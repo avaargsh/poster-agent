@@ -629,3 +629,62 @@ def test_unknown_paid_result_releases_concurrency_but_preserves_hourly_budget(
             "m7-unknown-paid-first", "hash-first",
             paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
         )
+
+
+def test_cancelled_paid_request_becomes_unknown_without_reserving_worker_forever(
+    tmp_path, monkeypatch, product_bytes
+):
+    """Cancelling an in-flight provider call must preserve uncertain billing."""
+    import io
+    import pytest
+    from fastapi import UploadFile
+    from app.main import create_poster
+
+    monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    started = asyncio.Event()
+    provider_calls = {"count": 0}
+    key = "m7-cancelled-paid-01"
+
+    async def waiting_provider(_style):
+        provider_calls["count"] += 1
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.main.generate_ai_background", waiting_provider)
+
+    async def cancel_in_flight_request():
+        task = asyncio.create_task(create_poster(
+            product=UploadFile(file=io.BytesIO(product_bytes), filename="sku.png"),
+            title="双十一电动牙刷",
+            price="199",
+            style="蓝色科技风",
+            subtitle="品质生活 · 限时优惠",
+            original_price="",
+            cta="立即抢购",
+            background_mode="ai",
+            logo=None,
+            review_run_id="",
+            idempotency_key=key,
+        ))
+        await asyncio.wait_for(started.wait(), timeout=5)
+        assert execution_store.get(key)["status"] == "RUNNING"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_in_flight_request())
+
+    state = execution_store.get(key)
+    assert state["status"] == "UNKNOWN"
+    assert [e["event_type"] for e in state["events"]] == ["CLAIMED", "RESULT_UNKNOWN"]
+    assert provider_calls["count"] == 1
+
+    # Cancellation frees the active slot, but preserves the original paid key
+    # and its budget reservation: an uncertain provider outcome is not retried.
+    with pytest.raises(execution_store.ExecutionConflict):
+        execution_store.begin(key, "a-new-hash", paid=True)
+    assert execution_store.begin(
+        "m7-paid-after-cancel", "hash-after",
+        paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
+    ) is None

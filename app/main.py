@@ -1,5 +1,6 @@
 """M1 REST API + 极简页面。仅适合本地或可信环境使用。"""
 from __future__ import annotations
+import asyncio
 import io
 from ipaddress import ip_address
 from urllib.parse import urlsplit
@@ -356,6 +357,13 @@ async def create_poster(
         if idempotency_key is not None:
             execution_store.finish(idempotency_key, result)
         return result
+    except asyncio.CancelledError:
+        # Cancelling an in-flight paid request does not prove the provider
+        # stopped or refunded the call. Release the local worker slot while
+        # retaining the idempotency claim and possible-billing reservation.
+        if idempotency_key is not None:
+            execution_store.mark_unknown(idempotency_key)
+        raise
     except ImageProviderError as exc:
         if idempotency_key is not None:
             execution_store.mark_unknown(idempotency_key)
