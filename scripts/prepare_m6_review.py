@@ -13,11 +13,11 @@ import io
 import json
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 from PIL import Image
 
 from app import storage
-from app.main import app
+from app.channel_export_routes import download_channel_export
 from evals.native_batch_scope import load_batch_scope
 from scripts.validate_m6_cohort import REGISTRY_FIELDS, REVIEW_FIELDS
 
@@ -94,121 +94,128 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
     missing_images = 0
     export_failures: list[dict] = []
 
-    with TestClient(app) as client:
-        for sku, pid in items:
-            record = batch[sku]
-            registry_rows.append({
-                "cohort_id": cohort_id,
-                "sku_id": sku,
-                "product_category": "",
-                "product_family_id": "",
-                "variant_or_packaging_condition": "",
-                "source_asset_authorization_status": "PENDING",
-                "authorization_evidence_ref": "",
-                "logo_authorization_status": (
-                    "PENDING" if record.get("logo_sha256") else "NOT_APPLICABLE"
-                ),
-                "source_image_sha256": record["product_sha256"],
-                "distinct_sku_verified": "NO",
-                "duplicate_source_image_reviewed": "NO",
-                "reviewer_alias": "",
-                "notes": "",
-            })
+    for sku, pid in items:
+        record = batch[sku]
+        registry_rows.append({
+            "cohort_id": cohort_id,
+            "sku_id": sku,
+            "product_category": "",
+            "product_family_id": "",
+            "variant_or_packaging_condition": "",
+            "source_asset_authorization_status": "PENDING",
+            "authorization_evidence_ref": "",
+            "logo_authorization_status": (
+                "PENDING" if record.get("logo_sha256") else "NOT_APPLICABLE"
+            ),
+            "source_image_sha256": record["product_sha256"],
+            "distinct_sku_verified": "NO",
+            "duplicate_source_image_reviewed": "NO",
+            "reviewer_alias": "",
+            "notes": "",
+        })
 
-            version = str(record["version"])
-            spec_sha = ""
-            square_sha = ""
-            spec: dict = {}
-            square_data = b""
-            problem = ""
-            try:
-                current = storage.view(pid)
-                version = str(current["version"])
-                if current["background_mode"] != "local":
-                    raise PreparationError("背景不是 local，拒绝混入免费基线")
-                spec_path = storage.poster_dir(pid) / "versions" / f"v{version}.json"
-                spec_raw = spec_path.read_bytes()
-                spec = json.loads(spec_raw)
-                if spec.get("background_mode") != "local":
-                    raise PreparationError("规格中的背景模式不是 local")
-                spec_sha = _sha(spec_raw)
-                square_data = storage.version_path(pid, int(version)).read_bytes()
-                if not _image_ok(square_data, (1024, 1024)):
-                    raise PreparationError("当前方图不是有效的 1024x1024 PNG")
-                square_sha = _sha(square_data)
-            except (FileNotFoundError, OSError, ValueError, KeyError,
-                    json.JSONDecodeError) as exc:
-                problem = f"SOURCE_INVALID:{type(exc).__name__}"
+        version = str(record["version"])
+        spec_sha = ""
+        square_sha = ""
+        spec: dict = {}
+        square_data = b""
+        problem = ""
+        try:
+            current = storage.view(pid)
+            version = str(current["version"])
+            if current["background_mode"] != "local":
+                raise PreparationError("背景不是 local，拒绝混入免费基线")
+            spec_path = storage.poster_dir(pid) / "versions" / f"v{version}.json"
+            spec_raw = spec_path.read_bytes()
+            spec = json.loads(spec_raw)
+            if spec.get("background_mode") != "local":
+                raise PreparationError("规格中的背景模式不是 local")
+            spec_sha = _sha(spec_raw)
+            square_data = storage.version_path(pid, int(version)).read_bytes()
+            if not _image_ok(square_data, (1024, 1024)):
+                raise PreparationError("当前方图不是有效的 1024x1024 PNG")
+            square_sha = _sha(square_data)
+        except (FileNotFoundError, OSError, ValueError, KeyError,
+                json.JSONDecodeError) as exc:
+            problem = f"SOURCE_INVALID:{type(exc).__name__}"
 
-            common = {
-                "cohort_id": cohort_id,
-                "sku_id": sku,
-                "poster_id": pid,
-                "source_version": version,
-                "source_product_sha256": record["product_sha256"],
-                "request_sha256": record["request_sha256"],
-                "spec_sha256": spec_sha,
-                "source_square_image_sha256": square_sha,
-                "reviewer_alias": "",
-                **{field: "UNVERIFIED" for field in FIELDS},
-                "overall_accept": "UNVERIFIED",
-                "overall_reason": "NOT_REVIEWED",
-                "reviewed_at_utc": "",
-            }
-            if not str(spec.get("subtitle") or "").strip():
-                common["subtitle"] = "N/A"
-            if spec.get("original_price") in (None, ""):
-                common["original_price"] = "N/A"
-                common["original_price_position"] = "N/A"
+        common = {
+            "cohort_id": cohort_id,
+            "sku_id": sku,
+            "poster_id": pid,
+            "source_version": version,
+            "source_product_sha256": record["product_sha256"],
+            "request_sha256": record["request_sha256"],
+            "spec_sha256": spec_sha,
+            "source_square_image_sha256": square_sha,
+            "reviewer_alias": "",
+            **{field: "UNVERIFIED" for field in FIELDS},
+            "overall_accept": "UNVERIFIED",
+            "overall_reason": "NOT_REVIEWED",
+            "reviewed_at_utc": "",
+        }
+        if not str(spec.get("subtitle") or "").strip():
+            common["subtitle"] = "N/A"
+        if spec.get("original_price") in (None, ""):
+            common["original_price"] = "N/A"
+            common["original_price_position"] = "N/A"
 
-            square_row = {
-                **common, "variant_id": "square",
-                "output_image_path": "", "output_image_sha256": "",
-            }
-            native_row = {
-                **common, "variant_id": NATIVE_ID,
-                "output_image_path": "", "output_image_sha256": "",
-            }
-            if problem:
-                for row in (square_row, native_row):
-                    row["overall_reason"] = "OUTPUT_MISSING:" + problem
-                missing_images += 2
-                export_failures.append({"sku_id": sku, "reason": problem})
-                review_rows.extend((square_row, native_row))
-                continue
-
-            square_name = f"images/{sku}-square.png"
-            (output_dir / square_name).write_bytes(square_data)
-            square_row.update({
-                "output_image_path": square_name,
-                "output_image_sha256": square_sha,
-            })
-            response = client.get(
-                f"/api/posters/{pid}/versions/{version}/exports/{NATIVE_ID}"
-            )
-            native_bytes = response.content
-            if (
-                response.status_code == 200
-                and response.headers.get("x-source-image-sha256") == square_sha
-                and response.headers.get("x-export-mode") == "native_layout"
-                and response.headers.get("x-automatically-accepted") == "false"
-                and _image_ok(native_bytes, (1080, 1350))
-            ):
-                native_name = f"images/{sku}-native-4x5.png"
-                (output_dir / native_name).write_bytes(native_bytes)
-                native_row.update({
-                    "output_image_path": native_name,
-                    "output_image_sha256": _sha(native_bytes),
-                })
-            else:
-                # No content or failure text from the route is treated as
-                # approved content. The row must remain visible and unverified.
-                reason = f"EXPORT_FAILED:HTTP_{response.status_code}"
-                native_row["overall_reason"] = reason
-                export_failures.append({"sku_id": sku, "reason": reason})
-                missing_images += 1
-
+        square_row = {
+            **common, "variant_id": "square",
+            "output_image_path": "", "output_image_sha256": "",
+        }
+        native_row = {
+            **common, "variant_id": NATIVE_ID,
+            "output_image_path": "", "output_image_sha256": "",
+        }
+        if problem:
+            for row in (square_row, native_row):
+                row["overall_reason"] = "OUTPUT_MISSING:" + problem
+            missing_images += 2
+            export_failures.append({"sku_id": sku, "reason": problem})
             review_rows.extend((square_row, native_row))
+            continue
+
+        square_name = f"images/{sku}-square.png"
+        (output_dir / square_name).write_bytes(square_data)
+        square_row.update({
+            "output_image_path": square_name,
+            "output_image_sha256": square_sha,
+        })
+        # Reuse the same export handler as the API without starting another
+        # ASGI lifespan. The live local workbench may own the worker locks.
+        try:
+            response = download_channel_export(pid, int(version), NATIVE_ID)
+        except HTTPException as exc:
+            native_bytes = b""
+            export_status = exc.status_code
+            export_headers = {}
+        else:
+            native_bytes = response.body
+            export_status = response.status_code
+            export_headers = response.headers
+        if (
+            export_status == 200
+            and export_headers.get("x-source-image-sha256") == square_sha
+            and export_headers.get("x-export-mode") == "native_layout"
+            and export_headers.get("x-automatically-accepted") == "false"
+            and _image_ok(native_bytes, (1080, 1350))
+        ):
+            native_name = f"images/{sku}-native-4x5.png"
+            (output_dir / native_name).write_bytes(native_bytes)
+            native_row.update({
+                "output_image_path": native_name,
+                "output_image_sha256": _sha(native_bytes),
+            })
+        else:
+            # No content or failure text from the route is treated as
+            # approved content. The row must remain visible and unverified.
+            reason = f"EXPORT_FAILED:HTTP_{export_status}"
+            native_row["overall_reason"] = reason
+            export_failures.append({"sku_id": sku, "reason": reason})
+            missing_images += 1
+
+        review_rows.extend((square_row, native_row))
 
     _write_csv(
         output_dir / "m6_cohort_registry.csv", REGISTRY_FIELDS, registry_rows

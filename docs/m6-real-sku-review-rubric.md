@@ -91,7 +91,7 @@ uv run --locked python -m scripts.prepare_m6_review \
   --apply
 ```
 
-脚本直接复制原有的方形 PNG，使用已有只读 `/exports/feed_4x5_native` API 生成原生版。不会修改原海报或生成新版本。生成结果包含 `images/`、`m6_cohort_registry.csv`、`m6_output_reviews.csv` 和 `m6_preparation.json`。
+脚本直接复制原有的方形 PNG，并复用 `/exports/feed_4x5_native` 的同一导出处理函数生成原生版。**不会创建第二个 FastAPI 工作进程，也不会请求运行中的本地 HTTP 服务**，所以工作台保持打开时仍可离线准备评审包。不会修改原海报或生成新版本。生成结果包含 `images/`、`m6_cohort_registry.csv`、`m6_output_reviews.csv` 和 `m6_preparation.json`。
 
 - `cohort_id` 根据完整 M5g batch journal 的 SHA-256 自动生成（`m6-` 加前 12 位），同一批次草稿可保持一致；若账本变化，ID 也随之变化。初始 `source_asset_authorization_status=PENDING`、`distinct_sku_verified=NO`，不能代表授权或商品独立性得到确认；需人工依据本地证据填写。
 - 两种尺寸都预填 `overall_accept=UNVERIFIED`、`overall_reason=NOT_REVIEWED`，审核员与时间为空，绝不伪造人工结论。

@@ -138,3 +138,31 @@ def test_refuses_incomplete_batch(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="尚未完成"):
         prepare_package(journal, output, apply=True)
     assert not output.exists()
+
+def test_offline_review_prepares_while_local_workbench_is_running(tmp_path, monkeypatch):
+    """An existing web worker must not block read-only offline M6 exports."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    journal = _fixture(tmp_path, monkeypatch)
+    output = tmp_path / "m6-while-web-running"
+
+    # The live app now owns the execution, checkpoint, and poster locks.
+    # Starting another TestClient(app) inside prepare_package would fail.
+    with TestClient(app) as live:
+        assert live.get("/health").status_code == 200
+        result = prepare_package(journal, output, apply=True)
+        assert live.get("/health").status_code == 200
+
+    assert result["missing_output_count"] == 0
+    assert result["review_rows_created"] == 2
+    reviews = _csv_rows(output / "m6_output_reviews.csv")
+    assert {row["variant_id"] for row in reviews} == {
+        "square", "feed_4x5_native",
+    }
+    for row in reviews:
+        with Image.open(output / row["output_image_path"]) as image:
+            assert image.format == "PNG"
+    assert result["human_review_performed"] is False
+    assert result["ocr_inference_performed"] is False
+    assert result["paid_model_calls"] == 0
