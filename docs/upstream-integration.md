@@ -32,6 +32,13 @@ Pillow format, and bounds image size and decoded pixels. When both image URL
 and Base64 are present, Base64 has priority. Invalid Base64 fails closed; it
 does not trigger a second download or model request.
 
+The compatible-mode **JSON response body** is also capped before parsing:
+`httpx.AsyncClient.stream` stops reading if the decoded HTTP payload exceeds
+`MAX_IMAGE_RESPONSE_BYTES`. The default is the maximum accepted image bytes
+after Base64 expansion plus 1 MiB for JSON metadata. This protects the
+response-receive stage, not only the subsequent image decode. The URL download
+continues to use its separate `MAX_GENERATED_IMAGE_BYTES` limit.
+
 For `url`, the adapter still accepts only HTTPS `aliyuncs.com` hosts and
 their subdomains, with no redirects. It bounds the downloaded bytes and now
 applies the same image-format and pixel checks. Untrusted Provider error
@@ -44,7 +51,7 @@ Whether a third-party endpoint honors `Idempotency-Key` cannot be assumed.
 The execution ledger and local single-worker safety model remain unchanged.
 
 ```bash
-uv run --locked python -m pytest tests/test_image_provider.py -q
+uv run --locked python -m pytest tests/test_image_provider.py tests/test_image_provider_response_limit.py -q
 uv run --locked python -m pytest -q
 uv run --locked ruff check app tests scripts evals
 ```

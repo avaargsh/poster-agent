@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import json
 import os
 import warnings
 from urllib.parse import urlparse
@@ -10,6 +11,9 @@ import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 MAX_GENERATED_IMAGE_BYTES = 14 * 1024 * 1024
+# Bound the HTTP body *before* JSON parsing allocates decoded Base64 strings.
+# Base64 expansion plus 1 MiB for response metadata and other JSON fields.
+MAX_IMAGE_RESPONSE_BYTES = 4 * ((MAX_GENERATED_IMAGE_BYTES + 2) // 3) + 1024 * 1024
 
 
 class ImageProviderError(RuntimeError):
@@ -92,9 +96,18 @@ async def generate_ai_background(style: str) -> Image.Image:
     timeout = httpx.Timeout(300.0, connect=20.0)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            response = await client.post(endpoint, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+            # AsyncClient.post() eagerly buffers the whole response. Stream the
+            # potentially Base64-backed JSON and enforce the limit first.
+            async with client.stream("POST", endpoint, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_IMAGE_RESPONSE_BYTES:
+                        raise ImageProviderError("模型响应内容过大")
+                    chunks.append(chunk)
+                data = json.loads(b"".join(chunks))
             items = data.get("data") if isinstance(data, dict) else None
             if not isinstance(items, list) or not items or not isinstance(items[0], dict):
                 raise ImageProviderError("模型响应没有有效的图片数据")
