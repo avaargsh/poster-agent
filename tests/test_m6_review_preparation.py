@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 
@@ -9,6 +10,7 @@ import pytest
 from PIL import Image
 
 from app import native_human_reviews, storage
+from app.schemas import PosterSpec
 from scripts import real_sku_batch
 from scripts.prepare_m6_review import PreparationError, prepare_package
 
@@ -166,3 +168,65 @@ def test_offline_review_prepares_while_local_workbench_is_running(tmp_path, monk
     assert result["human_review_performed"] is False
     assert result["ocr_inference_performed"] is False
     assert result["paid_model_calls"] == 0
+
+
+def _publish_later_version(poster_id: str):
+    """Simulate a user editing a poster after the M5g batch was completed."""
+    current = storage.version_view(poster_id, 1)
+    spec = PosterSpec.model_validate({
+        **current["spec"],
+        "title": "后续修改版本",
+    })
+    buffer = io.BytesIO()
+    Image.new("RGB", (1024, 1024), (210, 30, 40)).save(buffer, "PNG")
+    return storage.new_version(poster_id, spec, buffer.getvalue())
+
+
+def test_m6_review_package_uses_exact_batch_pinned_version_after_later_edit(
+    tmp_path, monkeypatch,
+):
+    journal = _fixture(tmp_path, monkeypatch)
+    batch = json.loads(journal.read_text(encoding="utf-8"))
+    record = batch["rows"]["sku-test"]
+    poster_id = record["poster_id"]
+    assert record["version"] == 1
+    original_square = storage.version_path(poster_id, 1).read_bytes()
+
+    later = _publish_later_version(poster_id)
+    assert later["version"] == 2
+    assert later["spec"]["title"] == "后续修改版本"
+
+    output = tmp_path / "m6-pinned-version"
+    report = prepare_package(journal, output, apply=True)
+    reviews = _csv_rows(output / "m6_output_reviews.csv")
+    square = next(row for row in reviews if row["variant_id"] == "square")
+    native = next(row for row in reviews if row["variant_id"] == "feed_4x5_native")
+
+    assert report["missing_output_count"] == 0
+    assert {row["source_version"] for row in reviews} == {"1"}
+    assert square["output_image_sha256"] == hashlib.sha256(original_square).hexdigest()
+    context = native_human_reviews.context(poster_id, 1, "test-reviewer")
+    assert native["source_square_image_sha256"] == context["source_image_sha256"]
+    assert native["spec_sha256"] == context["spec_sha256"]
+    with Image.open(output / native["output_image_path"]) as image:
+        assert image.size == (1080, 1350)
+
+
+def test_m6_review_package_does_not_fallback_to_latest_when_pinned_version_is_missing(
+    tmp_path, monkeypatch,
+):
+    journal = _fixture(tmp_path, monkeypatch)
+    batch = json.loads(journal.read_text(encoding="utf-8"))
+    poster_id = batch["rows"]["sku-test"]["poster_id"]
+    _publish_later_version(poster_id)
+    storage.poster_dir(poster_id).joinpath("versions", "v1.png").unlink()
+
+    output = tmp_path / "m6-missing-pinned-version"
+    report = prepare_package(journal, output, apply=True)
+    reviews = _csv_rows(output / "m6_output_reviews.csv")
+
+    assert report["missing_output_count"] == 2
+    assert len(reviews) == 2
+    assert all(row["source_version"] == "1" for row in reviews)
+    assert all(row["output_image_path"] == "" for row in reviews)
+    assert all(row["overall_reason"].startswith("OUTPUT_MISSING:SOURCE_INVALID") for row in reviews)

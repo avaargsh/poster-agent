@@ -60,7 +60,7 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **M5j 已支持按导入批次独立评分：** 使用 `uv run --locked python -m scripts.native_trial --reviewer local-operator --batch-journal data/eval_runs/m5g_import/batch_import_results.json` 仅盘点本批次最新 SKU 版本；全批 READY 后显式 `--score`，结果附带批次账本 SHA 和 SKU 清单。缺一个样本也不会自动缩小分母。详见 [M5j 批次独立评测](docs/m5j-batch-evaluation.md)。
 
-**M6 真实 SKU 评测准备：** 已提供 M5g 生成清单、授权治理表、人工审核工作表和本地证据门禁；`scripts.prepare_m6_review` 可在本地工作台运行期间直接复用导出逻辑，从完整 M5g 批次离线生成方图及原生 4:5 图，不会再次启动 ASGI 服务，并生成全部为 `UNVERIFIED` 的本地审核草稿，`scripts.validate_m6_cohort` 则检查版本、图片/规格哈希和 M5j 证据范围。两者都不运行真实 OCR、不调用收费模型、不替代人工验收。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
+**M6 真实 SKU 评测准备：** 已提供 M5g 生成清单、授权治理表、人工审核工作表和本地证据门禁；`scripts.prepare_m6_review` 可在本地工作台运行期间直接复用导出逻辑，从完整 M5g 批次记录的精确海报版本离线生成方图及原生 4:5 图（即使之后编辑出了 v2，也不会悄悄改评 v2），不会再次启动 ASGI 服务，并生成全部为 `UNVERIFIED` 的本地审核草稿，`scripts.validate_m6_cohort` 则检查版本、图片/规格哈希和 M5j 证据范围。两者都不运行真实 OCR、不调用收费模型、不替代人工验收。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
 
 **公开目录 SKU Smoke Test（不是业务质量评测）：** 可从 Amazon Berkeley Objects（CC BY 4.0）数据集选取 20 张目录商品图，在本地跑通批量导入与原生 4:5 海报导出。价格为确定性合成值；该流程不抓取淘宝、拼多多或京东，不执行真实 OCR 或人工评分，也不能证明真实价格准确性。操作步骤与限制见 [公开 SKU Smoke Test](docs/public-abo-sku-smoke-test.md)。
 

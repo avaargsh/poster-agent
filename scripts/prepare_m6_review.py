@@ -121,8 +121,11 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
         square_data = b""
         problem = ""
         try:
-            current = storage.view(pid)
-            version = str(current["version"])
+            pinned_version = record.get("version")
+            if type(pinned_version) is not int or pinned_version < 1:
+                raise PreparationError("M5g 记录的海报版本号非法")
+            current = storage.version_view(pid, pinned_version)
+            version = str(pinned_version)
             if current["background_mode"] != "local":
                 raise PreparationError("背景不是 local，拒绝混入免费基线")
             spec_path = storage.poster_dir(pid) / "versions" / f"v{version}.json"
