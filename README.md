@@ -76,6 +76,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **可选 Qwen 真实背景：** 在 `.env` 设置 `DASHSCOPE_API_KEY`、对应区域/Workspace 的 `QWEN_IMAGE_ENDPOINT`，以及 `QWEN_IMAGE_MODEL`。确保 Key、服务地域和模型互相匹配；勿将 `.env` 提交。详细变量模板见 [`.env.example`](.env.example)。Qwen 结构化 Brief 可按模板配置 `QWEN_CHAT_ENDPOINT`。
 
+**M8 兼容图片响应：** Qwen 图片 API 在 `data[0]` 返回 HTTPS URL 或 `b64_json` 时均可解析 PNG/JPEG/WEBP；Base64 图片大小、像素、格式与 URL 下载接受相同的安全校验。仍不支持任意自定义 Provider、付费调用自动重试或生产多租户部署。适配来源、MIT 许可、离线测试和下一轮集成候选见 [上游模块集成记录](docs/upstream-integration.md) 与 [第三方源码声明](THIRD_PARTY_NOTICES.md)。
+
 **OCR 环境诊断及真实单图推理（可选）：** 先按 [uv + OCR 安装说明](docs/uv-workflow.md#ocr-重依赖按需安装) 执行 `uv sync --locked --extra ocr`，再安装对应平台的 PaddlePaddle 推理引擎。
 
 ```bash
