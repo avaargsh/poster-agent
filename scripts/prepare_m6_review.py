@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from app import storage
+from app.batch_artifact_integrity import verify_batch_artifact
 from app.channel_export_routes import download_channel_export
 from evals.native_batch_scope import load_batch_scope
 from scripts.validate_m6_cohort import REGISTRY_FIELDS, REVIEW_FIELDS
@@ -121,6 +122,7 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
         square_data = b""
         problem = ""
         try:
+            verify_batch_artifact(pid, record)
             pinned_version = record.get("version")
             if type(pinned_version) is not int or pinned_version < 1:
                 raise PreparationError("M5g 记录的海报版本号非法")

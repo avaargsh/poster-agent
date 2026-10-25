@@ -230,3 +230,41 @@ def test_m6_review_package_does_not_fallback_to_latest_when_pinned_version_is_mi
     assert all(row["source_version"] == "1" for row in reviews)
     assert all(row["output_image_path"] == "" for row in reviews)
     assert all(row["overall_reason"].startswith("OUTPUT_MISSING:SOURCE_INVALID") for row in reviews)
+
+
+@pytest.mark.parametrize("artifact", ["product", "render", "spec"])
+def test_m6_review_package_rejects_receipt_mismatch(
+    tmp_path, monkeypatch, artifact,
+):
+    """Valid-looking local edits must not replace the M5g creation evidence."""
+    journal = _fixture(tmp_path, monkeypatch)
+    batch = json.loads(journal.read_text(encoding="utf-8"))
+    poster_id = batch["rows"]["sku-test"]["poster_id"]
+    poster_dir = storage.poster_dir(poster_id)
+
+    if artifact == "product":
+        target = poster_dir / "assets" / "product.png"
+        with Image.open(target) as image:
+            size = image.size
+        Image.new("RGB", size, (220, 20, 30)).save(target, format="PNG")
+    elif artifact == "render":
+        target = poster_dir / "versions" / "v1.png"
+        Image.new("RGB", (1024, 1024), (220, 20, 30)).save(target, format="PNG")
+    else:
+        target = poster_dir / "versions" / "v1.json"
+        spec = json.loads(target.read_text(encoding="utf-8"))
+        spec["title"] = "被手工篡改的规格"
+        target.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+
+    output = tmp_path / f"m6-tampered-{artifact}"
+    report = prepare_package(journal, output, apply=True)
+    reviews = _csv_rows(output / "m6_output_reviews.csv")
+
+    assert report["missing_output_count"] == 2
+    assert len(reviews) == 2
+    assert all(row["output_image_path"] == "" for row in reviews)
+    assert all(row["output_image_sha256"] == "" for row in reviews)
+    assert all(
+        row["overall_reason"].startswith("OUTPUT_MISSING:SOURCE_INVALID")
+        for row in reviews
+    )
