@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
-from . import storage, execution_store
+from . import storage, execution_store, worker_lock
 from .compositor import compose, local_background, validate_square_layout
 from .color_management import InvalidColorProfile, normalize_upload_color
 from .image_provider import generate_ai_background, ImageProviderError
@@ -37,9 +37,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Single-process only: orphaned RUNNING tasks may already have incurred costs.
-    execution_store.recover_incomplete()
-    yield
+    # Claim exclusive ownership before inspecting abandoned RUNNING tasks.
+    # A second worker must never reconcile an execution that is still active.
+    with worker_lock.single_worker():
+        execution_store.recover_incomplete()
+        yield
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)

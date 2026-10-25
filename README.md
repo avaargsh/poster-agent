@@ -32,7 +32,7 @@ uv run --locked python -m app.run_local --reload --port 8000
 | --- | --- | --- |
 | M1 渲染与修订 | SKU/Logo 上传、1024×1024 预览、改价产生新版本、PNG 导出；本地背景或 Qwen-Image API | 10 MiB/1600 万像素限制、ICC→sRGB；原子文件替换与分阶段发布；仅本地 Demo |
 | M2 Brief 与人工审核 | 规则/Qwen 结构化需求、LangGraph SQLite Checkpoint、规格人工确认 | 本地单进程工作流，没有登录和生产并发隔离 |
-| M2 执行可靠性 | AI 生图强制幂等键、执行历史、完整本地产物凭据核验与恢复、默认每小时 20 次和 1 路并发上限 | 单机 Demo 护栏；不能恢复缺失或损坏的产物；不保证跨系统 Exactly-Once |
+| M2/M7 执行可靠性 | AI 生图强制幂等键、执行历史、取消请求转 `UNKNOWN`、完整本地产物凭据核验与恢复、默认每小时 20 次和 1 路并发上限；启动时对执行库、Workflow 检查点库与海报目录取得独占锁 | macOS/Linux 本地文件系统；不能恢复缺失或损坏的产物；不保证跨系统 Exactly-Once |
 | M3 Acceptance Gate | 文案/OCR、品牌词表、价格区域位置与冲突检查、报告 SHA-256、可视化诊断 PNG | OCR 缺失与不确定必须标 `UNVERIFIED`，不可冒充 PASS |
 | M3 评测 | 合成 OCR 样本、20 张程序渲染 PNG、FP/FN/F1、逐版人工标注及 CSV | 合成数据不是真实业务精度；人工标签尚无独立审计 |
 | M4a/M4b 多尺寸派生 | 三种安全缩放尺寸；4:5 原生提供经典分栏和商品主体优先两种版式 | 两种版式均有独立 OCR/规则报告；M5c 人工标注支持两种模板且按版式隔离，其他比例仍为安全缩放 |
@@ -91,6 +91,14 @@ uv run --no-sync python -m scripts.ocr_probe --infer --image data/examples/sampl
 ## GitHub Actions 额度策略
 
 **不因每次 push 自动触发 CI。** Draft PR → Ready for review 时运行一次快速测试；修改后需要再次验证，则手动运行 CI quick 或给 PR 添加 `ci:run` 标签。完整离线评测选择手动 `full`；昂贵的 `Real PaddleOCR CPU` 仅手动执行。详细流程见 [docs/ci-budget.md](docs/ci-budget.md)。分支维护采用合并 PR 且 HEAD 精确匹配的保护策略，避免误删未完成工作。
+
+## M7：当前安全与可靠性边界
+
+- **已实现（本地单 Worker）**：非回环地址/请求保护、AI 强制幂等键、SQLite 付费并发与小时预算、超时或取消后的 `UNKNOWN` 处理、完整本地产物恢复。应用的 ASGI lifespan 会对 `POSTER_EXECUTION_DB`、`POSTER_CHECKPOINT_DB` 和 `POSTER_DATA_DIR` 申请独占 POSIX 文件锁，阻止其他进程在共享数据上同时启动或错误恢复未完成任务。
+- **未实现（禁止公网或共享部署）**：用户认证、资源级权限、租户隔离、正式任务队列、分布式锁、每用户额度、经过真实计费/重启故障注入验证的生产恢复策略。
+- **验证层级**：pytest/CI 仅证明模拟边界；真实 OCR 单图记录不能代表完整 M6。至少 20 个经授权 SKU 的真实 OCR、人工逐图复核和冻结证据仍未验收。
+
+在 macOS/Linux 的本地文件系统运行 `uv run --locked python -m app.run_local --port 8000`。如果启动出现 `WorkerLockUnavailable`，先停止正在使用同一执行库、Checkpoint 库或海报目录的进程；不要删除磁盘上的锁文件。Windows 与网络文件系统不属于该锁的支持范围。见 [本地部署边界](docs/local-only-deployment.md) 与 [付费调用恢复手册](docs/paid-call-idempotency.md)。
 
 ## 代码入口与下一阶段
 

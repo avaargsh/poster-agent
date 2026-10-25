@@ -20,7 +20,9 @@ This does **not** provide a cross-resource transaction spanning poster files and
 
 ## Boundaries
 
-- \`storage.LOCK\` is process-local; concurrent multi-process writers are unsupported.
+- `storage.LOCK` is process-local and guards threads inside one process. The ASGI lifespan also holds three POSIX advisory locks, keyed by the resolved poster-storage, execution-DB, and LangGraph checkpoint-DB paths, before startup recovery starts. A competing worker sharing any path fails startup; multiple writers are still unsupported.
+- A crashed process releases OS locks. The next worker checks complete local receipts before marking unmatched paid operations `UNKNOWN`. Do not delete the lock files or treat `UNKNOWN` as an unbilled call.
+- The worker lock requires macOS or Linux and a local filesystem with working `fcntl.flock`. Network file shares and startup outside the ASGI lifespan are not supported.
 - The filesystem and SQLite ledger are not a distributed transaction or production object store.
 - This is crash-consistency hardening, not a backup strategy. Keep independent backups of important local artifacts.
 - CI/unit tests exercise simulated write failures; they are not a power-loss durability test or production certification.

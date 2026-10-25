@@ -12,6 +12,7 @@ Local-background requests may omit the header for legacy API compatibility, alth
 - **Same key + different normalized request:** return HTTP 409. Use a new key for a genuinely new request.
 - **Key is already RUNNING or UNKNOWN:** return HTTP 409; do not automatically call the provider again.
 - **Provider failure or uncertain response after the claim:** record `UNKNOWN`. Query `GET /api/executions/{key}` before taking further action. A client timeout does not prove that the provider did not complete or charge the request.
+- **In-flight request cancelled after the claim:** record `UNKNOWN` and re-raise cancellation. The local concurrency slot is released, but the claimed attempt remains in the hourly budget. Cancellation does not prove provider cancellation or a refund.
 - **Missing key for AI mode:** return HTTP 428 and do not dispatch the paid call.
 
 Do not automatically generate a replacement key after a timeout. A new key represents a new billable operation and can incur another charge.
@@ -20,7 +21,9 @@ Do not automatically generate a replacement key after a timeout. A new key repre
 
 The SQLite ledger atomically claims a key before provider dispatch and protects against duplicate calls that reach this single app instance with the same key. It is not cross-provider exactly-once execution: a process can fail after a provider accepted a request but before the result is persisted. Such cases must remain `UNKNOWN` rather than being retried automatically.
 
-The ledger and locking model are local, single-worker only. This policy is not user authentication, resource authorization, multi-tenant isolation, a distributed lock, or a production job queue. Shared, reverse-proxy, multi-worker, and public deployments remain unsupported.
+The ledger and locking model are local, single-worker only. Application startup now acquires nonblocking POSIX file locks for the resolved execution DB, LangGraph checkpoint DB, and poster storage root, **before** reconciling abandoned runs. If either resource is owned by another worker, startup fails without modifying `RUNNING` records. The locks cover the ASGI lifespan, not a production queue or distributed deployment. Supported runtime: macOS or Linux on a local filesystem. Other platforms fail closed at startup; do not delete lock files to bypass a conflict. See [local-only deployment](local-only-deployment.md).
+
+This policy is not user authentication, resource authorization, multi-tenant isolation, a distributed lock, or a production job queue. Shared, reverse-proxy, multi-worker, and public deployments remain unsupported.
 
 ## Completed local artifact reconciliation
 

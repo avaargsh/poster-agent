@@ -6,6 +6,9 @@ __pycache__/
 .DS_Store
 data/posters/
 
+# Cross-process worker lock files (retain on disk, never commit)
+.*.poster-agent-worker.lock
+
 # Local checkpoint state
 data/*.sqlite3
 data/*.sqlite3-*
