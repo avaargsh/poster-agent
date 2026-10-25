@@ -464,3 +464,95 @@ def test_web_batch_history_ui_can_switch_to_older_batches_without_deletion():
     assert "async function loadBatchHistory" in html
     assert "batchReviewScope=null" in html
     assert "不会自动删除原图或评测账本" in html
+
+
+def test_web_batch_review_scope_rejects_missing_corrupt_published_files(
+    monkeypatch, tmp_path,
+):
+    staged = _upload_batch(monkeypatch, tmp_path)
+    assert staged.status_code == 201, staged.text
+    batch_id = staged.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    url = f"/api/batches/{batch_id}/review-scope"
+    assert client.get(url).status_code == 200
+    poster_id = client.get(url).json()["rows"][0]["poster_id"]
+    poster_dir = storage.poster_dir(poster_id)
+    image_path = poster_dir / "versions" / "v1.png"
+    spec_path = poster_dir / "versions" / "v1.json"
+    product_path = poster_dir / "assets" / "product.png"
+
+    image_bytes = image_path.read_bytes()
+    image_path.write_bytes(b"not-a-png")
+    assert client.get(url).status_code == 409
+    image_path.write_bytes(image_bytes)
+    assert client.get(url).status_code == 200
+
+    spec_bytes = spec_path.read_bytes()
+    spec_path.write_text("{broken", encoding="utf-8")
+    assert client.get(url).status_code == 409
+    spec_path.write_bytes(spec_bytes)
+    assert client.get(url).status_code == 200
+
+    product_bytes = product_path.read_bytes()
+    product_path.unlink()
+    assert client.get(url).status_code == 409
+    product_path.write_bytes(product_bytes)
+    assert client.get(url).status_code == 200
+
+    image_path.unlink()
+    assert client.get(url).status_code == 409
+
+
+def test_web_batch_review_scope_rejects_symlinked_image_and_missing_poster(
+    monkeypatch, tmp_path,
+):
+    staged = _upload_batch(monkeypatch, tmp_path)
+    assert staged.status_code == 201
+    batch_id = staged.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    url = f"/api/batches/{batch_id}/review-scope"
+    response = client.get(url)
+    assert response.status_code == 200
+    poster_id = response.json()["rows"][0]["poster_id"]
+    img = storage.poster_dir(poster_id) / "versions" / "v1.png"
+    original = img.read_bytes()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(original)
+    img.unlink()
+    img.symlink_to(outside)
+    assert client.get(url).status_code == 409
+    assert outside.read_bytes() == original
+    img.unlink()
+    img.write_bytes(original)
+    assert client.get(url).status_code == 200
+
+    import shutil
+
+    shutil.rmtree(storage.poster_dir(poster_id))
+    response = client.get(url)
+    assert response.status_code == 409
+    assert "已保存" in response.json()["detail"] or "不可用" in response.json()["detail"]
+
+
+def test_web_batch_review_scope_rejects_mismatched_or_invalid_v1_spec(
+    monkeypatch, tmp_path,
+):
+    staged = _upload_batch(monkeypatch, tmp_path)
+    batch_id = staged.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    url = f"/api/batches/{batch_id}/review-scope"
+    first = client.get(url)
+    assert first.status_code == 200
+    poster_id = first.json()["rows"][0]["poster_id"]
+    spec_path = storage.poster_dir(poster_id) / "versions" / "v1.json"
+    original_bytes = spec_path.read_bytes()
+    original = json.loads(original_bytes)
+
+    changed = dict(original)
+    changed["background_mode"] = "ai"
+    spec_path.write_text(json.dumps(changed), encoding="utf-8")
+    assert client.get(url).status_code == 409
+
+    # Restore the exact bytes: re-serializing equivalent JSON changes SHA-256.
+    spec_path.write_bytes(original_bytes)
+    assert client.get(url).status_code == 200
