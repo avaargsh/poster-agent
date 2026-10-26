@@ -99,6 +99,12 @@ uv run --locked python -m scripts.prepare_m6_review \
 - 生成的 CSV 与图片放在**同一目录**下，评审表中图片路径相对 CSV；不要单独移动 CSV。生成的 CSV 仍是草稿，后续应在此基础上填写人工判断、运行 M5j 和本地 M6 证据门禁。
 - 目录位于 `data/eval_runs/` 并被 Git 忽略。不要把图片、填充后的 CSV、源路径和授权证明提交到公开仓库。
 
+### 完成网页批次后，一键准备离线审核包
+
+如果通过本机工作台「本地批量商品导入与进度」创建 M5g 批次，则完成后可直接点击「准备 M6 离线审核包」，无需再手工复制 `batch_import_results.json` 路径运行 CLI。工作台会先复用已有 `/api/batches/{batch_id}/review-scope` 的完整账本和原始创建凭据验证，再调用 `scripts.prepare_m6_review.prepare_package`，**只将离线草稿生成到** `POSTER_BATCH_DIR/<batch_id>/m6_review_package/`。默认 `POSTER_BATCH_DIR` 为 `data/eval_runs/web_batches`，如自定义环境变量，应以配置的根目录为准。
+
+操作必须显式点击；读取 `/api/batches/{batch_id}/m6-package` 只做预检，不创建目录或执行模型。写操作 `POST /api/batches/{batch_id}/m6-package` 仅对状态 `COMPLETED`、账本完整且产物有效的批次生效；若目录已存在（包括未完成的部分输出），会拒绝覆盖。内部共用 CLI 的离线方形/原生 4:5 图片导出及 `UNVERIFIED` 人工表格，**无真实 OCR、无收费模型调用、无自动批准**。导出后请在本机打开新目录填充授权与审核记录，再使用下面的 M6 进度预览和最终证据门禁。生成包不是审查结果，也不证明 20 个真实 SKU 的质量。
+
 ### M6 网页人工进度预览（CSV-only）
 
 在本地运行 Poster Agent 工作台（`uv run --locked python -m app.run_local --port 8000`），打开 `http://127.0.0.1:8000` 的「M6 · 本地评测进度预览」。选择 `m6_cohort_registry.csv` 和 `m6_output_reviews.csv`，点击「查看本地评测进度」。

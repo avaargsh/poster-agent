@@ -556,3 +556,90 @@ def test_web_batch_review_scope_rejects_mismatched_or_invalid_v1_spec(
     # Restore the exact bytes: re-serializing equivalent JSON changes SHA-256.
     spec_path.write_bytes(original_bytes)
     assert client.get(url).status_code == 200
+
+
+def test_web_m6_package_requires_complete_batch_and_explicit_apply(
+    tmp_path, monkeypatch,
+):
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    assert uploaded.status_code == 201
+    batch_id = uploaded.json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-package"
+    target = tmp_path / "batch-root" / batch_id / "m6_review_package"
+
+    assert client.get(endpoint).status_code == 409
+    assert client.post(endpoint).status_code == 409
+    assert not target.exists()
+
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.get(f"/api/batches/{batch_id}").json()["status"] == "COMPLETED"
+
+    plan = client.get(endpoint)
+    assert plan.status_code == 200, plan.text
+    assert plan.json()["prepared"] is False
+    assert plan.json()["expected_review_rows"] == 4
+    assert not target.exists()
+
+    response = client.post(endpoint)
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["prepared"] is True
+    assert result["batch_sku_count"] == 2
+    assert result["review_rows_created"] == 4
+    assert result["missing_output_count"] == 0
+    assert result["human_review_performed"] is False
+    assert result["ocr_inference_performed"] is False
+    assert result["paid_model_calls"] == 0
+    assert result["relative_directory"] == f"{batch_id}/m6_review_package"
+    assert str(tmp_path) not in response.text
+
+    with (target / "m6_output_reviews.csv").open(encoding="utf-8") as handle:
+        reviews = list(csv.DictReader(handle))
+    assert {row["variant_id"] for row in reviews} == {
+        "square", "feed_4x5_native",
+    }
+    assert len(reviews) == 4
+    assert all(row["overall_accept"] == "UNVERIFIED" for row in reviews)
+    assert all(not row["reviewed_at_utc"] for row in reviews)
+    assert all((target / row["output_image_path"]).is_file() for row in reviews)
+
+    previously_saved = (target / "m6_output_reviews.csv").read_bytes()
+    again = client.post(endpoint)
+    assert again.status_code == 409
+    assert (target / "m6_output_reviews.csv").read_bytes() == previously_saved
+
+
+def test_web_m6_package_rejects_tampered_origin_and_symlink_output(
+    tmp_path, monkeypatch,
+):
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.get(f"/api/batches/{batch_id}").json()["status"] == "COMPLETED"
+    endpoint = f"/api/batches/{batch_id}/m6-package"
+    batch_dir = tmp_path / "batch-root" / batch_id
+    journal_path = batch_dir / "batch_import_results.json"
+    original = journal_path.read_bytes()
+    data = json.loads(original)
+    data["rows"].pop("sku-two")
+    journal_path.write_text(json.dumps(data), encoding="utf-8")
+    assert client.post(endpoint).status_code == 409
+    assert not (batch_dir / "m6_review_package").exists()
+
+    journal_path.write_bytes(original)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "private.txt").write_text("untouched", encoding="utf-8")
+    (batch_dir / "m6_review_package").symlink_to(outside, target_is_directory=True)
+    assert client.post(endpoint).status_code == 409
+    assert (outside / "private.txt").read_text(encoding="utf-8") == "untouched"
+
+
+def test_web_m6_package_ui_is_explicit_and_restores_completed_batch():
+    page = client.get("/")
+    assert page.status_code == 200
+    for marker in (
+        'id="prepareM6Package"', 'id="m6PackageStatus"',
+        "/m6-package", "relative_directory",
+    ):
+        assert marker in page.text

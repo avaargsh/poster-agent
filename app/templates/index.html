@@ -98,7 +98,9 @@
 <button id="preflightBatch" type="button">上传并预检</button>
 <button id="applyBatch" type="button" disabled>生成海报（本地背景）</button>
 <button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button>
+<button id="prepareM6Package" type="button" class="secondary" disabled>准备 M6 离线审核包</button>
 </div>
+<p id="m6PackageStatus" class="tip" aria-live="polite">批次完成后可生成本机 M6 审核包；仅生成 UNVERIFIED 草稿，不执行 OCR 或付费模型。</p>
 <p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
 <progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
 <div id="batchPlanSummary" class="tip"></div>
@@ -1278,6 +1280,8 @@ function resetBatchForNewFiles(){
   localStorage.removeItem(BATCH_STORAGE_KEY);
   $('applyBatch').disabled=true;
   $('reviewCurrentBatch').disabled=true;
+  $('prepareM6Package').disabled=true;
+  $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('batchProgress').value=0;
   $('batchRows').replaceChildren();
   $('batchPlanSummary').textContent='';
@@ -1302,6 +1306,9 @@ function renderBatchState(state){
     : '';
   $('applyBatch').disabled=!['READY','FAILED','INTERRUPTED'].includes(state.status);
   $('reviewCurrentBatch').disabled=state.status!=='COMPLETED';
+  $('prepareM6Package').disabled=state.status!=='COMPLETED';
+  if(state.status==='COMPLETED')refreshM6PackageStatus(state.batch_id);
+  else $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('applyBatch').textContent=(state.status==='FAILED'||state.status==='INTERRUPTED')
     ? '继续批次' : state.status==='COMPLETED' ? '批次已完成' : '生成海报（本地背景）';
   $('preflightBatch').disabled=state.status==='RUNNING';
@@ -1399,6 +1406,55 @@ $('applyBatch').addEventListener('click',async()=>{
     $('batchStatus').textContent='无法启动批次：'+err.message;
     $('batchStatus').className='tip bad';
     $('applyBatch').disabled=false;
+  }
+});
+
+async function refreshM6PackageStatus(batchId){
+  if(currentBatchId!==batchId)return;
+  const label=$('m6PackageStatus');
+  label.textContent='正在读取本机 M6 审核包状态…';
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-package');
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    $('prepareM6Package').disabled=result.prepared;
+    label.textContent=result.prepared
+      ? 'M6 审核包已存在：POSTER_BATCH_DIR/'+result.relative_directory+
+        '。为保护人工修改，不能再次覆盖。'
+      : '已完成 '+result.batch_sku_count+' 个 SKU；可显式准备 '+
+        result.expected_review_rows+' 条方形/4:5 待审记录（无 OCR、无付费调用）。';
+  }catch(err){
+    if(currentBatchId===batchId){
+      $('prepareM6Package').disabled=true;
+      label.textContent='M6 审核包预检未通过：'+err.message;
+    }
+  }
+}
+$('prepareM6Package').addEventListener('click',async()=>{
+  const batchId=currentBatchId;
+  if(!batchId||lastBatchStatus!=='COMPLETED')return;
+  const button=$('prepareM6Package'),label=$('m6PackageStatus');
+  button.disabled=true;
+  label.textContent='正在本机离线复制方图并生成 4:5 草稿，原始海报与已审核结果不会被覆盖…';
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-package',{
+      method:'POST'
+    });
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    label.textContent='已生成 M6 草稿：POSTER_BATCH_DIR/'+result.relative_directory+
+      ' · SKU '+result.batch_sku_count+' · 审核行 '+result.review_rows_created+
+      ' · 缺失输出 '+result.missing_output_count+
+      '。先填写授权和人工评审，再运行真实 OCR 与最终证据校验。';
+  }catch(err){
+    if(currentBatchId===batchId){
+      label.textContent='无法生成 M6 审核包：'+err.message;
+      // A failed attempt may have left a partial directory. Recheck first;
+      // never enable blind retries that could overwrite reviewer work.
+      await refreshM6PackageStatus(batchId);
+    }
   }
 });
 
