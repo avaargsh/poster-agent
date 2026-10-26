@@ -227,3 +227,31 @@ def test_serialization_failure_never_publishes_partial_evidence(tmp_path, monkey
         capture(package, det, rec, engine_factory=PredictStub)
     assert not (package / "m6_paddle_ocr_evidence.json").exists()
     assert not list(package.glob(".m6-ocr-*.tmp"))
+
+
+def test_capture_preserves_paddleocr_boxes_for_every_reviewed_variant(tmp_path):
+    package, det, rec, _ = package_fixture(tmp_path)
+
+    class WithBoxes(PredictStub):
+        def predict(self, image):
+            return [{
+                "rec_texts": ["¥129"],
+                "rec_scores": [0.96],
+                "rec_boxes": [[65, 668, 200, 720]],
+            }]
+
+    report = capture(package, det, rec, engine_factory=WithBoxes)
+    assert report["positioned_line_count"] == 4
+    assert report["unlocated_line_count"] == 0
+    assert all(
+        observation["recognized_lines"][0]["bbox"] == [65, 668, 200, 720]
+        for observation in report["observations"]
+    )
+    assert report["automatically_accepted"] is False
+
+
+def test_capture_without_boxes_counts_all_lines_as_unlocated(tmp_path):
+    package, det, rec, _ = package_fixture(tmp_path)
+    report = capture(package, det, rec, engine_factory=PredictStub)
+    assert report["positioned_line_count"] == 0
+    assert report["unlocated_line_count"] == 8

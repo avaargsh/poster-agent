@@ -499,6 +499,8 @@ def validate_bundle(
     # 'real_ocr_inference_attempted' remains an UNTRUSTED local declaration.
     capture_status = "NOT_ASSESSED"
     capture_observation_count = 0
+    capture_positioned_lines = 0
+    capture_unlocated_lines = 0
     capture_sha = None
     if ocr_evidence is None:
         if require_ocr_evidence:
@@ -513,7 +515,14 @@ def validate_bundle(
             )
             capture_status = checked["status"]
             capture_observation_count = checked["observation_count"]
+            capture_positioned_lines = checked["positioned_line_count"]
+            capture_unlocated_lines = checked["unlocated_line_count"]
             capture_sha = checked["evidence_sha256"]
+            if capture_unlocated_lines:
+                warnings.append(
+                    f"OCR 有 {capture_unlocated_lines} 条文字缺少可信检测框；"
+                    "位置正确性不能据此判断"
+                )
             warnings.append(
                 "OCR capture 与评审快照一致，但模型执行声明/指纹不构成独立运行证明；"
                 "仍须核对真实 PaddleOCR/M5j 证据及人工质量"
@@ -530,6 +539,8 @@ def validate_bundle(
         "ocr_inference_performed": False,
         "ocr_capture_consistency": capture_status,
         "ocr_capture_observation_count": capture_observation_count,
+        "ocr_capture_positioned_line_count": capture_positioned_lines,
+        "ocr_capture_unlocated_line_count": capture_unlocated_lines,
         "ocr_runtime_attested": False,
         "real_ocr_quality_verified": False,
         "paid_model_calls": 0,

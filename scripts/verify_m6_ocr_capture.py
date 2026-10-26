@@ -155,6 +155,8 @@ def verify_ocr_capture(
     if not isinstance(observations, list) or len(observations) > 200:
         raise _blocked("OCR observations 不是有界的记录列表")
     seen: set[tuple[str, str]] = set()
+    positioned = 0
+    unlocated = 0
     for row in observations:
         if not isinstance(row, dict):
             raise _blocked("OCR 观察记录必须是对象")
@@ -184,6 +186,24 @@ def verify_ocr_capture(
             if (type(confidence) not in (int, float) or
                 not math.isfinite(confidence) or not 0 <= confidence <= 1):
                 raise _blocked("OCR 置信度无效")
+            box = line.get("bbox")
+            if box is None:
+                unlocated += 1
+                continue
+            width, height = (1024, 1024) if key[1] == "square" else (1080, 1350)
+            if (not isinstance(box, list) or len(box) != 4 or
+                any(type(value) is not int for value in box)):
+                raise _blocked("OCR 检测框坐标必须为四个整数")
+            x1, y1, x2, y2 = box
+            if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+                raise _blocked("OCR 检测框超出当前版式尺寸或存在无效边界")
+            positioned += 1
+    if ("positioned_line_count" in document or "unlocated_line_count" in document):
+        if (type(document.get("positioned_line_count")) is not int or
+            type(document.get("unlocated_line_count")) is not int or
+            document["positioned_line_count"] != positioned or
+            document["unlocated_line_count"] != unlocated):
+            raise _blocked("OCR 空间检测框数量与采集摘要不一致")
     if seen != set(expected):
         raise _blocked("OCR observations 缺少必需版式")
 
@@ -191,6 +211,8 @@ def verify_ocr_capture(
         "status": "MATCHED_DECLARED_REAL",
         "evidence_sha256": evidence_sha,
         "observation_count": len(observations),
+        "positioned_line_count": positioned,
+        "unlocated_line_count": unlocated,
         "runtime_attested": False,
         "quality_verified": False,
         "authorization_verified": False,

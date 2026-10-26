@@ -191,27 +191,58 @@ def _rgb_snapshot(raw: bytes, size: tuple[int, int]):
         raise OCREvidenceError("PNG 损坏或尺寸异常") from exc
 
 
-def _ocr_lines(result: Any) -> list[dict[str, Any]]:
+def _ocr_lines(
+    result: Any, *, size: tuple[int, int] = (1024, 1024),
+) -> list[dict[str, Any]]:
+    """Preserve PaddleOCR text, confidence and optional pixel-space boxes.
+
+    PaddleOCR 3.x Result.json wraps observations under res; the existing
+    adapter already normalizes this to the flat model result. Missing boxes
+    become None, never fabricated price-location evidence.
+    """
+    from app.ocr_provider import OCRExecutionError, _json_dict
+
     if result is None:
         raise OCREvidenceError("OCR 未返回结果")
-    lines = []
+    lines: list[dict[str, Any]] = []
     try:
         for page in result:
-            texts = page["rec_texts"]
-            scores = page["rec_scores"]
-            if len(texts) != len(scores) or len(lines) + len(texts) > 2000:
-                raise OCREvidenceError("OCR 文本与置信度数量不一致或超限")
-            for text, value in zip(texts, scores):
+            data = _json_dict(page)
+            texts, scores = data["rec_texts"], data["rec_scores"]
+            boxes = data.get("rec_boxes")
+            if (len(texts) != len(scores) or
+                (boxes is not None and len(texts) != len(boxes)) or
+                len(lines) + len(texts) > 2000):
+                raise OCREvidenceError("OCR 文本/置信度/检测框数量不一致或超限")
+            for index, (text, value) in enumerate(zip(texts, scores)):
                 confidence = float(value)
-                if not isinstance(text, str) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                if (not isinstance(text, str) or
+                    not math.isfinite(confidence) or not 0 <= confidence <= 1):
                     raise OCREvidenceError("OCR 置信度或文本不合法")
-                lines.append({"text": text, "confidence": confidence})
-    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+
+                bbox = None
+                if boxes is not None:
+                    raw_box = boxes[index]
+                    if hasattr(raw_box, "tolist"):
+                        raw_box = raw_box.tolist()
+                    if (not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4 or
+                        any(isinstance(v, (bool, str, bytes)) for v in raw_box)):
+                        raise OCREvidenceError("OCR 检测框坐标无效")
+                    coords = [float(v) for v in raw_box]
+                    if any(not math.isfinite(v) or not v.is_integer() for v in coords):
+                        raise OCREvidenceError("OCR 检测框坐标必须为有限整数")
+                    x1, y1, x2, y2 = [int(v) for v in coords]
+                    if not (0 <= x1 < x2 <= size[0] and 0 <= y1 < y2 <= size[1]):
+                        raise OCREvidenceError("OCR 检测框坐标超出图片边界或顺序无效")
+                    bbox = [x1, y1, x2, y2]
+                lines.append({"text": text, "confidence": confidence, "bbox": bbox})
+    except (OCRExecutionError, KeyError, TypeError, AttributeError, ValueError, OverflowError) as exc:
         if isinstance(exc, OCREvidenceError):
             raise
-        raise OCREvidenceError("PaddleOCR 结果结构不兼容；需要 3.x rec_texts/rec_scores") from exc
+        raise OCREvidenceError(
+            "PaddleOCR 结果结构或检测框不兼容；需要 3.x rec_texts/rec_scores/rec_boxes"
+        ) from exc
     return lines
-
 
 def capture(
     package_dir: Path,
@@ -271,7 +302,7 @@ def capture(
         if digest != row["output_image_sha256"]:
             raise OCREvidenceError(f"PNG 已被修改：{row['sku_id']}/{row['variant_id']}")
         snapshot = _rgb_snapshot(data, VARIANTS[row["variant_id"]][0])
-        recognized = _ocr_lines(engine.predict(snapshot))
+        recognized = _ocr_lines(engine.predict(snapshot), size=VARIANTS[row["variant_id"]][0])
         observations.append({
             "sku_id": row["sku_id"],
             "variant_id": row["variant_id"],
@@ -288,6 +319,14 @@ def capture(
         "sku_count": sku_count,
         "expected_variant_count": 2 * sku_count,
         "captured_variant_count": len(observations),
+        "positioned_line_count": sum(
+            line["bbox"] is not None
+            for observation in observations for line in observation["recognized_lines"]
+        ),
+        "unlocated_line_count": sum(
+            line["bbox"] is None
+            for observation in observations for line in observation["recognized_lines"]
+        ),
         "min_20_real_skus_proven": False,
         "source_authorizations_verified": False,
         "human_review_performed": False,

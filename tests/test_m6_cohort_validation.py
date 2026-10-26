@@ -646,3 +646,31 @@ def test_m6_report_publication_cleans_temporary_file_on_link_error(
         _publish_report(tmp_path / "report.json", b"not completed")
     assert not (tmp_path / "report.json").exists()
     assert not list(tmp_path.glob(".m6-report-*.tmp"))
+
+
+def test_strict_m6_report_exposes_missing_spatial_ocr_coverage(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, data = _mock_ocr_evidence(bundle, tmp_path)
+    for observation in data["observations"]:
+        observation["recognized_lines"] = [{
+            "text": "¥129",
+            "confidence": 0.95,
+            "bbox": ([65, 668, 200, 720]
+                     if observation["variant_id"] == "square" else None),
+        }]
+        observation["recognized_line_count"] = 1
+    data["positioned_line_count"] = 2
+    data["unlocated_line_count"] = 2
+    evidence.write_text(json.dumps(data), encoding="utf-8")
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+    )
+    assert report["status"] == "PASS"
+    assert report["ocr_capture_positioned_line_count"] == 2
+    assert report["ocr_capture_unlocated_line_count"] == 2
+    assert report["real_ocr_quality_verified"] is False
+    assert any("缺少可信检测框" in warning for warning in report["warnings"])

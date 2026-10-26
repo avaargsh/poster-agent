@@ -101,6 +101,10 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 **M6 报告不可覆盖发布：** 最终验证报告会先写入同目录私有临时文件，写入完成后再以文件系统排他创建语义发布。即使另一个本地进程在路径预检之后抢先写入同名报告，也不会被本次运行覆盖；临时文件在失败时清理。仍建议每次试验使用唯一的报告输出路径，不要把本地 JSON 的生成视为可信签名或业务质量证明。
 
+**OCR 检测框与价格位置复核：** M6 的 PaddleOCR 3.x 采集现在保留每条 `rec_texts` 的置信度及对应像素矩形 `bbox=[x_min,y_min,x_max,y_max]`（方形 1024×1024，原生 4:5 为 1080×1350），识别输出同时支持官方 `Result.json` 的 `res` 包装。越界、反向、非数值或与识别文字数量不匹配的检测框会使采集失败，并且不发布不完整 OCR JSON。OCR 未提供 `rec_boxes` 时每行 `bbox=null`，不会根据文本臆造位置；仍可采集文本以供人工判断。
+
+严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
+
 ### 将 M6 OCR 采集绑定至最终本地证据门禁
 
 在完成原有 M5g 账本、M6 授权与人工审核 CSV、M5j native manifest 和 readiness 核验之后，可显式开启**严格 OCR 采集一致性模式**。完整 `validate_m6_cohort` 命令保留已有必填参数，并追加：

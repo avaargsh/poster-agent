@@ -147,3 +147,40 @@ def test_reject_unhashable_or_nonobject_ocr_rows_as_validation_error(tmp_path):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(OCRCaptureEvidenceError, match="对象"):
         _verify(path, rows)
+
+
+def test_verifier_checks_optional_spatial_boxes_without_claiming_quality(tmp_path):
+    path, data, rows = _fixture(tmp_path)
+    for observation in data["observations"]:
+        observation["recognized_lines"][0]["bbox"] = [65, 670, 200, 740]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    result = _verify(path, rows)
+    assert result["positioned_line_count"] == 4
+    assert result["unlocated_line_count"] == 0
+    assert result["quality_verified"] is False
+    assert result["runtime_attested"] is False
+
+    data["observations"][0]["recognized_lines"][0]["bbox"] = [65, 670, 200, 1380]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(OCRCaptureEvidenceError, match="检测框"):
+        _verify(path, rows)
+
+
+def test_verifier_legacy_capture_without_boxes_remains_unlocated(tmp_path):
+    path, _, rows = _fixture(tmp_path)
+    result = _verify(path, rows)
+    assert result["positioned_line_count"] == 0
+    assert result["unlocated_line_count"] == 4
+
+
+@pytest.mark.parametrize("bad_box", [
+    [10, 10, 0, 20], [0, -1, 20, 20], [0, 0, 1025, 20],
+    [0, 0, 20, float("inf")], [False, 0, 20, 20],
+    "0,0,20,20", [0, 0, 20],
+])
+def test_verifier_rejects_invalid_spatial_evidence(tmp_path, bad_box):
+    path, data, rows = _fixture(tmp_path)
+    data["observations"][0]["recognized_lines"][0]["bbox"] = bad_box
+    path.write_text(json.dumps(data, allow_nan=True), encoding="utf-8")
+    with pytest.raises(OCRCaptureEvidenceError, match="检测框|NaN"):
+        _verify(path, rows)
