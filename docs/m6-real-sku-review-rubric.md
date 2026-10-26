@@ -105,6 +105,19 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
 
+### 为人工审核生成 OCR 检测框标注图
+
+M6 保存 `m6_paddle_ocr_evidence.json` 以后，可在本地运行：
+
+```bash
+uv run --locked python -m scripts.render_m6_ocr_overlays \
+  --package-dir data/eval_runs/web_batches/<BATCH_ID>/m6_review_package
+```
+
+该命令**不运行模型、不修改原始海报或人工标签**。它读取已冻结的 `m6_output_reviews.csv`、OCR 采集 JSON 和原 PNG，校验完整 SKU×方形/4:5 集合、OCR 声明格式、来源哈希与当前图片字节，然后生成 `m6_ocr_review_overlays.zip`。ZIP 中包含两种画布尺寸的带数字编号检测框 PNG 及 `m6_ocr_overlay_manifest.json`，含对应的原图 SHA-256、标注图 SHA-256、OCR 证据摘要。标注图的数字与 OCR JSON 中每张图 `recognized_lines` 的 **1-based 行号**对应。沿用现有可视化最多显示前 35 个有坐标的框；清单会标记未画出的数量。没有坐标的文本仍需人工定位，不会臆造矩形或声称价格位置正确。
+
+此 ZIP 使用同目录私有临时文件生成并排他发布：已存在同名文件时拒绝覆盖，生成中失败不发布不完整压缩包。**它不是验收 PASS，也没有验证真实模型执行、素材授权或业务文案正确率**；人工审核仍须参考冻结规格、来源商品与两张原图。若修改了审核 CSV、OCR 证据或源图，原 ZIP 会保留，不会被静默重建；需建立新审核批次并重新执行证据采集。
+
 ### 将 M6 OCR 采集绑定至最终本地证据门禁
 
 在完成原有 M5g 账本、M6 授权与人工审核 CSV、M5j native manifest 和 readiness 核验之后，可显式开启**严格 OCR 采集一致性模式**。完整 `validate_m6_cohort` 命令保留已有必填参数，并追加：

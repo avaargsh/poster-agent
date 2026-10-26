@@ -60,6 +60,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **M5j 已支持按导入批次独立评分：** 使用 `uv run --locked python -m scripts.native_trial --reviewer local-operator --batch-journal data/eval_runs/m5g_import/batch_import_results.json` 仅盘点本批次最新 SKU 版本；全批 READY 后显式 `--score`，结果附带批次账本 SHA 和 SKU 清单。缺一个样本也不会自动缩小分母。详见 [M5j 批次独立评测](docs/m5j-batch-evaluation.md)。
 
+**M6 OCR 人工复核标注包：** 保存真实 OCR 证据后，可运行 `uv run --locked python -m scripts.render_m6_ocr_overlays --package-dir /path/to/m6_review_package`。脚本复用冻结 CSV、OCR JSON 和图片 SHA-256 校验，生成**不覆盖原图**的 `m6_ocr_review_overlays.zip`（编号检测框 PNG + 来源清单），供人工查看文字位置；缺坐标保留未知，不自动评分或批准。详细见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
+
 **M6 OCR 空间证据：** PaddleOCR 采集现在连同置信度保存识别行对应的像素检测框（`bbox`），严格拒绝不合法及越界坐标；如果模型没有返回检测框，证据仍会将位置标为未知。最终报告统计已定位/未定位 OCR 行数，但不自动宣称价格位置或文案质量通过。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
 
 **M6 严格 OCR 采集一致性门禁：** `scripts.validate_m6_cohort` 新增可选 `--ocr-evidence <m6_paddle_ocr_evidence.json>` 和 `--require-ocr-evidence`。严格模式下，缺文件、过期/模拟的捕获结果、SKU×版式缺口、评审 CSV 哈希或图片身份失配都会 `BLOCKED`；通过也仅表示本地 JSON 与冻结评审记录一致（`MATCHED_DECLARED_REAL`），**不证明真实模型执行和识别准确率**。默认兼容原有元数据门禁，但明确标记 `ocr_capture_consistency=NOT_ASSESSED`。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
