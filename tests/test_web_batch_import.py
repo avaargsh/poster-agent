@@ -1012,3 +1012,82 @@ def test_web_m6_sku_ocr_review_preview_bounded_and_untrusted_text_is_safe(
     assert 'id="m6OcrReviewRows"' in page.text
     assert "/m6-ocr-review" in page.text
     assert "textContent=line.text" in page.text
+
+
+def test_web_m6_sku_image_preview_serves_only_verified_frozen_images(tmp_path, monkeypatch):
+    """Synthetic OCR declaration tests transport integrity, not real model quality."""
+    import hashlib
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review"
+    assert client.get(endpoint + "/sku-one/image/square").status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    assert client.get(endpoint + "/sku-one/image/square").status_code == 409
+    capture = _seed_m6_ocr_capture_for_web(package)
+    before_csv = (package / "m6_output_reviews.csv").read_bytes()
+    before_capture = capture.read_bytes()
+
+    for variant, suffix in (("square", "square"), ("feed_4x5_native", "native-4x5")):
+        image_path = package / f"images/sku-two-{suffix}.png"
+        original = image_path.read_bytes()
+        result = client.get(endpoint + f"/sku-two/image/{variant}")
+        assert result.status_code == 200, result.text
+        assert result.headers["content-type"] == "image/png"
+        assert "no-store" in result.headers["cache-control"]
+        assert result.headers["x-content-type-options"] == "nosniff"
+        assert result.content == original
+        assert hashlib.sha256(result.content).hexdigest() == hashlib.sha256(original).hexdigest()
+
+    assert client.get(endpoint + "/not-in-cohort/image/square").status_code == 404
+    assert client.get(endpoint + "/sku-one/image/thumbnail").status_code == 404
+    assert (package / "m6_output_reviews.csv").read_bytes() == before_csv
+    assert capture.read_bytes() == before_capture
+
+
+def test_web_m6_sku_image_preview_fails_closed_on_stale_or_linked_input(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    capture = _seed_m6_ocr_capture_for_web(package)
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review/sku-one/image/square"
+    assert client.get(endpoint).status_code == 200
+
+    image = package / "images/sku-one-square.png"
+    original = image.read_bytes()
+    image.write_bytes(b"changed after frozen review")
+    assert client.get(endpoint).status_code == 409
+    image.write_bytes(original)
+    outside = tmp_path / "unrelated.png"
+    outside.write_bytes(original)
+    image.unlink()
+    image.symlink_to(outside)
+    assert client.get(endpoint).status_code == 409
+    image.unlink()
+    image.write_bytes(original)
+
+    csv_path = package / "m6_output_reviews.csv"
+    original_csv = csv_path.read_bytes()
+    csv_path.write_bytes(original_csv.replace(b"UNVERIFIED", b"FAIL", 1))
+    assert client.get(endpoint).status_code == 409
+    csv_path.write_bytes(original_csv)
+
+    ocr_original = capture.read_bytes()
+    capture.write_bytes(ocr_original.replace(b"3.3.0", b"test-double"))
+    assert client.get(endpoint).status_code == 409
+    capture.write_bytes(ocr_original)
+    assert client.get(endpoint).status_code == 200
+
+
+def test_web_m6_sku_review_renders_verified_images_without_using_ocr_as_approval():
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "/m6-ocr-review/" in page.text
+    assert "/image/" in page.text
+    assert "m6-ocr-evidence-image" in page.text
+    assert "picture.src='/api/batches/'" in page.text
+    assert "不代表已通过质量验收" in page.text
