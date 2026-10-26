@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Poster Agent · M5h</title>
+<title>Poster Agent · 商品海报工作台</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;margin:0;color:#e6edf7;background:#0b1221}header{padding:26px max(24px,calc((100% - 1170px)/2));border-bottom:1px solid #25364b;background:#101c2e}h1{font-size:25px;margin:0 0 6px}.sub{color:#9aafc6;font-size:14px;margin:0}.shell{max-width:1170px;margin:26px auto;padding:0 20px;display:grid;grid-template-columns:minmax(330px,430px) minmax(340px,1fr);gap:24px}.panel{background:#121f32;border:1px solid #31425b;border-radius:14px;padding:24px}.panel h2{font-size:18px;margin:0 0 18px}.row{display:grid;gap:7px;margin-bottom:15px}label{font-size:14px;color:#afc1d4}input,select,textarea{background:#0a1627;border:1px solid #3a4c61;border-radius:8px;color:#f0f5fc;padding:11px;width:100%;font-size:15px}input[type=file]{font-size:13px}button{border:0;border-radius:9px;padding:12px 17px;background:#67b6ff;color:#05192b;font-weight:700;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:wait}button.secondary{background:#253c55;color:#e3f1ff}.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.tip{color:#a6b6cc;font-size:13px;line-height:1.7}.execution-history{display:grid;gap:8px;margin-top:10px}.execution-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:#0a1627;border:1px solid #2d4157;border-radius:8px}.execution-row .summary{font-size:12px;color:#b7c9de;overflow-wrap:anywhere;flex:1;min-width:0}.execution-row .actions{gap:6px}.execution-row button{padding:6px 9px;font-size:12px}.bad{color:#ffadac}.good{color:#a5e9c4}.preview{width:100%;max-width:560px;aspect-ratio:1;border-radius:12px;object-fit:contain;border:1px dashed #3c536b;background:linear-gradient(135deg,#29334a,#0a1c35)}.tag{display:inline-flex;background:#243b50;border-radius:6px;padding:5px 8px;font-size:12px;color:#bed5f2;margin-bottom:12px}a{color:#8acaff;text-decoration:none}a:hover{text-decoration:underline}.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mt{margin-top:23px;border-top:1px solid #2c4056;padding-top:20px}.hidden{display:none}.style-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:9px}.style-preset{display:flex;flex-direction:column;align-items:stretch;gap:5px;text-align:left;background:#1b2a40;color:#e9f3ff;border:2px solid transparent;padding:7px;border-radius:10px;min-width:0}.style-preset[aria-pressed="true"]{border-color:#84c9ff;background:#263c54}.style-preset:focus-visible{outline:3px solid #b7e2ff;outline-offset:2px}.style-swatch{height:52px;border-radius:6px}.style-name{font-size:12px;font-weight:700}.style-hint{font-size:11px;color:#b7c9de}@media(max-width:840px){.shell{grid-template-columns:1fr}}
 
@@ -16,13 +16,118 @@
 #batchProgress{width:100%;height:14px;margin:8px 0;accent-color:#67b6ff}
 #batchRows .execution-row{align-items:flex-start}
 #batchRows .execution-row .summary{white-space:normal}
+
+:root{--surface:#121f32;--canvas:#0b1221;--line:#31425b;--accent:#84c9ff;--muted:#afc1d4;--text:#f0f5fc}
+[hidden]{display:none!important}
+html{scroll-padding-top:100px}
+body{line-height:1.5;accent-color:var(--accent)}
+::selection{background:#345c80;color:#fff}
+input,textarea{caret-color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+button{transition:background-color .16s ease,color .16s ease;min-height:42px}
+button:hover:not(:disabled){background:#9ed6ff}
+button.secondary:hover:not(:disabled){background:#36536f}
+button:disabled{opacity:.5;cursor:not-allowed}
+button[aria-busy="true"]{cursor:progress}
+input[aria-invalid="true"]{border-color:#ffadac}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input[type=file]{max-width:100%}
+input::file-selector-button{background:#253c55;color:var(--text);border:0;border-radius:4px;padding:7px 9px;margin-right:10px;cursor:pointer}
+.skip-link{position:fixed;top:-100px;left:20px;z-index:20;background:var(--accent);color:#05192b;padding:10px 18px;border-radius:6px}
+.skip-link:focus{top:12px}
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px max(24px,calc((100% - 1360px)/2));background:#101c2e}
+.brand{display:flex;align-items:center;gap:12px;color:var(--accent)}
+.brand h1{color:var(--text);font-size:20px;line-height:1.3;margin:0;font-weight:650;letter-spacing:-.025em}
+.brand .sub{font-size:12px;margin-top:3px}
+.local-label,.quiet-label{font-size:12px;color:#b5c8dc}
+.workspace-nav{position:sticky;top:0;z-index:10;background:#101c2e;border-bottom:1px solid var(--line);padding:0 max(24px,calc((100% - 1360px)/2))}
+.workspace-nav [role=tablist]{display:flex;gap:6px;max-width:1360px;margin:auto;overflow-x:auto}
+.workspace-nav button{flex-shrink:0;border-radius:0;background:transparent;color:#b5c8dc;padding:15px 24px;border-bottom:3px solid transparent;font-weight:550}
+.workspace-nav button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);background:#16283d}
+.workspace-nav button:hover:not(:disabled){background:#1a2d43;color:var(--text)}
+.shell{display:block;max-width:1408px;margin:28px auto;padding:0 24px}
+.workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:24px}
+.workspace-heading h2{font-size:24px;line-height:1.3;font-weight:650;letter-spacing:-.025em;margin:0 0 6px}
+.workspace-heading p{margin:0}
+.creation-grid{display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:24px;align-items:start}
+.panel{min-width:0;border-radius:10px;padding:24px}
+.panel h3{font-size:17px;line-height:1.4;font-weight:600;margin:0 0 16px}
+.creation-form>h3{margin-bottom:18px}
+.creation-form .style-presets{grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.creation-form .style-preset{padding:5px;gap:6px}
+.creation-form .style-swatch{height:34px}
+.creation-form .style-name{font-size:11px}
+.creation-form .style-hint{display:none}
+.disclosure{border-top:1px solid var(--line);margin:24px 0 0;padding:16px 0 0}
+.disclosure>summary{cursor:pointer;font-size:14px;font-weight:550;color:#c8daee;list-style-position:inside;min-height:28px}
+.disclosure[open]>summary{margin-bottom:18px}
+.brief-disclosure{border-top:0;border-bottom:1px solid var(--line);margin:0 0 22px;padding:0 0 16px}
+.row label{color:#c2d0e1;font-size:13px}
+.tip{color:var(--muted);overflow-wrap:anywhere}
+.tip.bad{color:#ffadac}.tip.good{color:#a5e9c4}
+.canvas-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.canvas-heading h3{margin:0}
+.canvas-heading .tag{margin:0}
+.canvas-panel>.preview{display:block;max-width:600px;max-height:62vh;margin:0 auto;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:#0a1627}
+.preview-empty{display:flex;min-height:390px;align-items:center;justify-content:center;flex-direction:column;padding:36px 20px;text-align:center;background:#0a1627;border:1px dashed #405771;border-radius:6px;color:#b3c9e0}
+.preview-empty svg{margin-bottom:24px;color:#7697b8}
+.preview-empty h3{color:var(--text);margin:0 0 8px}
+.preview-empty p{font-size:14px;margin:0 0 24px}
+.asset-selection{display:flex;align-items:center;gap:12px;padding:10px;margin-bottom:12px;background:#0a1627;border:1px solid var(--line);border-radius:6px;font-size:12px;overflow-wrap:anywhere}
+.asset-selection img{width:52px;height:64px;object-fit:contain;flex-shrink:0}
+#productFileError:empty{display:none}
+.editor-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:24px 0 20px;overflow-x:auto}
+.editor-tabs button{padding:12px 14px;border-radius:0;white-space:nowrap;color:#b5c8dc;background:transparent;border-bottom:2px solid transparent;font-size:14px}
+.editor-tabs button[aria-selected=true]{color:var(--accent);border-color:var(--accent)}
+.editor-tabs button:hover:not(:disabled){background:#1a2d43;color:var(--text)}
+#channelFormats,.workspace-view #trialQueue,.workspace-view #batchImportPanel{border-top:0;padding-top:0;margin-top:0}
+#editor .mt:first-child{border-top:0;padding-top:0;margin-top:0}
+#channelPreview{aspect-ratio:auto;display:block;margin:auto}
+.batch-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
+.batch-history .actions{gap:8px}
+.batch-history select{width:100%}
+.batch-history .execution-row{flex-direction:column;align-items:stretch;gap:12px}
+.workflow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;list-style:none;margin:24px 0 28px;padding:0}
+.workflow-steps li{display:flex;align-items:center;gap:8px;font-size:13px;color:#a6b6cc;min-width:0}
+.workflow-steps span{display:inline-flex;justify-content:center;align-items:center;border:1px solid #596e86;border-radius:50%;width:26px;height:26px;flex-shrink:0;font-size:12px}
+.workflow-steps [aria-current=step]{color:var(--accent);font-weight:650}
+.workflow-steps [aria-current=step] span{background:#203d58;border-color:var(--accent)}
+.workflow-steps [data-state=complete]{color:#a5e9c4}
+.workflow-steps [data-state=complete] span{border-color:#6fbf97;background:#153c35}
+.template-actions{margin-bottom:22px;font-size:13px;gap:10px}
+.batch-start-actions{margin-top:20px}
+.next-action{font-size:13px;line-height:1.7;padding:12px 14px;border:1px solid #385674;background:#142b42;border-radius:6px;color:#d5e7fa}
+.batch-results{border-top:1px solid var(--line);margin-top:24px;padding-top:24px}
+.batch-results .actions{gap:10px}
+.batch-results button{font-size:13px}
+.batch-search{margin:24px 0 12px}
+.execution-history{font-variant-numeric:tabular-nums}
+.execution-row{min-width:0;border-radius:6px;padding:12px}
+.batch-thumb{width:44px;height:44px;object-fit:contain;border-radius:4px;border:1px solid var(--line);flex-shrink:0}
+#batchRows{max-height:560px;overflow:auto}
+#batchRows .execution-row{align-items:center}
+.app-footer{max-width:1408px;margin:32px auto 24px;padding:0 24px;color:#9aafc6;font-size:12px}
+pre{max-width:100%}
+@media(max-width:1000px){.batch-grid{grid-template-columns:minmax(0,1fr)}.batch-history .execution-row{flex-direction:row;align-items:center}.batch-history select{width:auto}}
+@media(max-width:840px){.creation-grid{grid-template-columns:1fr}.local-label,.workspace-heading>.quiet-label{display:none}.canvas-panel>.preview{max-height:none}.preview-empty{min-height:300px}.shell{padding:0 16px;margin-top:22px}.app-header{padding:16px}.workspace-nav{padding:0 8px}.workspace-nav button{padding:13px 16px}.panel{padding:20px}.app-footer{padding:0 16px}}
+@media(max-width:480px){.workspace-heading h2{font-size:22px}.panel{padding:16px}.workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.split{grid-template-columns:1fr}.actions{gap:10px}.execution-row{flex-wrap:wrap}.execution-row .actions{width:100%}.editor-tabs button{padding:12px 10px;font-size:13px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto!important}*,*::before,*::after{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<header><h1>Poster Agent · M5h</h1><p class="sub">真实商品素材 + AI／本地背景 + 确定性文字图层 · 单机学习版</p></header>
-<main class="shell">
-<section class="panel">
-<h2>00 · 自然语言 Brief（可恢复审核）</h2>
+<a href="#workspaceMain" class="skip-link">跳到工作区</a>
+<header class="app-header"><div class="brand"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="3" y="2" width="19" height="24" rx="4" stroke="currentColor" stroke-width="2"/><path d="M8 8h9M8 12h6M8 20l4-4 5 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><div><h1>Poster Agent</h1><p class="sub">商品海报工作台</p></div></div><span class="local-label">本地工作区 · 无需云端保存</span></header>
+<nav class="workspace-nav" aria-label="工作区"><div role="tablist" aria-label="工作区导航">
+<button id="nav-create" role="tab" aria-selected="true" aria-controls="view-create" data-workspace="create">创作海报</button>
+<button id="nav-batch" role="tab" aria-selected="false" aria-controls="view-batch" tabindex="-1" data-workspace="batch">批量处理</button>
+<button id="nav-review" role="tab" aria-selected="false" aria-controls="view-review" tabindex="-1" data-workspace="review">审核中心</button>
+<button id="nav-history" role="tab" aria-selected="false" aria-controls="view-history" tabindex="-1" data-workspace="history">执行记录</button>
+</div></nav>
+<main class="shell" id="workspaceMain" tabindex="-1">
+<section class="workspace-view" id="view-create" role="tabpanel" aria-labelledby="nav-create" tabindex="0">
+<div class="workspace-heading"><div><h2>创作海报</h2><p class="tip">上传商品图、填写内容，在右侧预览和调整。</p></div><span class="quiet-label">默认使用免费本地背景</span></div>
+<div class="creation-grid"><section class="panel creation-form"><h3>商品与文案</h3>
+<details class="disclosure brief-disclosure" id="briefPanel"><summary>用一句话填写需求（可选）</summary>
 <div class="row"><label>输入运营需求（如：主标题：双十一限时优惠，活动价199元，原价399元，风格：蓝色科技风）</label><textarea id="briefText" rows="3" placeholder="主标题：电动牙刷双十一，活动价199元，原价399元，风格：蓝色科技风"></textarea></div>
 <div class="row"><label>规格编译模式</label><select id="briefCompiler"><option value="demo">本地规则演示（不是 AI，免费）</option><option value="qwen">Qwen LLM 结构化抽取（需要 API Key）</option></select></div>
 <div class="actions"><button class="secondary" id="compileBrief" type="button">编译并保存审核任务</button><span id="compileStatus" class="tip">创建后需明确批准，才能继续生图</span></div>
@@ -33,15 +138,14 @@
 </div>
 <p id="runInfo" class="tip"></p>
 <p id="compileWarnings" class="tip"></p>
-<section class="mt"><h2>01 · 新建海报（先确认字段）</h2></section>
-<form id="createForm"><input type="hidden" name="review_run_id" value="">
-<div class="row"><label>商品图片（推荐透明 PNG）*</label><input type="file" name="product" accept="image/png,image/jpeg,image/webp" required></div>
-<p class="tip">图片支持 PNG/JPEG/WEBP；单张不超过 10 MiB，最多 1600 万像素，单边最长 8192 像素。上传后会旋正方向；若带有效 ICC 则先转换至 sRGB，再移除 EXIF/ICC/文本元数据。</p>
-<div class="row"><label>品牌 Logo（可选）</label><input type="file" name="logo" accept="image/png,image/jpeg,image/webp"></div>
-<div class="row"><label>主标题*</label><input name="title" required maxlength="35" value="双十一限时优惠"></div>
-<div class="row"><label>副标题</label><input name="subtitle" maxlength="45" value="智能清洁 · 品质生活"></div>
-<div class="split"><div class="row"><label>活动价*</label><input name="price" type="number" step="0.01" min="0.01" value="199" required></div><div class="row"><label>原价</label><input name="original_price" type="number" step="0.01" value="399"></div></div>
-<div class="row"><label>按钮文案</label><input name="cta" maxlength="12" value="立即抢购"></div>
+</details><form id="createForm"><input type="hidden" name="review_run_id" value="">
+<div class="row"><label for="create-product">商品图片（推荐透明 PNG）*</label><input type="file" id="create-product" name="product" accept="image/png,image/jpeg,image/webp" required></div>
+<p class="tip">PNG、JPG 或 WEBP，单张不超过 10 MB。</p><div id="productSelection" class="asset-selection" hidden><img id="productThumb" alt="已选择的商品图"><span id="productFileName"></span></div><p id="productFileError" class="tip bad" role="alert"></p>
+<div class="row"><label for="create-logo">品牌 Logo（可选）</label><input type="file" id="create-logo" name="logo" accept="image/png,image/jpeg,image/webp"></div>
+<div class="row"><label for="create-title">主标题*</label><input id="create-title" name="title" required maxlength="35" value="双十一限时优惠"></div>
+<div class="row"><label for="create-subtitle">副标题</label><input id="create-subtitle" name="subtitle" maxlength="45" value="智能清洁 · 品质生活"></div>
+<div class="split"><div class="row"><label for="create-price">活动价*</label><input id="create-price" name="price" type="number" step="0.01" min="0.01" value="199" required></div><div class="row"><label for="create-original_price">原价</label><input id="create-original_price" name="original_price" type="number" step="0.01" value="399"></div></div>
+<div class="row"><label for="create-cta">按钮文案</label><input id="create-cta" name="cta" maxlength="12" value="立即抢购"></div>
 <div class="row"><label id="stylePresetLabel">本地背景配色（快速选择，非完整布局模板）</label>
 <div class="style-presets" role="group" aria-labelledby="stylePresetLabel">
 <button class="style-preset" type="button" data-style-preset="蓝色科技风" aria-pressed="true" aria-label="选择蓝色科技风本地背景">
@@ -66,122 +170,19 @@
 </button>
 </div>
 <p id="stylePickerStatus" class="tip" aria-live="polite">可选预设也可手动输入关键词；当前选择不会调用模型。</p></div>
-<div class="row"><label>画面风格</label><input name="style" maxlength="80" value="蓝色科技风"></div>
-<div class="row"><label>背景模式</label><select name="background_mode"><option value="local">本地渐变（无需 API Key，不是 AI）</option><option value="ai">真实 Qwen-Image（需要 API Key，会计费）</option></select></div>
+<div class="row"><label for="create-style">画面风格</label><input id="create-style" name="style" maxlength="80" value="蓝色科技风"></div>
+<div class="row"><label for="create-background_mode">背景模式</label><select id="create-background_mode" name="background_mode"><option value="local">本地渐变（无需 API Key，不是 AI）</option><option value="ai">真实 Qwen-Image（需要 API Key，会计费）</option></select></div>
 <div class="actions"><button id="generate" type="submit">生成海报</button><span id="createStatus" class="tip">上传商品图后生成</span></div>
-<div class="actions" style="margin-top:12px"><button id="checkExecution" type="button" class="secondary">查询最近执行状态</button><button id="refreshExecutionHistory" type="button" class="secondary">刷新执行历史</button></div>
-<p id="executionStatus" class="tip">生成请求会保存本地幂等键。网络断开时先查状态，不重复付费生图。</p>
-<div class="actions" style="margin-top:12px">
-  <label for="executionHistoryFilter">历史记录筛选</label>
-  <select id="executionHistoryFilter" aria-label="按执行状态筛选">
-    <option value="">全部状态</option>
-    <option value="COMPLETED">已完成</option>
-    <option value="UNKNOWN">结果未知</option>
-    <option value="RUNNING">执行中</option>
-  </select>
-  <button id="executionHistoryPrev" type="button" class="secondary" disabled>上一页</button>
-  <button id="executionHistoryNext" type="button" class="secondary" disabled>下一页</button>
-  <span id="executionHistoryRange" class="tip" aria-live="polite">读取中…</span>
-</div>
-<div id="executionHistory" class="execution-history" aria-live="polite">读取最近执行记录…</div>
-</form>
-<p class="tip">渲染主版本为 1024×1024，支持多尺寸安全派生（非自适应重排）；AI 只生成背景，商品与价格来自上传素材和精确排版。本地版无登录，请仅在个人电脑或可信网络运行。</p>
-</section>
-<section class="panel">
-<section id="batchImportPanel" class="mt">
-<h2>本地批量商品导入与进度</h2>
-<p class="tip">上传 CSV 与其引用的商品图/Logo，先对全批进行预检，再显式开始生成。只使用本地免费背景，不调用 Qwen 生图或 OCR；每个 SKU 完成后都会写入本地批次账本，可在中断后续跑。</p>
-<div class="row"><label for="batchManifest">SKU 清单 CSV（UTF-8）</label><input id="batchManifest" type="file" accept=".csv,text/csv"></div>
-<div class="row"><label for="batchImages">CSV 引用的所有图片（PNG / JPEG / WEBP；每张不超过 10 MiB）</label><input id="batchImages" type="file" accept="image/png,image/jpeg,image/webp" multiple></div>
-<p class="tip">必填列：sku_id、product_image、title、price。可选：original_price、subtitle、cta、style、logo_image。网页批量导入要求 product_image / logo_image 使用文件名，不带目录；每批 1–100 个 SKU。图片只保存在本机。</p>
-<div class="actions">
-<button id="preflightBatch" type="button">上传并预检</button>
-<button id="applyBatch" type="button" disabled>生成海报（本地背景）</button>
-<button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button>
-<button id="prepareM6Package" type="button" class="secondary" disabled>准备 M6 离线审核包</button>
-<button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button>
-<button id="prepareM6Overlay" type="button" class="secondary" disabled>准备 OCR 标注预览</button>
-<button id="downloadM6Overlay" type="button" class="secondary" disabled>下载 OCR 标注 ZIP</button>
-</div>
-<p id="m6PackageStatus" class="tip" aria-live="polite">批次完成后可生成本机 M6 审核包；仅生成 UNVERIFIED 草稿，不执行 OCR 或付费模型。</p>
-<p id="m6OverlayStatus" class="tip" aria-live="polite">先准备 M6 审核包并在本机采集 OCR 证据，才可生成只读标注预览。</p>
-<div class="actions"><button id="inspectM6OCR" type="button" class="secondary" disabled>查看逐 SKU OCR 核对</button></div>
-<section id="m6OcrReviewPanel" class="mt" hidden aria-label="逐 SKU OCR 与人工标签核对">
-  <h3>OCR 文字与人工标签逐项核对</h3>
-  <p class="tip">内容来自本地冻结的审核 CSV 和 OCR 证据；仅供人工检查，不能据此自动批准海报或证明真实模型执行。</p>
-  <div class="row"><label for="m6OcrSkuPicker">选择 SKU</label>
-    <select id="m6OcrSkuPicker" disabled></select>
-  </div>
-  <p id="m6OcrReviewStatus" class="tip" aria-live="polite"></p>
-  <div id="m6OcrReviewRows" aria-live="polite"></div>
-</section>
-<p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
-<progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
-<div id="batchPlanSummary" class="tip"></div>
-<div id="batchRows" class="execution-history" aria-live="polite"></div>
-<div class="mt" id="batchHistoryPanel">
-  <h3>历史网页批次</h3>
-  <p class="tip">选择旧批次后可查看原有进度、续跑未完成任务或进入人工审核；历史浏览不会自动删除原图或评测账本。</p>
-  <div class="actions">
-    <label for="batchHistoryFilter">状态</label>
-    <select id="batchHistoryFilter" aria-label="筛选历史批次">
-      <option value="">全部</option>
-      <option value="COMPLETED">已完成</option>
-      <option value="FAILED">失败</option>
-      <option value="INTERRUPTED">已中断</option>
-      <option value="READY">待生成</option>
-      <option value="RUNNING">执行中</option>
-    </select>
-    <button id="refreshBatchHistory" class="secondary" type="button">刷新历史</button>
-    <button id="batchHistoryPrev" class="secondary" type="button" disabled>上一页</button>
-    <button id="batchHistoryNext" class="secondary" type="button" disabled>下一页</button>
-  </div>
-  <p id="batchHistoryInfo" class="tip" aria-live="polite">尚未加载历史批次</p>
-  <div id="batchHistoryItems" class="execution-history" aria-live="polite"></div>
-</div>
-</section>
-<section id="cliBatchJournal" style="margin-bottom:24px">
-<h3>命令行批次账本状态（M5g）</h3>
-<p class="tip">只读默认目录 data/eval_runs/m5g_import/batch_import_results.json 中的 CLI 批次。它与上方网页批次分开统计；自定义 CLI 输出目录不会显示。此处不会生成海报、运行 OCR 或自动验收。</p>
-<div class="actions">
-<button id="refreshCliBatchJournal" class="secondary" type="button">刷新命令行账本</button>
-<span id="cliBatchJournalSummary" class="tip" aria-live="polite">尚未读取</span>
-</div>
-<div id="cliBatchJournalRows" class="execution-history" aria-live="polite"></div>
-</section>
-<section id="m6ReviewProgress" style="margin-bottom:24px">
-<h2>M6 · 本地评测进度预览</h2>
-<p class="tip">选择由 scripts.prepare_m6_review 生成并由人工填写的两个 CSV。点击后只传给本机服务在内存中统计，不留存 CSV、不访问图片路径，也不会执行 OCR 或收费模型。此处“完成”只指人工表格填写状态，不能代替最终 M6 证据门禁。</p>
-<div class="row"><label for="m6RegistryCsv">M6 cohort registry CSV（授权与 SKU 独立性记录）</label><input id="m6RegistryCsv" type="file" accept=".csv,text/csv"></div>
-<div class="row"><label for="m6ReviewsCsv">M6 output reviews CSV（方形 + 4:5 人工审核记录）</label><input id="m6ReviewsCsv" type="file" accept=".csv,text/csv"></div>
-<div class="actions"><button id="checkM6Progress" type="button" class="secondary">查看本地评测进度</button></div>
-<p id="m6ProgressSummary" class="tip" aria-live="polite">尚未加载 M6 CSV；不会自动判断 OCR 或图片质量。</p>
-<div id="m6ProgressIssues" class="execution-history" aria-live="polite"></div>
-</section>
-<section id="trialQueue" style="margin-bottom:24px">
-<h2>本地 4:5 验收队列</h2>
-<p class="tip">复用当前人工审核员代号（下方“4:5 原生海报人工验收”中可修改）。按版式独立列出最新版本的人工审核与 OCR 状态。READY 表示当前选中版式的人工审核与 OCR 证据齐备，可在 M5e 中指定相同的 --variant 单独评分；两种版式的标签与报告不能混用，也都不代表可投放。</p>
-<div class="actions">
-<label for="reviewQueueVariant">验收版式</label>
-<select id="reviewQueueVariant" aria-label="选择当前验收队列对应的 4:5 原生版式">
-<option value="feed_4x5_native">经典分栏 4:5</option>
-<option value="feed_4x5_native_product_focus">商品主体优先 4:5</option>
-</select>
-<button id="loadReviewQueue" class="secondary" type="button">刷新本地验收队列</button>
-<label for="batchReviewFile">仅看 M5g 批次</label>
-<input type="file" id="batchReviewFile" accept=".json,application/json" aria-label="选择 M5g 的 batch_import_results.json">
-<button id="clearBatchScope" class="secondary" type="button">清除批次筛选</button>
-<span id="reviewQueueStatus" class="tip">按需读取本地状态；不会自动执行 OCR 或模型。</span>
-</div>
-<p id="batchReviewScopeStatus" class="tip">当前查看全部本地海报。批次筛选文件仅在此浏览器中读取，不会上传到服务器。</p>
-<div id="reviewQueueItems" style="margin-top:12px;max-height:360px;overflow:auto"></div>
-</section>
-<h2>02 · 预览与修改</h2>
-<span class="tag" id="source">尚未生成</span><br>
-<img id="preview" class="preview" alt="生成海报预览">
-<p class="tip" id="metadata">生成成功后会显示版本与链接。</p>
-<section id="editor" class="mt hidden">
-<h2>03 · 修改内容（不重新生成背景）</h2>
+</form></section>
+<section class="panel canvas-panel" aria-label="预览与编辑"><div class="canvas-heading"><h3>海报预览</h3><span class="tag" id="source">尚未生成</span></div>
+<div id="previewEmpty" class="preview-empty"><svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true"><rect x="8" y="4" width="40" height="48" rx="5" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="18" r="4" stroke="currentColor" stroke-width="2"/><path d="M14 43l10-12 7 7 6-6 6 11" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><h3>海报会出现在这里</h3><p>先选择商品图，再填写标题和价格。</p><button type="button" id="chooseProduct" class="secondary">选择商品图片</button></div>
+<img id="preview" class="preview" alt="生成海报预览" hidden><p class="tip" id="metadata" role="status">生成后可修改文案、保留历史版本，并导出不同尺寸。</p>
+<section id="editor" class="hidden"><div class="editor-tabs" role="tablist" aria-label="海报操作">
+<button id="editor-tab-content" type="button" role="tab" aria-selected="true" aria-controls="editor-content" data-editor-tab="content">编辑内容</button>
+<button id="editor-tab-export" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="editor-export" data-editor-tab="export">尺寸与导出</button>
+<button id="editor-tab-check" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="editor-check" data-editor-tab="check">检查与标注</button></div>
+<div id="editor-content" role="tabpanel" aria-labelledby="editor-tab-content" tabindex="0">
+<h3>编辑当前版本</h3>
 <form id="editForm">
 <p class="tip">只重新排版文字和价格，保留原商品与背景。保存会生成新的不可变历史版本。</p>
 <div class="row"><label for="editTitle">主标题</label><input id="editTitle" required maxlength="35"></div>
@@ -191,7 +192,7 @@
 <div class="actions"><button id="saveEdit" type="submit">保存新版本</button><button id="reloadPoster" class="secondary" type="button">加载最新版本</button><a id="download" href="#" download="poster.png">导出 PNG</a></div>
 </form>
 <div class="tip" id="editStatus"></div><div class="tip" id="history"></div>
-<div class="row mt" id="versionGallery">
+<details class="disclosure" id="versionGallery"><summary>查看历史版本</summary><div class="row">
   <label for="historyVersionSelect">历史版本（只读预览，不切换当前编辑版本）</label>
   <div class="split">
     <select id="historyVersionSelect" aria-label="选择已发布的历史版本"></select>
@@ -200,9 +201,9 @@
   <img id="historyVersionPreview" class="preview hidden" alt="历史版本只读预览" loading="lazy">
   <p id="historyVersionStatus" class="tip" aria-live="polite">选择版本后可查看当时的文案和图片。</p>
   <a id="historyVersionDownload" class="hidden" href="#" download="poster-history.png">下载此历史版本 PNG</a>
-</div>
-<section class="mt" id="channelFormats">
-<h2>04 · 多渠道导出（原生排版 / 安全缩放）</h2>
+</div></details></div>
+<div id="editor-export" role="tabpanel" aria-labelledby="editor-tab-export" tabindex="0" hidden><section class="mt" id="channelFormats">
+<h3>尺寸与导出</h3>
 <p class="tip">4:5 可以选择从原商品、Logo、背景和当前规格重新排版；原来的安全缩放导出仍可选。两种方式都不调用 Qwen，也不会自动通过验收。</p>
 <div class="row"><label>选择导出规格</label>
 <select id="channelPreset">
@@ -236,7 +237,7 @@
   <p class="tip">对比使用同一张已保存的商品和同一个海报版本，不修改原文件；两种模板都需要各自独立验收。</p>
 </div>
 
-<div class="row"><label>原生 4:5 单独验收</label><select id="nativeOcrMode">
+<details class="disclosure"><summary>检查与审核这张 4:5 海报</summary><div class="row"><label>原生 4:5 单独验收</label><select id="nativeOcrMode">
 <option value="none">规则检查（不调用 OCR）</option>
 <option value="paddle">真实 PaddleOCR（本地需安装）</option>
 </select></div>
@@ -254,9 +255,8 @@
   </div>
   <p class="tip" id="nativeReviewStatus">生成原生 4:5 海报后可审核。</p>
 </div>
-</section>
-<section class="mt">
-<h2>05 · Acceptance Gate（自动验收）</h2>
+</details></section></div>
+<div id="editor-check" role="tabpanel" aria-labelledby="editor-tab-check" tabindex="0" hidden><section class="mt"><h2>方形海报检查</h2>
 <p class="tip">检测每个海报版本。规则检查与真实 OCR 分开执行；未运行 OCR 不会视为通过。</p>
 <div class="row"><label>验收模式</label><select id="ocrMode">
 <option value="none">规则检查（不运行 OCR）</option>
@@ -271,8 +271,7 @@
   <div class="actions"><a id="downloadOverlay" href="#" download="ocr-diagnostic.png">导出诊断 PNG</a></div>
 </div>
 </section>
-<section class="mt">
-<h2>06 · 人工标注（真实图片证据）</h2>
+<section class="mt"><h2>方形海报人工审核</h2>
 <p class="tip">请对照上方 PNG 亲眼检查每个字段。提交后绑定当前版本的 SHA-256；这是你自己提供的标签，并非模型验证。</p>
 <div class="row"><label>审核员代号（2–40 位英文、数字、_、-）</label><input id="humanReviewer" value="local-operator" maxlength="40"></div>
 <div id="humanFields">
@@ -284,17 +283,212 @@
 </div>
 <div class="actions"><button type="button" id="saveHuman" class="secondary" disabled>保存人工标注</button><a id="exportHuman" href="#" download="poster-human-labels.csv">导出该审核员 CSV</a></div>
 <p id="humanStatus" class="tip">生成海报后，先核对 PNG 再标注。</p>
+</section></div></section></section></div></section>
+<section class="workspace-view" id="view-batch" role="tabpanel" aria-labelledby="nav-batch" tabindex="0" hidden>
+<div class="workspace-heading"><div><h2>批量处理</h2><p class="tip">从一份商品清单开始，统一生成，再逐张审核。</p></div><span class="quiet-label">免费本地背景 · 支持中断续跑</span></div>
+<div class="batch-grid"><section class="panel"><section id="batchImportPanel"><h3>导入商品素材</h3>
+<p class="tip">每批 1–100 个商品。先检查清单，再开始生成；不调用 Qwen 生图或 OCR。</p>
+<ol class="workflow-steps" id="batchSteps" aria-label="批量处理步骤">
+<li data-batch-step="0" aria-current="step"><span>1</span>准备素材</li><li data-batch-step="1"><span>2</span>检查清单</li><li data-batch-step="2"><span>3</span>生成海报</li><li data-batch-step="3"><span>4</span>审核与导出</li></ol>
+<div class="actions template-actions"><a id="downloadBatchTemplate" download="poster-products-template.csv" href="data:text/csv;charset=utf-8,sku_id%2Cproduct_image%2Ctitle%2Cprice%2Coriginal_price%2Csubtitle%2Ccta%2Cstyle%2Clogo_image%0A">下载 CSV 模板</a><span class="tip">填写商品编号、图片文件名、标题和价格。</span></div>
+<div class="row"><label for="batchManifest">SKU 清单 CSV（UTF-8）</label><input id="batchManifest" type="file" accept=".csv,text/csv"></div>
+<div class="row"><label for="batchImages">CSV 引用的所有图片（PNG / JPEG / WEBP；每张不超过 10 MiB）</label><input id="batchImages" type="file" accept="image/png,image/jpeg,image/webp" multiple></div>
+<details class="disclosure"><summary>清单怎么填写？</summary><p class="tip">必填列：sku_id、product_image、title、price。可选：original_price、subtitle、cta、style、logo_image。网页批量导入要求 product_image / logo_image 使用文件名，不带目录；每批 1–100 个 SKU。图片只保存在本机。</p></details><p id="batchFileSummary" class="tip">尚未选择文件。</p>
+<div class="actions batch-start-actions"><button id="preflightBatch" type="button">上传并预检</button><button id="applyBatch" type="button" disabled>生成海报（本地背景）</button></div>
+<p id="batchNextAction" class="next-action" role="status">先选择 CSV 和图片，再点击「上传并预检」。</p>
+<section id="batchResults" class="batch-results" hidden><h3>生成完成，接下来检查海报</h3>
+<p class="tip">可逐张审核，也可下载含方形和 4:5 图片的审核包。生成完成不代表审核通过。</p><div class="actions"><button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button><button id="prepareM6Package" type="button" class="secondary" disabled>准备离线审核包</button><button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button></div>
+<p id="m6PackageStatus" class="tip" aria-live="polite">准备后可下载图片与待填审核表。</p>
+<details class="disclosure"><summary>OCR 证据与标注工具</summary><p id="m6OverlayStatus" class="tip" aria-live="polite">先准备审核包，再在本机采集 OCR 证据。</p><div class="actions"><button id="prepareM6Overlay" type="button" class="secondary" disabled>准备 OCR 标注预览</button><button id="downloadM6Overlay" type="button" class="secondary" disabled>下载 OCR 标注 ZIP</button><button id="inspectM6OCR" type="button" class="secondary" disabled>查看逐 SKU OCR 核对</button></div></details></section>
+<section id="m6OcrReviewPanel" class="mt" hidden aria-label="逐 SKU OCR 与人工标签核对">
+  <h3>OCR 文字与人工标签逐项核对</h3>
+  <p class="tip">内容来自本地冻结的审核 CSV 和 OCR 证据；仅供人工检查，不能据此自动批准海报或证明真实模型执行。</p>
+  <div class="row"><label for="m6OcrSkuPicker">选择 SKU</label>
+    <select id="m6OcrSkuPicker" disabled></select>
+  </div>
+  <p id="m6OcrReviewStatus" class="tip" aria-live="polite"></p>
+  <div id="m6OcrReviewRows" aria-live="polite"></div>
 </section>
+<p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
+<progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
+<div id="batchPlanSummary" class="tip"></div>
+<div class="row batch-search"><label for="batchSearch">查找本批商品</label><input id="batchSearch" type="search" placeholder="输入商品编号" aria-controls="batchRows"></div><p id="batchSearchEmpty" class="tip" hidden>没有匹配的商品，请换一个编号。</p><div id="batchRows" class="execution-history" aria-live="polite"></div>
+</section></section><aside class="panel batch-history"><div id="batchHistoryPanel">
+  <h3>最近的批次</h3>
+  <p class="tip">选择旧批次后可查看原有进度、续跑未完成任务或进入人工审核；历史浏览不会自动删除原图或评测账本。</p>
+  <div class="actions">
+    <label for="batchHistoryFilter">状态</label>
+    <select id="batchHistoryFilter" aria-label="筛选历史批次">
+      <option value="">全部</option>
+      <option value="COMPLETED">已完成</option>
+      <option value="FAILED">失败</option>
+      <option value="INTERRUPTED">已中断</option>
+      <option value="READY">待生成</option>
+      <option value="RUNNING">执行中</option>
+    </select>
+    <button id="refreshBatchHistory" class="secondary" type="button">刷新历史</button>
+    <button id="batchHistoryPrev" class="secondary" type="button" disabled>上一页</button>
+    <button id="batchHistoryNext" class="secondary" type="button" disabled>下一页</button>
+  </div>
+  <p id="batchHistoryInfo" class="tip" aria-live="polite">尚未加载历史批次</p>
+  <div id="batchHistoryItems" class="execution-history" aria-live="polite"></div>
+</div>
+</aside></div></section>
+<section class="workspace-view" id="view-review" role="tabpanel" aria-labelledby="nav-review" tabindex="0" hidden><div class="workspace-heading"><div><h2>审核中心</h2><p class="tip">按版式检查商品、文案和价格。未验证的结果会保留待审核状态。</p></div></div><section class="panel"><section id="trialQueue" style="margin-bottom:24px">
+<h3>待审核的海报</h3>
+<p class="tip">复用当前人工审核员代号（下方“4:5 原生海报人工验收”中可修改）。按版式独立列出最新版本的人工审核与 OCR 状态。READY 表示当前选中版式的人工审核与 OCR 证据齐备，可在 M5e 中指定相同的 --variant 单独评分；两种版式的标签与报告不能混用，也都不代表可投放。</p>
+<div class="actions">
+<label for="reviewQueueVariant">验收版式</label>
+<select id="reviewQueueVariant" aria-label="选择当前验收队列对应的 4:5 原生版式">
+<option value="feed_4x5_native">经典分栏 4:5</option>
+<option value="feed_4x5_native_product_focus">商品主体优先 4:5</option>
+</select>
+<button id="loadReviewQueue" class="secondary" type="button">刷新本地验收队列</button>
+<label for="batchReviewFile">仅看 M5g 批次</label>
+<input type="file" id="batchReviewFile" accept=".json,application/json" aria-label="选择 M5g 的 batch_import_results.json">
+<button id="clearBatchScope" class="secondary" type="button">清除批次筛选</button>
+<span id="reviewQueueStatus" class="tip">按需读取本地状态；不会自动执行 OCR 或模型。</span>
+</div>
+<p id="batchReviewScopeStatus" class="tip">当前查看全部本地海报。批次筛选文件仅在此浏览器中读取，不会上传到服务器。</p>
+<div id="reviewQueueItems" style="margin-top:12px;max-height:360px;overflow:auto"></div>
 </section>
+<details class="disclosure"><summary>查看离线审核表的填写进度</summary><section id="m6ReviewProgress" style="margin-bottom:24px">
+<h2>M6 · 本地评测进度预览</h2>
+<p class="tip">选择由 scripts.prepare_m6_review 生成并由人工填写的两个 CSV。点击后只传给本机服务在内存中统计，不留存 CSV、不访问图片路径，也不会执行 OCR 或收费模型。此处“完成”只指人工表格填写状态，不能代替最终 M6 证据门禁。</p>
+<div class="row"><label for="m6RegistryCsv">M6 cohort registry CSV（授权与 SKU 独立性记录）</label><input id="m6RegistryCsv" type="file" accept=".csv,text/csv"></div>
+<div class="row"><label for="m6ReviewsCsv">M6 output reviews CSV（方形 + 4:5 人工审核记录）</label><input id="m6ReviewsCsv" type="file" accept=".csv,text/csv"></div>
+<div class="actions"><button id="checkM6Progress" type="button" class="secondary">查看本地评测进度</button></div>
+<p id="m6ProgressSummary" class="tip" aria-live="polite">尚未加载 M6 CSV；不会自动判断 OCR 或图片质量。</p>
+<div id="m6ProgressIssues" class="execution-history" aria-live="polite"></div>
 </section>
+</details></section></section>
+<section class="workspace-view" id="view-history" role="tabpanel" aria-labelledby="nav-history" tabindex="0" hidden><div class="workspace-heading"><div><h2>执行记录</h2><p class="tip">找回已生成的海报，或核对中断的生成请求。</p></div></div><section class="panel"><h3>海报生成记录</h3><div class="actions" style="margin-top:12px"><button id="checkExecution" type="button" class="secondary">查询最近执行状态</button><button id="refreshExecutionHistory" type="button" class="secondary">刷新执行历史</button></div>
+<p id="executionStatus" class="tip">生成请求会保存本地幂等键。网络断开时先查状态，不重复付费生图。</p>
+<div class="actions" style="margin-top:12px">
+  <label for="executionHistoryFilter">历史记录筛选</label>
+  <select id="executionHistoryFilter" aria-label="按执行状态筛选">
+    <option value="">全部状态</option>
+    <option value="COMPLETED">已完成</option>
+    <option value="UNKNOWN">结果未知</option>
+    <option value="RUNNING">执行中</option>
+  </select>
+  <button id="executionHistoryPrev" type="button" class="secondary" disabled>上一页</button>
+  <button id="executionHistoryNext" type="button" class="secondary" disabled>下一页</button>
+  <span id="executionHistoryRange" class="tip" aria-live="polite">读取中…</span>
+</div>
+<div id="executionHistory" class="execution-history" aria-live="polite">读取最近执行记录…</div>
+<details class="disclosure"><summary>命令行批次记录</summary><section id="cliBatchJournal" style="margin-bottom:24px">
+<h3>命令行批次账本状态（M5g）</h3>
+<p class="tip">只读默认目录 data/eval_runs/m5g_import/batch_import_results.json 中的 CLI 批次。它与上方网页批次分开统计；自定义 CLI 输出目录不会显示。此处不会生成海报、运行 OCR 或自动验收。</p>
+<div class="actions">
+<button id="refreshCliBatchJournal" class="secondary" type="button">刷新命令行账本</button>
+<span id="cliBatchJournalSummary" class="tip" aria-live="polite">尚未读取</span>
+</div>
+<div id="cliBatchJournalRows" class="execution-history" aria-live="polite"></div>
+</section>
+</details></section></section>
 </main>
+<footer class="app-footer">文件与记录保存在本机。生成与自动检查完成后，仍需人工确认再使用。</footer>
 <script>
 let current = null;
 let activeReviewRunId = null;
 let activeReviewApproved = false;
 const $ = id => document.getElementById(id);
+const workspaceNames=['create','batch','review','history'];
+function showWorkspace(name,{focus=false}={}){
+  if(!workspaceNames.includes(name))name='create';
+  for(const key of workspaceNames){
+    const selected=key===name;
+    $('view-'+key).hidden=!selected;
+    $('nav-'+key).setAttribute('aria-selected',String(selected));
+    $('nav-'+key).tabIndex=selected?0:-1;
+  }
+  window.history.replaceState(null,'','#'+name);
+  window.scrollTo(0,0);
+  if(focus)$('view-'+name).focus({preventScroll:true});
+}
+function showEditorTab(name){
+  for(const key of ['content','export','check']){
+    const selected=key===name;
+    $('editor-'+key).hidden=!selected;
+    $('editor-tab-'+key).setAttribute('aria-selected',String(selected));
+    $('editor-tab-'+key).tabIndex=selected?0:-1;
+  }
+}
+function wireTabs(selector,activate){
+  const tabs=[...document.querySelectorAll(selector)];
+  for(const tab of tabs){
+    tab.addEventListener('click',()=>activate(tab));
+    tab.addEventListener('keydown',event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      event.preventDefault();
+      const index=tabs.indexOf(tab);
+      const target=event.key==='Home'?0:event.key==='End'?tabs.length-1:
+        (index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+      tabs[target].focus();activate(tabs[target]);
+    });
+  }
+}
+wireTabs('[data-workspace]',tab=>{
+  showWorkspace(tab.dataset.workspace);
+  if(tab.dataset.workspace==='review')$('loadReviewQueue').click();
+});
+wireTabs('[data-editor-tab]',tab=>showEditorTab(tab.dataset.editorTab));
+window.addEventListener('hashchange',()=>{
+  const name=location.hash.slice(1);
+  if(workspaceNames.includes(name))showWorkspace(name);
+});
+function revealPosterPreview(){
+  if(window.matchMedia('(max-width:840px)').matches)
+    $('preview').scrollIntoView({block:'start'});
+}
+$('chooseProduct').addEventListener('click',()=>$('create-product').click());
+function setBatchStage(stage){
+  for(const item of document.querySelectorAll('[data-batch-step]')){
+    const step=Number(item.dataset.batchStep);
+    item.dataset.state=step<stage?'complete':step===stage?'current':'upcoming';
+    if(step===stage)item.setAttribute('aria-current','step');
+    else item.removeAttribute('aria-current');
+  }
+}
+function filterBatchRows(){
+  const query=$('batchSearch').value.trim().toLowerCase();
+  const rows=[...$('batchRows').children];
+  for(const row of rows)row.hidden=!row.dataset.sku.includes(query);
+  $('batchSearchEmpty').hidden=!rows.length||rows.some(row=>!row.hidden);
+}
+$('batchSearch').addEventListener('input',filterBatchRows);
 const form = $('createForm');
 const field = name => form.elements.namedItem(name);
+let productObjectUrl=null;
+field('product').addEventListener('change',()=>{
+  if(productObjectUrl)URL.revokeObjectURL(productObjectUrl);
+  productObjectUrl=null;
+  const input=field('product'),file=input.files[0];
+  const selection=$('productSelection'),image=$('productThumb');
+  selection.hidden=true;
+  input.setCustomValidity('');input.removeAttribute('aria-invalid');
+  $('productFileError').textContent='';
+  if(!file)return;
+  function invalid(message){
+    input.setCustomValidity(message);input.setAttribute('aria-invalid','true');
+    $('productFileError').textContent=message;selection.hidden=true;
+  }
+  if(file.size>10*1024*1024){invalid('图片超过 10 MB，请选择较小的 PNG、JPG 或 WEBP 文件。');return;}
+  const objectUrl=URL.createObjectURL(file);
+  productObjectUrl=objectUrl;
+  image.onload=()=>{
+    if(productObjectUrl!==objectUrl)return;
+    if(image.naturalWidth<64||image.naturalHeight<64||image.naturalWidth>8192||
+       image.naturalHeight>8192||image.naturalWidth*image.naturalHeight>16000000){
+      invalid('图片尺寸需至少 64×64，单边不超过 8192 像素，总像素不超过 1600 万。');return;
+    }
+    $('productFileName').textContent=file.name+' · '+image.naturalWidth+'×'+image.naturalHeight;
+    selection.hidden=false;
+  };
+  image.onerror=()=>{if(productObjectUrl===objectUrl)invalid('无法读取图片，请重新选择有效的 PNG、JPG 或 WEBP 文件。');};
+  image.src=objectUrl;
+});
 const reviewFields = ['title','subtitle','price','original_price','style','cta','background_mode'];
 const stylePresetButtons=[...document.querySelectorAll('[data-style-preset]')];
 function syncStylePresetPicker(){
@@ -442,6 +636,9 @@ async function restoreExecutionPoster(posterId){
     const obj=await res.json();
     if(!res.ok)throw Error(errorText(obj));
     display(obj);
+    showWorkspace('create',{focus:true});
+    showEditorTab('content');
+    revealPosterPreview();
     $('createStatus').textContent='已从执行历史恢复海报 '+posterId;
     $('createStatus').className='tip good';
   }catch(err){
@@ -579,7 +776,30 @@ async function fingerprintFormData(body){
   return JSON.stringify(entries);
 }
 function errorText(json){const d=json.detail; if(Array.isArray(d))return d.map(e=>e.msg).join('；');return typeof d==='string'?d:'请求失败'}
-function display(data){current=data; resetNativeCompare(); updateChannelExport(); $('overlayPanel').classList.add('hidden'); $('overlayPreview').removeAttribute('src'); localStorage.setItem('poster-last-id',data.poster_id); loadHumanContext(); $('gateStatus').textContent='当前版本尚未重新验收'; $('gateResult').textContent='暂无报告'; const url=data.image_url+'?t='+Date.now(); $('preview').src=url; $('source').textContent=data.background_mode==='ai'?'Qwen-Image AI 背景':'本地渐变背景（非 AI）';$('metadata').textContent='海报 ID: '+data.poster_id+'  |  版本 v'+data.version+'  |  可编辑数据已保存';$('editor').classList.remove('hidden');$('editTitle').value=data.spec.title;$('editSubtitle').value=data.spec.subtitle ?? '';$('editPrice').value=data.spec.price;$('editOriginal').value=data.spec.original_price ?? '';$('editCta').value=data.spec.cta;$('download').href=data.image_url;$('download').download='poster-v'+data.version+'.png';$('history').textContent='历史版本：'+data.versions.map(v=>'v'+v).join('、');populateHistoryVersions(data)}
+function display(data){
+  current=data;
+  resetNativeCompare(); updateChannelExport();
+  $('overlayPanel').classList.add('hidden');
+  $('overlayPreview').removeAttribute('src');
+  localStorage.setItem('poster-last-id',data.poster_id);
+  loadHumanContext();
+  $('gateStatus').textContent='当前版本尚未重新验收';
+  $('gateResult').textContent='暂无报告';
+  $('previewEmpty').hidden=true;
+  $('preview').hidden=false;
+  $('preview').src=data.image_url+'?t='+Date.now();
+  $('source').textContent=data.background_mode==='ai'?'AI 背景':'本地背景';
+  $('metadata').textContent=data.spec.title+' · v'+data.version+' · 已保存在本机';
+  $('editor').classList.remove('hidden');
+  $('editTitle').value=data.spec.title;
+  $('editSubtitle').value=data.spec.subtitle ?? '';
+  $('editPrice').value=data.spec.price;
+  $('editOriginal').value=data.spec.original_price ?? '';
+  $('editCta').value=data.spec.cta;
+  $('download').href=data.image_url;
+  $('download').download='poster-v'+data.version+'.png';
+  $('history').textContent='历史版本：'+data.versions.map(v=>'v'+v).join('、');
+  populateHistoryVersions(data)}
 let historyPreviewRequest=0;
 function populateHistoryVersions(data){
   const select=$('historyVersionSelect');
@@ -688,6 +908,8 @@ function renderReviewQueue(data){
         if(!res.ok)throw Error(errorText(poster));
         if(poster.version!==item.version)throw Error('该海报已有新版本，请刷新队列');
         $('channelPreset').value=data.variant_id;display(poster);
+        showWorkspace('create',{focus:true});showEditorTab('export');
+        $('channelFormats').querySelector('details').open=true;
         $('preview').scrollIntoView({behavior:'smooth',block:'start'});
         $('reviewQueueStatus').textContent='已打开 '+(sku||item.title)+' · v'+item.version+
           '；核对 4:5 预览后进行人工标注。';
@@ -1012,6 +1234,7 @@ $('createForm').addEventListener('submit',async e=>{e.preventDefault();
     }
     localStorage.setItem('poster-last-execution',JSON.stringify({key,fp,status:'COMPLETED'}));
     display(json);
+    revealPosterPreview();
     $('createStatus').textContent='生成成功；主动再次生成会创建新执行，网络中断重试会复用原键';
     $('createStatus').className='tip good';
   }catch(err){
@@ -1116,18 +1339,6 @@ function refreshExportLink(){
   const reviewer=$('humanReviewer').value.trim();
   $('exportHuman').href='/api/annotations/export.csv?reviewer='+encodeURIComponent(reviewer);
 }
-async function loadHumanContext(){
-  if(!current)return;
-  humanContext=null;
-  $('saveHuman').disabled=true;
-  const posterId=current.poster_id,version=current.version;
-  humanLabels.forEach(row=>{
-    row.querySelector('[data-judgment]').value='';
-    row.querySelector('[data-reason]').value='';
-    row.hidden=true;
-  });
-  $('humanStatus').textContent='正在载入当前版本校验值…';
-  
 async function refreshCliBatchJournal(){
   const summary=$('cliBatchJournalSummary');
   const host=$('cliBatchJournalRows');
@@ -1161,7 +1372,18 @@ async function refreshCliBatchJournal(){
 $('refreshCliBatchJournal').addEventListener('click',refreshCliBatchJournal);
 refreshCliBatchJournal();
 
-refreshExportLink();
+async function loadHumanContext(){
+  if(!current)return;
+  humanContext=null;
+  $('saveHuman').disabled=true;
+  const posterId=current.poster_id,version=current.version;
+  humanLabels.forEach(row=>{
+    row.querySelector('[data-judgment]').value='';
+    row.querySelector('[data-reason]').value='';
+    row.hidden=true;
+  });
+  $('humanStatus').textContent='正在载入当前版本校验值…';
+  refreshExportLink();
   try{
     const reviewer=$('humanReviewer').value.trim();
     const response=await fetch(annotationUrl()+'?reviewer='+encodeURIComponent(reviewer));
@@ -1292,6 +1514,17 @@ function resetBatchForNewFiles(){
   currentBatchId=null;
   lastBatchStatus=null;
   localStorage.removeItem(BATCH_STORAGE_KEY);
+  batchReviewScope=null;
+  $('batchReviewScopeStatus').textContent='当前查看全部本地海报。';
+  if(lastReviewQueueData)renderReviewQueue(lastReviewQueueData);
+  $('batchResults').hidden=true;
+  $('applyBatch').hidden=true;
+  $('preflightBatch').classList.remove('secondary');
+  $('batchSearch').value='';
+  $('batchSearchEmpty').hidden=true;
+  setBatchStage(0);
+  updateBatchFileSummary();
+  $('batchNextAction').textContent='文件已更改，请点击「上传并预检」重新检查。';
   $('applyBatch').disabled=true;
   $('reviewCurrentBatch').disabled=true;
   $('prepareM6Package').disabled=true;
@@ -1311,6 +1544,17 @@ function renderBatchState(state){
   if(!state || state.batch_id!==currentBatchId)return;
   localStorage.setItem(BATCH_STORAGE_KEY,state.batch_id);
   lastBatchStatus=state.status;
+  $('batchResults').hidden=state.status!=='COMPLETED';
+  $('applyBatch').hidden=!['READY','RUNNING','FAILED','INTERRUPTED'].includes(state.status);
+  $('preflightBatch').classList.add('secondary');
+  setBatchStage(state.status==='COMPLETED'?3:2);
+  $('batchNextAction').textContent=({
+    READY:'清单检查通过。下一步点击「生成海报」，开始处理这 '+state.total+' 个商品。',
+    RUNNING:'正在生成。你可以切换工作区；刷新页面后也能继续查看进度。',
+    COMPLETED:'已完成 '+state.total+' 个商品。接下来逐张审核，或准备并下载离线审核包。',
+    FAILED:'生成已中断，已完成的商品会保留。点击「继续批次」处理剩余商品。',
+    INTERRUPTED:'服务曾中断。点击「继续批次」，会复用已保存的结果。'
+  })[state.status]||'请查看批次状态后继续。';
   $('batchManifest').disabled=state.status==='RUNNING';
   $('batchImages').disabled=state.status==='RUNNING';
   const total=Number(state.total)||0;
@@ -1321,8 +1565,8 @@ function renderBatchState(state){
   $('batchStatus').textContent=batchStatusLabel(state.status)+' · '+processed+'/'+total+current+error;
   $('batchStatus').className='tip '+(state.status==='COMPLETED'?'good':state.status==='FAILED'?'bad':'');
   $('batchPlanSummary').textContent=state.plan
-    ? 'SKU 数：'+state.plan.total_skus+' · 不同商品图哈希数：'+state.plan.unique_source_files+
-      ' · 收费模型：'+(state.plan.no_paid_model?'不会调用':'需进一步核对')
+    ? '共 '+state.plan.total_skus+' 个商品 · '+state.plan.unique_source_files+
+      ' 张不同素材 · '+(state.plan.no_paid_model?'使用免费本地背景':'请核对背景模式')
     : '';
   $('applyBatch').disabled=!['READY','FAILED','INTERRUPTED'].includes(state.status);
   $('reviewCurrentBatch').disabled=state.status!=='COMPLETED';
@@ -1345,6 +1589,13 @@ function renderBatchState(state){
   for(const item of (state.rows||[])){
     const row=document.createElement('div');
     row.className='execution-row';
+    row.dataset.sku=item.sku_id.toLowerCase();
+    if(item.poster_id){
+      const thumbnail=document.createElement('img');
+      thumbnail.className='batch-thumb';thumbnail.alt='';thumbnail.loading='lazy';
+      thumbnail.src='/api/posters/'+item.poster_id+'/versions/'+item.version+'/image';
+      row.appendChild(thumbnail);
+    }
     const summary=document.createElement('span');
     summary.className='summary';
     summary.textContent='SKU '+item.sku_id+' · '+batchStatusLabel(item.status)+
@@ -1358,6 +1609,7 @@ function renderBatchState(state){
     }
     host.appendChild(row);
   }
+  filterBatchRows();
   if(batchPollTimer){clearTimeout(batchPollTimer);batchPollTimer=null;}
   if(state.status==='RUNNING')scheduleBatchPoll(state.batch_id);
 }
@@ -1383,12 +1635,22 @@ async function refreshBatchState(batchId){
     }
   }
 }
+function updateBatchFileSummary(){
+  const manifest=$('batchManifest').files[0];
+  const images=Array.from($('batchImages').files||[]);
+  $('batchFileSummary').textContent=(manifest?manifest.name:'未选择 CSV')+' · 已选择 '+images.length+' 张图片';
+  $('batchManifest').removeAttribute('aria-invalid');
+  $('batchImages').removeAttribute('aria-invalid');
+}
 $('batchManifest').addEventListener('change',resetBatchForNewFiles);
 $('batchImages').addEventListener('change',resetBatchForNewFiles);
 $('preflightBatch').addEventListener('click',async()=>{
   const manifest=$('batchManifest').files[0];
   const images=Array.from($('batchImages').files||[]);
   if(!manifest||!images.length){
+    $('batchManifest').setAttribute('aria-invalid',String(!manifest));
+    $('batchImages').setAttribute('aria-invalid',String(!images.length));
+    (!manifest?$('batchManifest'):$('batchImages')).focus();
     $('batchStatus').textContent='请同时选择 CSV 和该清单引用的全部图片。';
     $('batchStatus').className='tip bad';
     return;
@@ -1400,6 +1662,9 @@ $('preflightBatch').addEventListener('click',async()=>{
   $('applyBatch').disabled=true;
   $('batchManifest').disabled=true;
   $('batchImages').disabled=true;
+  setBatchStage(1);
+  $('preflightBatch').setAttribute('aria-busy','true');
+  $('batchNextAction').textContent='正在检查清单和图片。此步骤不会创建海报。';
   $('batchStatus').textContent='正在上传到本机并校验全部 SKU；此步骤不会创建海报…';
   $('batchStatus').className='tip';
   try{
@@ -1411,10 +1676,13 @@ $('preflightBatch').addEventListener('click',async()=>{
     renderBatchState(state);
     loadBatchHistory();
   }catch(err){
+    setBatchStage(0);
+    $('batchNextAction').textContent='请按下方提示修正文件，再重新预检。';
     $('batchStatus').textContent='批次预检失败：'+err.message;
     $('batchStatus').className='tip bad';
   }finally{
     $('preflightBatch').disabled=false;
+    $('preflightBatch').removeAttribute('aria-busy');
     $('batchManifest').disabled=false;
     $('batchImages').disabled=false;
   }
@@ -1446,6 +1714,7 @@ async function refreshM6PackageStatus(batchId){
     const result=await response.json();
     if(currentBatchId!==batchId)return;
     if(!response.ok)throw Error(errorText(result));
+    label.title='本地审核目录：'+result.relative_directory;
     $('prepareM6Package').disabled=result.prepared;
     $('downloadM6Package').disabled=!result.prepared;
     if(result.prepared)refreshM6OverlayStatus(batchId);
@@ -1455,8 +1724,7 @@ async function refreshM6PackageStatus(batchId){
       $('m6OverlayStatus').textContent='请先生成 M6 审核包并在本机采集 OCR 证据。';
     }
     label.textContent=result.prepared
-      ? 'M6 审核包已存在：POSTER_BATCH_DIR/'+result.relative_directory+
-        '。为保护人工修改，不能再次覆盖。'
+      ? '离线审核包已准备好，可下载图片与审核表。已有文件会保留，不能重复覆盖。'
       : '已完成 '+result.batch_sku_count+' 个 SKU；可显式准备 '+
         result.expected_review_rows+' 条方形/4:5 待审记录（无 OCR、无付费调用）。';
   }catch(err){
@@ -1484,8 +1752,7 @@ $('prepareM6Package').addEventListener('click',async()=>{
     if(!response.ok)throw Error(errorText(result));
     $('downloadM6Package').disabled=false;
     refreshM6OverlayStatus(batchId);
-    label.textContent='已生成 M6 草稿：POSTER_BATCH_DIR/'+result.relative_directory+
-      ' · SKU '+result.batch_sku_count+' · 审核行 '+result.review_rows_created+
+    label.textContent='离线审核包已准备好：'+result.batch_sku_count+' 个商品 · '+result.review_rows_created+' 条待审记录'+
       ' · 缺失输出 '+result.missing_output_count+
       '。先填写授权和人工评审，再运行真实 OCR 与最终证据校验。';
   }catch(err){
@@ -1705,6 +1972,7 @@ $('reviewCurrentBatch').addEventListener('click',async()=>{
       '…）。只做浏览器筛选，不会运行 OCR 或自动批准。';
     if(lastReviewQueueData)renderReviewQueue(lastReviewQueueData);
     $('loadReviewQueue').click();
+    showWorkspace('review',{focus:true});
     $('trialQueue').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(err){
     if(currentBatchId===batchId)
@@ -1829,5 +2097,8 @@ refreshExportLink();
     $('metadata').textContent='上次海报无法恢复，可以重新生成';
   }
 })();
+$('applyBatch').hidden=!currentBatchId;
+showWorkspace(location.hash.slice(1));
+setBatchStage(0);
 </script>
 </body></html>

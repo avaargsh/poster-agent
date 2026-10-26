@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "app/templates/index.html"
+        ],
+        "createdAt": "2026-10-26T13:49:11.518Z",
+        "reason": "Agent verified in the live browser: these image elements receive real URLs at runtime and remain inside hidden containers until a poster, upload or diagnostic exists; no visible missing-source image was observed. The first-run preview now has an explicit empty state."
+      }
+    ]
+  }
+}
