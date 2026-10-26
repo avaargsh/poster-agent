@@ -643,3 +643,105 @@ def test_web_m6_package_ui_is_explicit_and_restores_completed_batch():
         "/m6-package", "relative_directory",
     ):
         assert marker in page.text
+
+
+def test_web_m6_review_package_zip_download_includes_only_expected_files(
+    tmp_path, monkeypatch,
+):
+    import hashlib
+    import zipfile
+
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    folder = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    (folder / "private-notes.txt").write_text("never export me", encoding="utf-8")
+    response = client.get(f"/api/batches/{batch_id}/m6-package/download")
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment" in response.headers["content-disposition"]
+    assert str(tmp_path) not in str(response.headers)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+        assert names == {
+            "m6_preparation.json", "m6_cohort_registry.csv", "m6_output_reviews.csv",
+            "images/sku-one-square.png", "images/sku-one-native-4x5.png",
+            "images/sku-two-square.png", "images/sku-two-native-4x5.png",
+        }
+        assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
+        assert archive.read("m6_output_reviews.csv") == (
+            folder / "m6_output_reviews.csv"
+        ).read_bytes()
+        with io.StringIO(archive.read("m6_output_reviews.csv").decode("utf-8")) as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            payload = archive.read(row["output_image_path"])
+            assert hashlib.sha256(payload).hexdigest() == row["output_image_sha256"]
+    assert b"never export me" not in response.content
+    assert client.get(f"/api/batches/{batch_id}/m6-package/download").status_code == 200
+
+
+def test_web_m6_zip_refuses_unprepared_batch_without_creating_files(
+    tmp_path, monkeypatch,
+):
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-package/download"
+    assert client.get(endpoint).status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.get(endpoint).status_code == 409
+    assert not (tmp_path / "batch-root" / batch_id / "m6_review_package").exists()
+
+
+def test_web_m6_zip_refuses_tampered_png_without_leaking_file(
+    tmp_path, monkeypatch,
+):
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    folder = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    picture = folder / "images/sku-one-square.png"
+    saved = picture.read_bytes()
+    picture.write_bytes(b"tampered")
+    assert client.get(f"/api/batches/{batch_id}/m6-package/download").status_code == 409
+    picture.write_bytes(saved)
+    assert client.get(f"/api/batches/{batch_id}/m6-package/download").status_code == 200
+
+
+def test_web_m6_zip_rejects_symlink_and_csv_path_traversal(
+    tmp_path, monkeypatch,
+):
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    folder = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    output = folder / "images/sku-one-square.png"
+    original = output.read_bytes()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(original)
+    output.unlink()
+    output.symlink_to(outside)
+    endpoint = f"/api/batches/{batch_id}/m6-package/download"
+    assert client.get(endpoint).status_code == 409
+    output.unlink()
+    output.write_bytes(original)
+
+    csv_path = folder / "m6_output_reviews.csv"
+    original_csv = csv_path.read_bytes()
+    csv_path.write_bytes(original_csv.replace(
+        b"images/sku-one-square.png", b"../outside.png"
+    ))
+    assert client.get(endpoint).status_code == 409
+    csv_path.write_bytes(original_csv)
+
+
+def test_web_m6_zip_ui_download_is_available_only_for_prepared_batch():
+    page = client.get("/")
+    assert page.status_code == 200
+    html = page.text
+    assert 'id="downloadM6Package"' in html
+    assert "/m6-package/download" in html
+    assert "$('downloadM6Package').disabled=!result.prepared" in html

@@ -99,6 +99,12 @@ uv run --locked python -m scripts.prepare_m6_review \
 - 生成的 CSV 与图片放在**同一目录**下，评审表中图片路径相对 CSV；不要单独移动 CSV。生成的 CSV 仍是草稿，后续应在此基础上填写人工判断、运行 M5j 和本地 M6 证据门禁。
 - 目录位于 `data/eval_runs/` 并被 Git 忽略。不要把图片、填充后的 CSV、源路径和授权证明提交到公开仓库。
 
+### 从网页下载离线审核包 ZIP
+
+完成网页 M6 审核包准备后，点击「下载审核包 ZIP」即可获取本机生成的 CSV、准备摘要与当前审核表中列出的两种版式 PNG，不必手动查找 `POSTER_BATCH_DIR`。接口 `GET /api/batches/{batch_id}/m6-package/download` 只读，仅对完整且已有审核包的网页批次有效。它先验证原始批次的产物凭据、所需审核行和图片摘要，再生成安全 ZIP：每张 PNG ≤20 MiB，CSV/JSON ≤2 MB，全部文件解压后总计不超过 256 MiB。**额外的未登记文件不会打包**，避免把本机私有文件意外带出；路径穿越、符号链接、文件损坏或超限会阻止下载。
+
+ZIP 是便于本机导出、离线审核与人工交接的文件集合，**不是完整的科学/业务证据门禁**。两份人工 CSV 会按本机已填写的内容复制，允许仍标为 `UNVERIFIED`。请注意网页服务默认只支持本地回环访问；下载并转交 ZIP 前由操作员自行确认真实 SKU 的使用授权和数据脱敏。此接口既不修改现有审核包也不执行真实 OCR、付费模型或自动批准。
+
 ### 完成网页批次后，一键准备离线审核包
 
 如果通过本机工作台「本地批量商品导入与进度」创建 M5g 批次，则完成后可直接点击「准备 M6 离线审核包」，无需再手工复制 `batch_import_results.json` 路径运行 CLI。工作台会先复用已有 `/api/batches/{batch_id}/review-scope` 的完整账本和原始创建凭据验证，再调用 `scripts.prepare_m6_review.prepare_package`，**只将离线草稿生成到** `POSTER_BATCH_DIR/<batch_id>/m6_review_package/`。默认 `POSTER_BATCH_DIR` 为 `data/eval_runs/web_batches`，如自定义环境变量，应以配置的根目录为准。

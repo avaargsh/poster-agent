@@ -99,6 +99,7 @@
 <button id="applyBatch" type="button" disabled>生成海报（本地背景）</button>
 <button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button>
 <button id="prepareM6Package" type="button" class="secondary" disabled>准备 M6 离线审核包</button>
+<button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button>
 </div>
 <p id="m6PackageStatus" class="tip" aria-live="polite">批次完成后可生成本机 M6 审核包；仅生成 UNVERIFIED 草稿，不执行 OCR 或付费模型。</p>
 <p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
@@ -1281,6 +1282,7 @@ function resetBatchForNewFiles(){
   $('applyBatch').disabled=true;
   $('reviewCurrentBatch').disabled=true;
   $('prepareM6Package').disabled=true;
+  $('downloadM6Package').disabled=true;
   $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('batchProgress').value=0;
   $('batchRows').replaceChildren();
@@ -1307,6 +1309,7 @@ function renderBatchState(state){
   $('applyBatch').disabled=!['READY','FAILED','INTERRUPTED'].includes(state.status);
   $('reviewCurrentBatch').disabled=state.status!=='COMPLETED';
   $('prepareM6Package').disabled=state.status!=='COMPLETED';
+  $('downloadM6Package').disabled=true;
   if(state.status==='COMPLETED')refreshM6PackageStatus(state.batch_id);
   else $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('applyBatch').textContent=(state.status==='FAILED'||state.status==='INTERRUPTED')
@@ -1419,6 +1422,7 @@ async function refreshM6PackageStatus(batchId){
     if(currentBatchId!==batchId)return;
     if(!response.ok)throw Error(errorText(result));
     $('prepareM6Package').disabled=result.prepared;
+    $('downloadM6Package').disabled=!result.prepared;
     label.textContent=result.prepared
       ? 'M6 审核包已存在：POSTER_BATCH_DIR/'+result.relative_directory+
         '。为保护人工修改，不能再次覆盖。'
@@ -1427,6 +1431,7 @@ async function refreshM6PackageStatus(batchId){
   }catch(err){
     if(currentBatchId===batchId){
       $('prepareM6Package').disabled=true;
+      $('downloadM6Package').disabled=true;
       label.textContent='M6 审核包预检未通过：'+err.message;
     }
   }
@@ -1444,6 +1449,7 @@ $('prepareM6Package').addEventListener('click',async()=>{
     const result=await response.json();
     if(currentBatchId!==batchId)return;
     if(!response.ok)throw Error(errorText(result));
+    $('downloadM6Package').disabled=false;
     label.textContent='已生成 M6 草稿：POSTER_BATCH_DIR/'+result.relative_directory+
       ' · SKU '+result.batch_sku_count+' · 审核行 '+result.review_rows_created+
       ' · 缺失输出 '+result.missing_output_count+
@@ -1456,6 +1462,20 @@ $('prepareM6Package').addEventListener('click',async()=>{
       await refreshM6PackageStatus(batchId);
     }
   }
+});
+
+$('downloadM6Package').addEventListener('click',()=>{
+  const batchId=currentBatchId;
+  if(!batchId || lastBatchStatus!=='COMPLETED' ||
+     $('downloadM6Package').disabled)return;
+  // The server enforces local-only access, exact contents and SHA-256 before
+  // it sends ZIP response headers. Browser download never deletes local files.
+  const link=document.createElement('a');
+  link.href='/api/batches/'+encodeURIComponent(batchId)+'/m6-package/download';
+  link.download='m6-review-'+batchId+'.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 });
 
 $('reviewCurrentBatch').addEventListener('click',async()=>{

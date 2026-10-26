@@ -62,6 +62,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **M6 真实 SKU 评测准备：** 已提供 M5g 生成清单、授权治理表、人工审核工作表和本地证据门禁；`scripts.prepare_m6_review` 可在本地工作台运行期间直接复用导出逻辑，从完整 M5g 批次记录的精确海报版本离线生成方图及原生 4:5 图（即使之后编辑出了 v2，也不会悄悄改评 v2），不会再次启动 ASGI 服务，并生成全部为 `UNVERIFIED` 的本地审核草稿，`scripts.validate_m6_cohort` 则检查版本、创建凭据与本地图片/规格哈希以及 M5j 证据范围。两者都不运行真实 OCR、不调用收费模型、不替代人工验收。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
 
+**M6 审核包 ZIP 下载：** 已准备好的网页批次现在可以直接点击「下载审核包 ZIP」，包含官方 M6 CSV、准备摘要及与评审行匹配的方形 / 原生 4:5 PNG。服务器先在本机校验图片 SHA-256，限定文件清单和压缩包大小，拒绝符号链接和目录外文件；不会把同目录其他私有文件打包。下载是只读操作，不运行 OCR 或付费模型，不代表人工评测通过。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
+
 **M6 网页一键准备审核包：** 完成网页 M5g 批次后，可显式点击「准备 M6 离线审核包」，在该批次的 `POSTER_BATCH_DIR/<batch_id>/m6_review_package/` 生成不可覆盖的方形/4:5 图片与人工审核 CSV 草稿；复用现有本地离线导出器，严格保留原始凭据核验，仍不调用 OCR 或付费模型，不会自动验收。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
 
 **M6 网页进度预览：** 本地工作台支持选取人工填写的 M6 registry 与 output reviews 两份 CSV，实时统计各 SKU 的授权/独立性声明、方形与 4:5 审核进度及缺行、未验证的输出引用；服务仅在本机解析，不保存 CSV、不读取图片或调用模型。它不运行真实 OCR，不核实图片 SHA-256 与授权真实性，不能替代 `scripts.validate_m6_cohort` 最终证据门禁。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
