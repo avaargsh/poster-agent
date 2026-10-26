@@ -1227,3 +1227,116 @@ def test_m6_sidecar_workbench_exports_draft_with_explicit_operator_action():
         "/m6-review-sidecar", "m6ReviewDrafts", "OPERATOR_ASSERTED_NOT_ATTESTED",
     ):
         assert item in page.text
+
+
+def _m6_frozen_sidecar_fixture(tmp_path, monkeypatch):
+    """Return a synthetic 2-SKU completed batch and an exported sidecar."""
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    _seed_m6_ocr_capture_for_web(package)
+    exported = client.post(
+        f"/api/batches/{batch_id}/m6-review-sidecar",
+        json=_m6_review_sidecar_request(package),
+    )
+    assert exported.status_code == 200, exported.text
+    return batch_id, package, exported.json()
+
+
+def test_m6_review_sidecar_restore_revalidates_export_without_writing_source(
+    tmp_path, monkeypatch,
+):
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/restore"
+    originals = {
+        name: (package / name).read_bytes()
+        for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
+                     "images/sku-one-square.png", "images/sku-one-native-4x5.png")
+    }
+    response = client.post(endpoint, json=sidecar)
+    assert response.status_code == 200, response.text
+    assert response.json() == sidecar
+    assert sidecar["human_review_verified"] is False
+    assert sidecar["quality_verified"] is False
+    assert sidecar["runtime_attested"] is False
+    assert sidecar["decision_count"] == 2
+    assert all((package / name).read_bytes() == raw for name, raw in originals.items())
+
+
+def test_m6_review_sidecar_restore_rejects_forged_identity_and_claims(
+    tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/restore"
+    for field, value in (
+        ("schema_version", "fake-v2"),
+        ("status", "VERIFIED"),
+        ("human_review_verified", True),
+        ("quality_verified", True),
+        ("runtime_attested", True),
+        ("automatically_accepted", True),
+        ("decision_count", 3),
+        ("cohort_sku_count", 99),
+        ("reviews_csv_sha256", "0" * 64),
+        ("ocr_capture_sha256", "0" * 64),
+        ("cohort_id", "m6-foreign-cohort"),
+    ):
+        forged = deepcopy(sidecar)
+        forged[field] = value
+        assert client.post(endpoint, json=forged).status_code in (409, 422), field
+
+    for field, value in (
+        ("poster_id", "f" * 32),
+        ("image_sha256", "f" * 64),
+        ("reviewed_at_utc", "2026-10-26T00:00:00Z"),
+        ("manual_overall_label", "APPROVED"),
+        ("sku_id", "sku-missing"),
+    ):
+        forged = deepcopy(sidecar)
+        forged["decisions"][0][field] = value
+        assert client.post(endpoint, json=forged).status_code in (409, 422), field
+    forged = deepcopy(sidecar)
+    forged["decisions"].append(deepcopy(forged["decisions"][0]))
+    forged["decision_count"] += 1
+    assert client.post(endpoint, json=forged).status_code == 422
+    forged = deepcopy(sidecar)
+    forged["extra_attestation"] = "approved"
+    assert client.post(endpoint, json=forged).status_code == 422
+    assert client.post(endpoint, content=b"x" * 262145,
+                       headers={"Content-Type": "application/json"}).status_code == 413
+
+
+def test_m6_review_sidecar_restore_blocks_stale_evidence_and_cross_batch(
+    tmp_path, monkeypatch,
+):
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/restore"
+    for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
+                 "images/sku-one-square.png"):
+        file = package / name
+        original = file.read_bytes()
+        file.write_bytes(b"modified-evidence")
+        assert client.post(endpoint, json=sidecar).status_code == 409, name
+        file.write_bytes(original)
+    assert client.post(endpoint, json=sidecar).status_code == 200
+
+    other_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{other_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{other_id}/m6-package").status_code == 201
+    other_package = tmp_path / "batch-root" / other_id / "m6_review_package"
+    _seed_m6_ocr_capture_for_web(other_package)
+    assert client.post(f"/api/batches/{other_id}/m6-review-sidecar/restore",
+                       json=sidecar).status_code == 409
+
+
+def test_m6_review_workbench_supports_manual_sidecar_restore():
+    html = client.get("/").text
+    for marker in (
+        'id="m6ReviewImportFile"', 'id="m6ReviewImportSidecar"',
+        '/m6-review-sidecar/restore', 'm6ReviewDrafts.clear()',
+        'OPERATOR_ASSERTED_NOT_ATTESTED',
+    ):
+        assert marker in html

@@ -117,6 +117,9 @@
   <div class="actions">
     <button id="m6ReviewSaveSku" type="button" class="secondary" disabled>暂存当前 SKU 的人工审核</button>
     <button id="m6ReviewExportSidecar" type="button" class="secondary" disabled>下载审核侧车 JSON</button>
+    <label for="m6ReviewImportFile">恢复审核草稿（本地 JSON）</label>
+    <input id="m6ReviewImportFile" type="file" accept=".json,application/json">
+    <button id="m6ReviewImportSidecar" type="button" class="secondary" disabled>校验并恢复审核草稿</button>
   </div>
   <p id="m6ReviewSidecarStatus" class="tip" aria-live="polite">
     暂存只在当前浏览器页面内有效。请显式下载后保存；不会覆盖冻结 CSV，不构成 M6 最终验收。
@@ -1535,6 +1538,8 @@ function resetM6OCRReview(){
   m6OcrReviewBatch=null;
   m6ReviewDrafts.clear();
   m6ReviewSource=null;
+  $('m6ReviewImportFile').value='';
+  $('m6ReviewImportSidecar').disabled=true;
   $('m6ReviewSaveSku').disabled=true;
   $('m6ReviewExportSidecar').disabled=true;
   $('m6ReviewSidecarStatus').textContent='暂存仅在当前页面内有效；请显式下载 JSON 保存，不会改写冻结 CSV。';
@@ -1568,6 +1573,7 @@ function drawM6OCRReview(data,batchId){
   }
   picker.value=data.selected_sku_id;
   picker.disabled=false;
+  $('m6ReviewImportSidecar').disabled=!$('m6ReviewImportFile').files.length;
   $('m6ReviewSaveSku').disabled=false;
   $('m6OcrReviewPanel').hidden=false;
   $('m6OcrReviewStatus').textContent='已核对冻结证据：'+data.sku_ids.length+
@@ -1724,6 +1730,64 @@ async function loadM6OCRReview(batchId,skuId=null){
       $('inspectM6OCR').disabled=lastBatchStatus!=='COMPLETED';
   }
 }
+$('m6ReviewImportFile').addEventListener('change',()=>{
+  $('m6ReviewImportSidecar').disabled=!(
+    m6ReviewSource&&currentBatchId===m6ReviewSource.batchId&&
+    $('m6ReviewImportFile').files.length
+  );
+});
+$('m6ReviewImportSidecar').addEventListener('click',async()=>{
+  const source=m6ReviewSource,batchId=currentBatchId;
+  const input=$('m6ReviewImportFile'),file=input.files?.[0];
+  if(!file||!source||source.batchId!==batchId||batchId!==m6OcrReviewBatch)return;
+  const button=$('m6ReviewImportSidecar');
+  button.disabled=true;
+  $('m6ReviewSidecarStatus').textContent='正在重新校验侧车与冻结 CSV、OCR 和图片哈希…';
+  try{
+    if(file.size===0||file.size>256*1024)
+      throw Error('JSON 文件为空或超过 256 KiB 限制');
+    const raw=await file.text();
+    if(currentBatchId!==batchId||m6ReviewSource!==source)return;
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+
+      '/m6-review-sidecar/restore',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:raw
+      });
+    const restored=await response.json();
+    if(currentBatchId!==batchId||m6ReviewSource!==source)return;
+    if(!response.ok)throw Error(errorText(restored));
+    if(restored.status!=='OPERATOR_ASSERTED_NOT_ATTESTED'||
+       restored.reviews_csv_sha256!==source.reviews_csv_sha256||
+       restored.ocr_capture_sha256!==source.ocr_capture_sha256)
+      throw Error('审核侧车身份与当前批次不一致');
+    const draft=new Map();
+    for(const row of restored.decisions||[]){
+      const key=row.sku_id+'/'+row.variant_id;
+      if(draft.has(key))throw Error('导入文件包含重复审核记录');
+      draft.set(key,{
+        sku_id:row.sku_id,variant_id:row.variant_id,
+        reviewer_alias:row.reviewer_alias,checks:row.checks,
+        overall_accept:row.manual_overall_label,overall_reason:row.overall_reason
+      });
+    }
+    if(draft.size!==restored.decision_count||draft.size===0)
+      throw Error('审核侧车的记录数量不一致');
+    // Commit atomically AFTER all server-side validation and local shape checks.
+    m6ReviewDrafts.clear();
+    for(const [key,row] of draft)m6ReviewDrafts.set(key,row);
+    $('m6ReviewExportSidecar').disabled=false;
+    input.value='';
+    $('m6ReviewSidecarStatus').textContent='已恢复 '+draft.size+
+      ' 条已核对草稿。它们仍是操作员声明，不代表人工验收或质量 PASS。';
+    await loadM6OCRReview(batchId,$('m6OcrSkuPicker').value);
+  }catch(err){
+    if(currentBatchId===batchId&&m6ReviewSource===source)
+      $('m6ReviewSidecarStatus').textContent='恢复失败，已保留当前草稿：'+err.message;
+  }finally{
+    if(currentBatchId===batchId&&m6ReviewSource===source)
+      button.disabled=!input.files.length;
+  }
+});
+
 function collectM6ReviewCard(card,skuId){
   const checks={};
   for(const input of card.querySelectorAll('select[data-m6-check]')){
