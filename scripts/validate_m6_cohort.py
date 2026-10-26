@@ -204,6 +204,7 @@ def validate_bundle(
     # Review snapshots only prove that a reviewed image matches the current
     # version. They do not prove that the original M5g product/background/receipt
     # remains unchanged. Reuse the same v1 integrity check as M6 preparation.
+    normalized_product_shas: dict[str, str] = {}
     for sku in sorted(expected_skus):
         journal_item = journal_rows.get(sku)
         if not isinstance(journal_item, dict):
@@ -215,7 +216,10 @@ def validate_bundle(
             continue
         try:
             verify_batch_artifact(poster_id, journal_item)
-        except BatchArtifactIntegrityError as exc:
+            normalized_product_shas[sku] = _sha(
+                (storage.poster_dir(poster_id) / "assets" / "product.png").read_bytes()
+            )
+        except (BatchArtifactIntegrityError, OSError) as exc:
             errors.append(f"{sku}: M5g 原始产物与执行凭据不一致：{exc}")
     if scope.get("batch_sku_count") != len(expected_skus):
         errors.append("M5g batch scope SKU 数与冻结 CSV 不一致")
@@ -237,8 +241,10 @@ def validate_bundle(
         journal_item = journal_rows.get(sku, {})
         if row["poster_id"] != journal_item.get("poster_id"):
             errors.append(f"{sku}: M5j manifest poster_id 与 M5g journal 不一致")
-        if row["product_sha256"] != journal_item.get("product_sha256"):
-            errors.append(f"{sku}: M5j manifest product_sha256 与 M5g journal 不一致")
+        # M5g hashes the original upload; M5j hashes the normalized PNG used
+        # to render/review. Compare like identities after receipt verification.
+        if row["product_sha256"] != normalized_product_shas.get(sku):
+            errors.append(f"{sku}: M5j manifest product_sha256 与已核验的 PNG 素材不一致")
         if not _is_sha(row["native_image_sha256"]):
             errors.append(f"{sku}: M5j manifest native_image_sha256 格式无效")
         if row["status"] != "READY":
