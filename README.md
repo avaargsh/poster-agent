@@ -35,6 +35,20 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 切换入口不会自动生成海报、运行 OCR 或批准审核。只有点击生成后才开始处理；批次完成与质量验收通过是两种独立状态。
 
+### 从本地工作台运行真实 M6 OCR（显式执行）
+
+先在支持的平台中安装项目的 OCR 可选依赖与 PaddlePaddle 运行时（PaddleOCR 3.x），预先准备本地检测模型和识别模型。将以下变量写入**本机** `.env`（不要提交模型、客户素材或本机路径）：
+
+```dotenv
+POSTER_M6_OCR_DET_MODEL_DIR=/absolute/path/to/detection-model
+POSTER_M6_OCR_REC_MODEL_DIR=/absolute/path/to/recognition-model
+POSTER_M6_OCR_DEVICE=cpu
+```
+
+完成网页批次并点击「准备离线审核包」后，展开「OCR 证据与标注工具」，确认就绪，再显式点击「运行本机 PaddleOCR」。本入口复用 `scripts.capture_m6_paddle_ocr.capture`，一次只允许一个任务，不接收网页传入的路径或命令；后台仅对冻结审核包中的两种版式执行 OCR，成功时原子写入不可覆盖的证据 JSON。页面中的状态仅存于当前服务进程，**中途重启后要检查证据是否已发布**，而不能假定任务成功；重试前须确认原文件未存在。
+
+若未安装官方版本或未配置两个本地模型目录，入口保持禁用。本功能没有对客户素材的授权判断，也不能将模型运行声明当作独立真实 OCR、人工审核或商品投放质量的证明。
+
 ## 已实现能力（以当前 main 为准）
 
 | 模块 | 当前能力 | 可信边界 |

@@ -1537,3 +1537,113 @@ def test_m6_workbench_assessment_controls_are_explicit_and_read_only():
         'quality_verified', 'm6ReviewDrafts',
     ):
         assert marker in page.text
+
+
+def test_m6_ocr_launch_is_explicitly_unavailable_without_local_models(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-capture"
+    assert client.get(endpoint).status_code == 409
+    assert client.post(endpoint).status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    monkeypatch.delenv("POSTER_M6_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("POSTER_M6_OCR_REC_MODEL_DIR", raising=False)
+    status = client.get(endpoint)
+    assert status.status_code == 200, status.text
+    assert status.json()["state"] == "NOT_CONFIGURED"
+    assert status.json()["ready_to_capture"] is False
+    assert status.json()["automatically_accepted"] is False
+    assert client.post(endpoint).status_code == 409
+
+
+def test_m6_ocr_launch_executes_existing_real_capture_only_after_user_post(
+    tmp_path, monkeypatch,
+):
+    import app.m6_ocr_capture_routes as routes
+    from scripts import capture_m6_paddle_ocr
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    frozen = (package / "m6_output_reviews.csv").read_bytes()
+    det, rec = tmp_path / "det", tmp_path / "rec"
+    det.mkdir()
+    rec.mkdir()
+    monkeypatch.setenv("POSTER_M6_OCR_DET_MODEL_DIR", str(det))
+    monkeypatch.setenv("POSTER_M6_OCR_REC_MODEL_DIR", str(rec))
+    monkeypatch.setenv("POSTER_M6_OCR_DEVICE", "cpu")
+    monkeypatch.setattr(routes, "_runtime_available", lambda: True)
+    calls = []
+
+    def fake_capture(*args, **kwargs):
+        calls.append((args, kwargs))
+        # The real implementation publishes this only after complete capture.
+        _seed_m6_ocr_capture_for_web(package)
+        return {"captured_variant_count": 4}
+
+    monkeypatch.setattr(capture_m6_paddle_ocr, "capture", fake_capture)
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-capture"
+    ready = client.get(endpoint)
+    assert ready.status_code == 200
+    assert ready.json()["state"] == "READY"
+    assert calls == []
+    started = client.post(endpoint)
+    assert started.status_code == 202, started.text
+    assert len(calls) == 1
+    assert calls[0][0] == (package, det, rec)
+    assert calls[0][1] == {"device": "cpu"}
+    after = client.get(endpoint)
+    assert after.status_code == 200
+    assert after.json()["state"] == "EVIDENCE_PRESENT_UNATTESTED"
+    assert after.json()["ready_to_capture"] is False
+    assert after.json()["quality_verified"] is False
+    assert after.json()["runtime_attested"] is False
+    assert client.post(endpoint).status_code == 409
+    assert (package / "m6_output_reviews.csv").read_bytes() == frozen
+
+
+def test_m6_ocr_launch_fails_closed_on_missing_capture_and_wrong_model_paths(
+    tmp_path, monkeypatch,
+):
+    import app.m6_ocr_capture_routes as routes
+    from scripts import capture_m6_paddle_ocr
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    det, rec = tmp_path / "det", tmp_path / "rec"
+    det.mkdir()
+    rec.mkdir()
+    monkeypatch.setenv("POSTER_M6_OCR_DET_MODEL_DIR", str(det))
+    monkeypatch.setenv("POSTER_M6_OCR_REC_MODEL_DIR", str(rec))
+    monkeypatch.setattr(routes, "_runtime_available", lambda: True)
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-capture"
+    monkeypatch.setenv("POSTER_M6_OCR_DET_MODEL_DIR", "../bad-relative-model")
+    assert client.get(endpoint).json()["state"] == "NOT_CONFIGURED"
+    assert client.post(endpoint).status_code == 409
+    monkeypatch.setenv("POSTER_M6_OCR_DET_MODEL_DIR", str(det))
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("local failing OCR engine")
+
+    monkeypatch.setattr(capture_m6_paddle_ocr, "capture", fail)
+    response = client.post(endpoint)
+    assert response.status_code == 202
+    status = client.get(endpoint)
+    assert status.status_code == 200
+    assert status.json()["state"] == "FAILED"
+    assert status.json()["quality_verified"] is False
+    assert "local failing OCR engine" not in status.text
+
+
+def test_m6_ocr_launch_button_and_preflight_status_are_available():
+    html = client.get("/")
+    assert html.status_code == 200
+    for marker in (
+        'id="captureM6OCR"', 'id="m6OCRCaptureStatus"',
+        '/m6-ocr-capture', "POSTER_M6_OCR_DET_MODEL_DIR",
+    ):
+        assert marker in html.text

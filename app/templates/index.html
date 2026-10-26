@@ -299,7 +299,11 @@ pre{max-width:100%}
 <section id="batchResults" class="batch-results" hidden><h3>生成完成，接下来检查海报</h3>
 <p class="tip">可逐张审核，也可下载含方形和 4:5 图片的审核包。生成完成不代表审核通过。</p><div class="actions"><button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button><button id="prepareM6Package" type="button" class="secondary" disabled>准备离线审核包</button><button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button></div>
 <p id="m6PackageStatus" class="tip" aria-live="polite">准备后可下载图片与待填审核表。</p>
-<details class="disclosure"><summary>OCR 证据与标注工具</summary><p id="m6OverlayStatus" class="tip" aria-live="polite">先准备审核包，再在本机采集 OCR 证据。</p><div class="actions"><button id="prepareM6Overlay" type="button" class="secondary" disabled>准备 OCR 标注预览</button><button id="downloadM6Overlay" type="button" class="secondary" disabled>下载 OCR 标注 ZIP</button><button id="inspectM6OCR" type="button" class="secondary" disabled>查看逐 SKU OCR 核对</button></div></details></section>
+<details class="disclosure"><summary>OCR 证据与标注工具</summary>
+<p id="m6OCRCaptureStatus" class="tip" aria-live="polite">OCR 尚未启动。先在本机配置 POSTER_M6_OCR_DET_MODEL_DIR 和 POSTER_M6_OCR_REC_MODEL_DIR，并预先安装 PaddleOCR 3.x、PaddlePaddle 与对应离线模型。</p>
+<div class="actions"><button id="captureM6OCR" type="button" class="secondary" disabled>显式运行本机 PaddleOCR（耗费 CPU/GPU）</button></div>
+<p class="tip">模型目录由本机环境变量指定；网页不会接受 Shell 命令或任意文件路径。采集证据不可覆盖；执行和标签均不构成真实质量验收。</p>
+<p id="m6OverlayStatus" class="tip" aria-live="polite">先准备审核包，再在本机采集 OCR 证据。</p><div class="actions"><button id="prepareM6Overlay" type="button" class="secondary" disabled>准备 OCR 标注预览</button><button id="downloadM6Overlay" type="button" class="secondary" disabled>下载 OCR 标注 ZIP</button><button id="inspectM6OCR" type="button" class="secondary" disabled>查看逐 SKU OCR 核对</button></div></details></section>
 <section id="m6OcrReviewPanel" class="mt" hidden aria-label="逐 SKU OCR 与人工标签核对">
   <h3>OCR 文字与人工标签逐项核对</h3>
   <p class="tip">内容来自本地冻结的审核 CSV 和 OCR 证据；仅供人工检查，不能据此自动批准海报或证明真实模型执行。</p>
@@ -1736,6 +1740,8 @@ async function refreshM6PackageStatus(batchId){
     $('downloadM6Package').disabled=!result.prepared;
     if(result.prepared)refreshM6OverlayStatus(batchId);
     else{
+      $('captureM6OCR').disabled=true;
+      $('m6OCRCaptureStatus').textContent='请先生成 M6 审核包，再检查本机 OCR 模型与运行环境。';
       $('prepareM6Overlay').disabled=true;
       $('downloadM6Overlay').disabled=true;
       $('m6OverlayStatus').textContent='请先生成 M6 审核包并在本机采集 OCR 证据。';
@@ -1748,6 +1754,8 @@ async function refreshM6PackageStatus(batchId){
     if(currentBatchId===batchId){
       $('prepareM6Package').disabled=true;
       $('downloadM6Package').disabled=true;
+      $('captureM6OCR').disabled=true;
+      $('m6OCRCaptureStatus').textContent='M6 审核包预检未通过，无法执行 OCR。';
       $('prepareM6Overlay').disabled=true;
       $('downloadM6Overlay').disabled=true;
       label.textContent='M6 审核包预检未通过：'+err.message;
@@ -2259,7 +2267,64 @@ $('m6OcrSkuPicker').addEventListener('change',()=>{
     loadM6OCRReview(currentBatchId,$('m6OcrSkuPicker').value);
 });
 
-async function refreshM6OverlayStatus(batchId){
+let m6OCRCaptureTimer=null;
+async function refreshM6OCRCaptureStatus(batchId){
+  if(currentBatchId!==batchId)return;
+  const button=$('captureM6OCR'),label=$('m6OCRCaptureStatus');
+  button.disabled=true;
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-ocr-capture');
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    button.disabled=!result.ready_to_capture;
+    const states={
+      NOT_CONFIGURED:'无法运行：本机缺 PaddleOCR 3.x/PaddlePaddle，或未配置有效的检测、识别模型绝对路径。请设置 POSTER_M6_OCR_DET_MODEL_DIR、POSTER_M6_OCR_REC_MODEL_DIR。',
+      READY:'本机 OCR 已就绪。点击按钮后将离线运行整批方形和 4:5 海报，不会自动审批。',
+      BUSY:'已有另一批本机 OCR 任务执行中；不能同时发起新任务。',
+      RUNNING:'本批 OCR 正在本机执行；源图片和冻结 CSV 不会修改。',
+      EVIDENCE_PRESENT_UNATTESTED:'已检测到完整且 SHA 一致的 OCR 采集声明；不能据此证明真实执行或质量通过。可继续生成标注并人工核对。',
+      FAILED:'本次 OCR 采集失败；没有发布成功证据。请检查本地服务日志、模型和图片。',
+      FAILED_NO_EVIDENCE:'OCR 未发布完整证据；检查本地日志后可重试。',
+      BLOCKED:'本批 OCR 证据已存在但格式或摘要不匹配；禁止覆盖，请核查原始数据。'
+    };
+    label.textContent=states[result.state]||'OCR 状态：'+result.state;
+    if(result.state==='RUNNING'){
+      if(m6OCRCaptureTimer)clearTimeout(m6OCRCaptureTimer);
+      m6OCRCaptureTimer=setTimeout(()=>refreshM6OCRCaptureStatus(batchId),2500);
+    }else if(m6OCRCaptureTimer){
+      clearTimeout(m6OCRCaptureTimer);m6OCRCaptureTimer=null;
+    }
+    if(result.state==='EVIDENCE_PRESENT_UNATTESTED')refreshM6OverlayStatus(batchId,true);
+  }catch(err){
+    if(currentBatchId===batchId){
+      button.disabled=true;
+      label.textContent='本地 OCR 预检失败：'+err.message;
+    }
+  }
+}
+$('captureM6OCR').addEventListener('click',async()=>{
+  const batchId=currentBatchId;
+  if(!batchId||lastBatchStatus!=='COMPLETED'||$('captureM6OCR').disabled)return;
+  $('captureM6OCR').disabled=true;
+  $('m6OCRCaptureStatus').textContent='正在提交整批 PaddleOCR 采集任务；不会自动批准海报…';
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-ocr-capture',{method:'POST'});
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    $('m6OCRCaptureStatus').textContent='本机 OCR 已启动。采集期间不能再次运行或覆盖原证据。';
+    refreshM6OCRCaptureStatus(batchId);
+  }catch(err){
+    if(currentBatchId===batchId){
+      $('m6OCRCaptureStatus').textContent='无法启动 OCR：'+err.message;
+      refreshM6OCRCaptureStatus(batchId);
+    }
+  }
+});
+
+async function refreshM6OverlayStatus(batchId,skipCapture=false){
+  if(!skipCapture)refreshM6OCRCaptureStatus(batchId);
   if(currentBatchId!==batchId)return;
   const label=$('m6OverlayStatus');
   label.textContent='正在检查本机 OCR 标注预览文件状态…';
