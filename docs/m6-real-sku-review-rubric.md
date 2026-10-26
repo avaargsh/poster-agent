@@ -99,6 +99,23 @@ uv run --locked python -m scripts.prepare_m6_review \
 - 生成的 CSV 与图片放在**同一目录**下，评审表中图片路径相对 CSV；不要单独移动 CSV。生成的 CSV 仍是草稿，后续应在此基础上填写人工判断、运行 M5j 和本地 M6 证据门禁。
 - 目录位于 `data/eval_runs/` 并被 Git 忽略。不要把图片、填充后的 CSV、源路径和授权证明提交到公开仓库。
 
+### M6 已绑定图片与模型的真实 OCR 采集（CLI）
+
+先准备上述 M6 本地审核包。安装适合自己 OS/架构的 PaddlePaddle，并安装 `pyproject.toml` 中可选的 `ocr` extra（PaddleOCR 3.3.0）。只有在两个**现有**模型目录已准备且适配当前 PaddleOCR / PaddlePaddle 版本时，才执行：
+
+```bash
+uv sync --locked --extra ocr
+uv run --locked --extra ocr python -m scripts.capture_m6_paddle_ocr \
+  --package-dir data/eval_runs/web_batches/<BATCH_ID>/m6_review_package \
+  --det-model-dir /absolute/path/to/real/detection-model \
+  --rec-model-dir /absolute/path/to/real/recognition-model \
+  --device cpu
+```
+
+采集脚本在本机有界读取 `m6_output_reviews.csv` 与当前图片，检查完整 SKU×方形/4:5 行、同一 SKU 的来源哈希一致性，强制 PNG SHA-256 和 1024×1024 / 1080×1350 尺寸匹配，并记录 PaddleOCR 3.x 实际 `predict()` 的 `rec_texts/rec_scores`、OCR/运行时版本、模型目录 SHA-256 指纹、耗时与每个输出的 SHA。任何失配/推理失败会阻断整个批次，不发布部分 `m6_paddle_ocr_evidence.json`；已有文件不可覆盖。
+
+**这仍是证据采集，不是评分。** `CAPTURED_REVIEW_REQUIRED` 明确要求人工和规格核对，不代表价格正确、文字位置正确或海报可投放。单独的 `m6_paddle_ocr_evidence.json` 还没有自动接入现有 `validate_m6_cohort` 的最终证据门禁，不能单凭它宣称通过 M5j/M6。文件包含识别出的敏感文案，仅在本机 Git 忽略目录保存，不要公开提交。使用显式模型路径并不构成绝对断网保证；严格离线运行须通过系统或容器网络策略阻断出站连接。Mac M1 的 PaddlePaddle 可用性须与官方安装矩阵核对，必要时用 Linux CPU 环境执行；单元测试使用注入的假引擎，并不代表真实模型已运行。
+
 ### 从网页下载离线审核包 ZIP
 
 完成网页 M6 审核包准备后，点击「下载审核包 ZIP」即可获取本机生成的 CSV、准备摘要与当前审核表中列出的两种版式 PNG，不必手动查找 `POSTER_BATCH_DIR`。接口 `GET /api/batches/{batch_id}/m6-package/download` 只读，仅对完整且已有审核包的网页批次有效。它先验证原始批次的产物凭据、所需审核行和图片摘要，再生成安全 ZIP：每张 PNG ≤20 MiB，CSV/JSON ≤2 MB，全部文件解压后总计不超过 256 MiB。**额外的未登记文件不会打包**，避免把本机私有文件意外带出；路径穿越、符号链接、文件损坏或超限会阻止下载。
