@@ -366,3 +366,35 @@ def test_overall_fail_with_all_fields_pass_is_reported_for_manual_reconciliation
     assert report["status"] == "PASS"
     assert report["field_overall_mismatch_count"] == 1
     assert any("最终人工汇总中复核原因" in warning for warning in report["warnings"])
+
+
+@pytest.mark.parametrize("artifact", ["product", "background", "receipt"])
+def test_m6_gate_rejects_changed_original_m5g_artifact(
+    tmp_path, monkeypatch, artifact,
+):
+    """Review hashes alone must not hide changes to the original M5g receipt."""
+    bundle = _bundle(tmp_path, monkeypatch)
+    journal = json.loads(bundle["journal"].read_text(encoding="utf-8"))
+    poster_id = journal["rows"]["sku-01"]["poster_id"]
+    poster_dir = storage.poster_dir(poster_id)
+
+    if artifact == "receipt":
+        meta_path = poster_dir / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["execution_receipt"]["key"] = "a-different-paid-job"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    else:
+        path = poster_dir / "assets" / f"{artifact}.png"
+        with Image.open(path) as original:
+            dimensions = original.size
+        # Preserve format and dimensions: the bytes change while the reviewed
+        # square PNG, spec and M5j manifest remain untouched.
+        Image.new("RGB", dimensions, "#ab4c32").save(path, format="PNG")
+
+    report = _validate(bundle)
+
+    assert report["status"] == "BLOCKED"
+    assert any(
+        "M5g 原始产物与执行凭据不一致" in error
+        for error in report["errors"]
+    )

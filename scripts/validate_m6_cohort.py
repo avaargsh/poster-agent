@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 from app import storage
+from app.batch_artifact_integrity import BatchArtifactIntegrityError, verify_batch_artifact
 from evals.native_batch_scope import load_batch_scope
 from scripts.real_sku_batch import BatchError, preflight
 
@@ -189,6 +190,22 @@ def validate_bundle(
         errors.append("M5g expected_sku_count 与冻结 CSV 的 SKU 数不一致")
     if set(journal_rows) != expected_skus:
         errors.append("M5g rows 与冻结 CSV 的 SKU 集合不一致")
+    # Review snapshots only prove that a reviewed image matches the current
+    # version. They do not prove that the original M5g product/background/receipt
+    # remains unchanged. Reuse the same v1 integrity check as M6 preparation.
+    for sku in sorted(expected_skus):
+        journal_item = journal_rows.get(sku)
+        if not isinstance(journal_item, dict):
+            errors.append(f"{sku}: M5g journal 缺少有效产物记录")
+            continue
+        poster_id = journal_item.get("poster_id")
+        if not isinstance(poster_id, str):
+            errors.append(f"{sku}: M5g journal poster_id 无效")
+            continue
+        try:
+            verify_batch_artifact(poster_id, journal_item)
+        except BatchArtifactIntegrityError as exc:
+            errors.append(f"{sku}: M5g 原始产物与执行凭据不一致：{exc}")
     if scope.get("batch_sku_count") != len(expected_skus):
         errors.append("M5g batch scope SKU 数与冻结 CSV 不一致")
     native_by_sku: dict[str, dict] = {}
