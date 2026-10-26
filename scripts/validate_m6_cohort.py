@@ -10,6 +10,8 @@ import argparse
 import csv
 import hashlib
 import io
+import os
+import tempfile
 import json
 import re
 from collections import Counter
@@ -574,6 +576,37 @@ def _safe_report_destination(output: Path, inputs: tuple[Path, ...]) -> Path:
     return destination
 
 
+def _publish_report(destination: Path, payload: bytes) -> None:
+    """Write the complete report before publishing it under an exclusive name.
+
+    The earlier destination preflight is for clear errors, not race safety:
+    hard-linking a completed temporary file rejects a competing publisher
+    without opening or truncating the existing evidence.
+    """
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=".m6-report-",
+            suffix=".tmp",
+            mode="w+b",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            os.chmod(temporary, 0o600)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, destination, follow_symlinks=False)
+    except FileExistsError as exc:
+        raise M6ValidationError(
+            "报告输出文件已存在；禁止覆盖此前或其他进程发布的 M6 证据"
+        ) from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate the local M6 real-SKU evidence bundle; no OCR/model calls"
@@ -620,7 +653,10 @@ def main() -> int:
         }
     destination.parent.mkdir(parents=True, exist_ok=True)
     raw = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    destination.write_bytes(raw)
+    try:
+        _publish_report(destination, raw)
+    except (OSError, M6ValidationError) as exc:
+        parser.exit(2, f"M6 证据报告保存失败：{exc}\n")
     print(json.dumps({**report, "report_sha256": _sha(raw)}, ensure_ascii=False, indent=2))
     return 0 if report["status"] == "PASS" else 2
 

@@ -14,6 +14,7 @@ from scripts import real_sku_batch as batch
 from scripts.validate_m6_cohort import (
     M6ValidationError,
     _safe_report_destination,
+    _publish_report,
     validate_bundle,
 )
 
@@ -590,3 +591,58 @@ def test_legacy_metadata_mode_labels_ocr_not_assessed_explicitly(tmp_path, monke
     assert report["ocr_capture_consistency"] == "NOT_ASSESSED"
     assert report["ocr_runtime_attested"] is False
     assert report["real_ocr_quality_verified"] is False
+
+
+def test_m6_report_publication_writes_exact_bytes_without_temp_leftovers(tmp_path):
+    output = tmp_path / "audits" / "report.json"
+    output.parent.mkdir()
+    payload = b'{"status":"BLOCKED","reason":"synthetic"}\n'
+    _publish_report(output, payload)
+    assert output.read_bytes() == payload
+    assert not list(output.parent.glob(".m6-report-*.tmp"))
+
+
+def test_m6_report_publication_never_overwrites_existing_evidence(tmp_path):
+    output = tmp_path / "report.json"
+    output.write_bytes(b"original evidence")
+    with pytest.raises(M6ValidationError, match="已存在"):
+        _publish_report(output, b"replacement")
+    assert output.read_bytes() == b"original evidence"
+    assert not list(tmp_path.glob(".m6-report-*.tmp"))
+
+
+def test_m6_report_publication_is_safe_when_target_appears_during_publish(
+    tmp_path, monkeypatch,
+):
+    """The precheck can race; the final operation must still be no-clobber."""
+    import os
+
+    output = _safe_report_destination(
+        tmp_path / "report.json", (tmp_path / "source.csv",),
+    )
+    original_link = os.link
+
+    def racing_link(src, dst, *, follow_symlinks=True):
+        Path(dst).write_bytes(b"other writer's finished evidence")
+        return original_link(src, dst, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, "link", racing_link)
+    with pytest.raises(M6ValidationError, match="已存在"):
+        _publish_report(output, b"our later output")
+    assert output.read_bytes() == b"other writer's finished evidence"
+    assert not list(tmp_path.glob(".m6-report-*.tmp"))
+
+
+def test_m6_report_publication_cleans_temporary_file_on_link_error(
+    tmp_path, monkeypatch,
+):
+    import os
+
+    def inaccessible_target(*args, **kwargs):
+        raise PermissionError("simulated denied publication")
+
+    monkeypatch.setattr(os, "link", inaccessible_target)
+    with pytest.raises(PermissionError, match="denied publication"):
+        _publish_report(tmp_path / "report.json", b"not completed")
+    assert not (tmp_path / "report.json").exists()
+    assert not list(tmp_path.glob(".m6-report-*.tmp"))
