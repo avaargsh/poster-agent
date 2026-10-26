@@ -60,6 +60,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **M5j 已支持按导入批次独立评分：** 使用 `uv run --locked python -m scripts.native_trial --reviewer local-operator --batch-journal data/eval_runs/m5g_import/batch_import_results.json` 仅盘点本批次最新 SKU 版本；全批 READY 后显式 `--score`，结果附带批次账本 SHA 和 SKU 清单。缺一个样本也不会自动缩小分母。详见 [M5j 批次独立评测](docs/m5j-batch-evaluation.md)。
 
+**M6 严格 OCR 采集一致性门禁：** `scripts.validate_m6_cohort` 新增可选 `--ocr-evidence <m6_paddle_ocr_evidence.json>` 和 `--require-ocr-evidence`。严格模式下，缺文件、过期/模拟的捕获结果、SKU×版式缺口、评审 CSV 哈希或图片身份失配都会 `BLOCKED`；通过也仅表示本地 JSON 与冻结评审记录一致（`MATCHED_DECLARED_REAL`），**不证明真实模型执行和识别准确率**。默认兼容原有元数据门禁，但明确标记 `ocr_capture_consistency=NOT_ASSESSED`。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
+
 **M6 真实 OCR 批次证据采集：** 新增 `scripts.capture_m6_paddle_ocr`，在本机对 M6 审核包的方形/4:5 PNG 用已安装的 PaddleOCR 3.x 和明确指定的检测、识别模型目录做真实识别；记录两种版式每张图的 SHA-256、OCR 文本/置信度、模型文件指纹和环境耗时。它拒绝不一致或篡改过的 CSV/图片，仅写入 `CAPTURED_REVIEW_REQUIRED` 的本地私有证据，**不会自动将任何结果判为 PASS、不会主动做模型下载，也不代替 20 个真实 SKU 的最终门禁**。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
 
 **M6 真实 SKU 评测准备：** 已提供 M5g 生成清单、授权治理表、人工审核工作表和本地证据门禁；`scripts.prepare_m6_review` 可在本地工作台运行期间直接复用导出逻辑，从完整 M5g 批次记录的精确海报版本离线生成方图及原生 4:5 图（即使之后编辑出了 v2，也不会悄悄改评 v2），不会再次启动 ASGI 服务，并生成全部为 `UNVERIFIED` 的本地审核草稿，`scripts.validate_m6_cohort` 则检查版本、创建凭据与本地图片/规格哈希以及 M5j 证据范围。两者都不运行真实 OCR、不调用收费模型、不替代人工验收。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。

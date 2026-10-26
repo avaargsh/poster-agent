@@ -478,3 +478,115 @@ def test_m6_gate_reports_decompression_bomb_as_blocker(tmp_path, monkeypatch):
 
     assert report["status"] == "BLOCKED"
     assert any("输出 PNG 不可读取" in error for error in report["errors"])
+
+
+def _mock_ocr_evidence(bundle, tmp_path):
+    """Local declaration fixture, NOT proof that real PaddleOCR was executed."""
+    rows = bundle["review_rows"]
+    data = {
+        "schema_version": "m6-paddle-ocr-evidence-1",
+        "cohort_id": rows[0]["cohort_id"],
+        "reviews_csv_sha256": _sha(bundle["reviews"]),
+        "sku_count": len(rows) // 2,
+        "expected_variant_count": len(rows),
+        "captured_variant_count": len(rows),
+        "real_ocr_inference_attempted": True,
+        "paddleocr_version": "3.3.0",
+        "paddlepaddle_version": "3.2.0",
+        "model_digests": {
+            "detection": {"sha256": "a" * 64, "file_count": 1, "total_bytes": 3},
+            "recognition": {"sha256": "b" * 64, "file_count": 1, "total_bytes": 3},
+        },
+        "automatically_accepted": False,
+        "human_review_performed": False,
+        "source_authorizations_verified": False,
+        "min_20_real_skus_proven": False,
+        "captured_at_utc": "2026-10-26T05:00:00Z",
+        "elapsed_seconds": 0.2,
+        "observations": [
+            {
+                "sku_id": row["sku_id"],
+                "variant_id": row["variant_id"],
+                "poster_id": row["poster_id"],
+                "image_sha256": row["output_image_sha256"],
+                "status": "CAPTURED_REVIEW_REQUIRED",
+                "recognized_lines": [],
+                "recognized_line_count": 0,
+            }
+            for row in rows
+        ],
+    }
+    path = tmp_path / "m6_paddle_ocr_evidence.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path, data
+
+
+def test_strict_ocr_gate_missing_file_blocks_without_forgetting_denominator(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True,
+    )
+    assert report["status"] == "BLOCKED"
+    assert report["ocr_capture_consistency"] == "NOT_ASSESSED"
+    assert report["expected_output_count"] == 4
+    assert report["ocr_runtime_attested"] is False
+    assert any("OCR" in error for error in report["errors"])
+
+
+def test_strict_ocr_gate_matches_declared_capture_but_not_real_runtime_or_quality(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+    )
+    assert report["status"] == "PASS"
+    assert report["ocr_capture_consistency"] == "MATCHED_DECLARED_REAL"
+    assert report["ocr_capture_observation_count"] == 4
+    assert report["input_sha256"]["ocr_capture"] == _sha(evidence)
+    assert report["ocr_runtime_attested"] is False
+    assert report["product_quality_score_computed"] is False
+    assert report["real_ocr_quality_verified"] is False
+    assert report["ocr_inference_performed"] is False
+
+
+def test_strict_ocr_gate_rejects_stale_reviews_and_fake_capture(tmp_path, monkeypatch):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, data = _mock_ocr_evidence(bundle, tmp_path)
+    data["real_ocr_inference_attempted"] = False
+    evidence.write_text(json.dumps(data), encoding="utf-8")
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+    )
+    assert report["status"] == "BLOCKED"
+    assert report["ocr_capture_consistency"] == "BLOCKED"
+    assert any("OCR" in error for error in report["errors"])
+    data["real_ocr_inference_attempted"] = True
+    evidence.write_text(json.dumps(data), encoding="utf-8")
+    bundle["review_rows"][0]["overall_reason"] = "updated human note"
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, bundle["review_rows"])
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+    )
+    assert report["status"] == "BLOCKED"
+    assert report["ocr_capture_consistency"] == "BLOCKED"
+
+
+def test_legacy_metadata_mode_labels_ocr_not_assessed_explicitly(tmp_path, monkeypatch):
+    bundle = _bundle(tmp_path, monkeypatch)
+    report = _validate(bundle)
+    assert report["status"] == "PASS"
+    assert report["ocr_capture_consistency"] == "NOT_ASSESSED"
+    assert report["ocr_runtime_attested"] is False
+    assert report["real_ocr_quality_verified"] is False

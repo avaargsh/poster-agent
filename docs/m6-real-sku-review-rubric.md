@@ -99,6 +99,29 @@ uv run --locked python -m scripts.prepare_m6_review \
 - 生成的 CSV 与图片放在**同一目录**下，评审表中图片路径相对 CSV；不要单独移动 CSV。生成的 CSV 仍是草稿，后续应在此基础上填写人工判断、运行 M5j 和本地 M6 证据门禁。
 - 目录位于 `data/eval_runs/` 并被 Git 忽略。不要把图片、填充后的 CSV、源路径和授权证明提交到公开仓库。
 
+### 将 M6 OCR 采集绑定至最终本地证据门禁
+
+在完成原有 M5g 账本、M6 授权与人工审核 CSV、M5j native manifest 和 readiness 核验之后，可显式开启**严格 OCR 采集一致性模式**。完整 `validate_m6_cohort` 命令保留已有必填参数，并追加：
+
+```bash
+uv run --locked python -m scripts.validate_m6_cohort \
+  --manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
+  --journal data/eval_runs/web_batches/<BATCH_ID>/batch_import_results.json \
+  --reviews data/eval_runs/web_batches/<BATCH_ID>/m6_review_package/m6_output_reviews.csv \
+  --native-manifest data/eval_runs/m6_native_trial_001/native_trial_manifest.csv \
+  --readiness data/eval_runs/m6_native_trial_001/native_trial_readiness.json \
+  --ocr-evidence data/eval_runs/web_batches/<BATCH_ID>/m6_review_package/m6_paddle_ocr_evidence.json \
+  --require-ocr-evidence \
+  --output data/eval_runs/m6_validation_ocr_001/report.json
+```
+
+指定 `--require-ocr-evidence` 却缺少文件会返回 `BLOCKED`（退出码 2）；OCR 文件超 8 MiB、符号链接、非官方 schema、模拟引擎标记、跨 cohort、旧评审 CSV SHA、缺少或重复的方形/4:5 行、错误 PNG 摘要/海报 ID、无效识别行/置信度或异常模型指纹声明都会阻断。校验**不调用 OCR**、不重新加载模型，也不修改任何输入；报告保留 `expected_output_count` 原始分母，并新增 `ocr_capture_consistency`、`ocr_capture_observation_count`、`input_sha256.ocr_capture`。
+
+不传 `--ocr-evidence` 的旧调用仍只做历史元数据/文件校验，报告显式标记 `ocr_capture_consistency=NOT_ASSESSED`；此种 `PASS` **不能当作 OCR 通过**。指定匹配采集文件时可能标记 `MATCHED_DECLARED_REAL`，但 `real_ocr_inference_attempted` 是操作者可编辑 JSON 中的声明，模型文件哈希也是采集时的本地记录；两者都不是可信硬件签名或独立执行证明。因此不论本地文件是否匹配，`ocr_runtime_attested=false`、`real_ocr_quality_verified=false`，不计算文字正确率、价格坐标准确率或产品投放资格。应另行结合 M5j 原始推理报告、真实 SKU 素材授权和人工视觉审核检查。
+
+**操作顺序：** 完成人工审核 CSV 的修改后，冻结该文件、再执行 OCR 采集。采集文件绑定 `reviews_csv_sha256`；如果后续任何人工标签改变，严格门禁会拒绝旧 OCR 证据，必须保留旧报告并重新采集一份新的完整证据，不得直接修改 JSON 以绕过冻结绑定。
+
 ### M6 已绑定图片与模型的真实 OCR 采集（CLI）
 
 先准备上述 M6 本地审核包。安装适合自己 OS/架构的 PaddlePaddle，并安装 `pyproject.toml` 中可选的 `ocr` extra（PaddleOCR 3.3.0）。只有在两个**现有**模型目录已准备且适配当前 PaddleOCR / PaddlePaddle 版本时，才执行：
@@ -114,7 +137,7 @@ uv run --locked --extra ocr python -m scripts.capture_m6_paddle_ocr \
 
 采集脚本在本机有界读取 `m6_output_reviews.csv` 与当前图片，检查完整 SKU×方形/4:5 行、同一 SKU 的来源哈希一致性，强制 PNG SHA-256 和 1024×1024 / 1080×1350 尺寸匹配，并记录 PaddleOCR 3.x 实际 `predict()` 的 `rec_texts/rec_scores`、OCR/运行时版本、模型目录 SHA-256 指纹、耗时与每个输出的 SHA。任何失配/推理失败会阻断整个批次，不发布部分 `m6_paddle_ocr_evidence.json`；已有文件不可覆盖。
 
-**这仍是证据采集，不是评分。** `CAPTURED_REVIEW_REQUIRED` 明确要求人工和规格核对，不代表价格正确、文字位置正确或海报可投放。单独的 `m6_paddle_ocr_evidence.json` 还没有自动接入现有 `validate_m6_cohort` 的最终证据门禁，不能单凭它宣称通过 M5j/M6。文件包含识别出的敏感文案，仅在本机 Git 忽略目录保存，不要公开提交。使用显式模型路径并不构成绝对断网保证；严格离线运行须通过系统或容器网络策略阻断出站连接。Mac M1 的 PaddlePaddle 可用性须与官方安装矩阵核对，必要时用 Linux CPU 环境执行；单元测试使用注入的假引擎，并不代表真实模型已运行。
+**这仍是证据采集，不是评分。** `CAPTURED_REVIEW_REQUIRED` 明确要求人工和规格核对，不代表价格正确、文字位置正确或海报可投放。`m6_paddle_ocr_evidence.json` 现在可通过上述 `--ocr-evidence --require-ocr-evidence` 参数在 `validate_m6_cohort` 中进行一致性核验，但它仍不能单独证明真实模型执行、OCR 正确率或 M5j/M6 质量验收。文件包含识别出的敏感文案，仅在本机 Git 忽略目录保存，不要公开提交。使用显式模型路径并不构成绝对断网保证；严格离线运行须通过系统或容器网络策略阻断出站连接。Mac M1 的 PaddlePaddle 可用性须与官方安装矩阵核对，必要时用 Linux CPU 环境执行；单元测试使用注入的假引擎，并不代表真实模型已运行。
 
 ### 从网页下载离线审核包 ZIP
 

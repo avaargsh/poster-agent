@@ -22,6 +22,7 @@ from app import storage
 from app.batch_artifact_integrity import BatchArtifactIntegrityError, verify_batch_artifact
 from evals.native_batch_scope import load_batch_scope
 from scripts.real_sku_batch import BatchError, preflight
+from scripts.verify_m6_ocr_capture import OCRCaptureEvidenceError, verify_ocr_capture
 
 SCHEMA = "m6-validation-1"
 MIN_SKUS = 20
@@ -142,6 +143,8 @@ def validate_bundle(
     readiness: Path,
     *,
     min_skus: int = MIN_SKUS,
+    ocr_evidence: Path | None = None,
+    require_ocr_evidence: bool = False,
 ) -> dict:
     """Validate the full M6 local evidence bundle without mutating its inputs."""
     manifest_path = Path(manifest)
@@ -489,12 +492,44 @@ def validate_bundle(
         for label in LABELS:
             overall_counts[variant].setdefault(label, 0)
 
+    # Strict mode binds a separately captured PaddleOCR JSON to the exact M6
+    # worksheet snapshot and each expected SKU × variant. The capture's
+    # 'real_ocr_inference_attempted' remains an UNTRUSTED local declaration.
+    capture_status = "NOT_ASSESSED"
+    capture_observation_count = 0
+    capture_sha = None
+    if ocr_evidence is None:
+        if require_ocr_evidence:
+            errors.append("M6 OCR 严格门禁缺少 --ocr-evidence 输入")
+        else:
+            warnings.append("M6 OCR 采集证据未核验；本次仅评估传统元数据/文件门禁")
+    else:
+        try:
+            checked = verify_ocr_capture(
+                Path(ocr_evidence), review_rows,
+                cohort_id=cohort_id, reviews_sha256=reviews_sha,
+            )
+            capture_status = checked["status"]
+            capture_observation_count = checked["observation_count"]
+            capture_sha = checked["evidence_sha256"]
+            warnings.append(
+                "OCR capture 与评审快照一致，但模型执行声明/指纹不构成独立运行证明；"
+                "仍须核对真实 PaddleOCR/M5j 证据及人工质量"
+            )
+        except (OCRCaptureEvidenceError, OSError, ValueError) as exc:
+            capture_status = "BLOCKED"
+            errors.append(f"M6 OCR 采集一致性门禁失败：{exc}")
+
     report = {
         "schema_version": SCHEMA,
         "status": "PASS" if not errors else "BLOCKED",
         "scope": "local_metadata_and_evidence_integrity_only",
         "product_quality_score_computed": False,
         "ocr_inference_performed": False,
+        "ocr_capture_consistency": capture_status,
+        "ocr_capture_observation_count": capture_observation_count,
+        "ocr_runtime_attested": False,
+        "real_ocr_quality_verified": False,
         "paid_model_calls": 0,
         "minimum_skus_required": min_skus,
         "expected_sku_count": len(expected_skus),
@@ -515,12 +550,14 @@ def validate_bundle(
             "output_reviews": reviews_sha,
             "m5j_native_manifest": native_manifest_sha,
             "m5j_readiness": readiness_sha,
+            **({"ocr_capture": capture_sha} if capture_sha is not None else {}),
         },
         "warnings": warnings,
         "errors": errors,
         "limitations": [
             "Registry authorization and distinct-SKU fields are operator-supplied assertions, not signed proof.",
-            "M5j readiness metadata is not cryptographic attestation that a real OCR engine ran.",
+            "M5j readiness and optional M6 OCR capture metadata are not cryptographic attestation that a real OCR engine ran.",
+            "OCR capture consistency validates local declarations and hashes only; it neither runs PaddleOCR nor checks text accuracy.",
             "PASS means evidence metadata and files passed these checks; it is not a product-quality or production-readiness claim.",
         ],
     }
@@ -548,20 +585,27 @@ def main() -> int:
     parser.add_argument("--native-manifest", type=Path, required=True,
                         help="M5j native_trial_manifest.csv; binds reviewed PNG to OCR/review evidence")
     parser.add_argument("--readiness", type=Path, required=True, help="M5j native_trial_readiness.json")
+    parser.add_argument("--ocr-evidence", type=Path, default=None,
+                        help="Optional M6 PaddleOCR capture JSON, validated against frozen reviews")
+    parser.add_argument("--require-ocr-evidence", action="store_true",
+                        help="BLOCKED unless a complete matching declared-real OCR capture is supplied")
     parser.add_argument("--output", type=Path, required=True, help="Local JSON report destination")
     args = parser.parse_args()
     try:
         destination = _safe_report_destination(
             args.output,
             (args.manifest, args.registry, args.journal, args.reviews,
-             args.native_manifest, args.readiness),
+             args.native_manifest, args.readiness)
+            + ((args.ocr_evidence,) if args.ocr_evidence else ()),
         )
     except M6ValidationError as exc:
         parser.error(str(exc))
     try:
         report = validate_bundle(
             args.manifest, args.registry, args.journal, args.reviews,
-            args.native_manifest, args.readiness
+            args.native_manifest, args.readiness,
+            ocr_evidence=args.ocr_evidence,
+            require_ocr_evidence=args.require_ocr_evidence,
         )
     except (M6ValidationError, BatchError, OSError, ValueError, json.JSONDecodeError) as exc:
         report = {
