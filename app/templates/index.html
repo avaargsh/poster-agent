@@ -133,6 +133,15 @@
 </div>
 <div id="cliBatchJournalRows" class="execution-history" aria-live="polite"></div>
 </section>
+<section id="m6ReviewProgress" style="margin-bottom:24px">
+<h2>M6 · 本地评测进度预览</h2>
+<p class="tip">选择由 scripts.prepare_m6_review 生成并由人工填写的两个 CSV。点击后只传给本机服务在内存中统计，不留存 CSV、不访问图片路径，也不会执行 OCR 或收费模型。此处“完成”只指人工表格填写状态，不能代替最终 M6 证据门禁。</p>
+<div class="row"><label for="m6RegistryCsv">M6 cohort registry CSV（授权与 SKU 独立性记录）</label><input id="m6RegistryCsv" type="file" accept=".csv,text/csv"></div>
+<div class="row"><label for="m6ReviewsCsv">M6 output reviews CSV（方形 + 4:5 人工审核记录）</label><input id="m6ReviewsCsv" type="file" accept=".csv,text/csv"></div>
+<div class="actions"><button id="checkM6Progress" type="button" class="secondary">查看本地评测进度</button></div>
+<p id="m6ProgressSummary" class="tip" aria-live="polite">尚未加载 M6 CSV；不会自动判断 OCR 或图片质量。</p>
+<div id="m6ProgressIssues" class="execution-history" aria-live="polite"></div>
+</section>
 <section id="trialQueue" style="margin-bottom:24px">
 <h2>本地 4:5 验收队列</h2>
 <p class="tip">复用当前人工审核员代号（下方“4:5 原生海报人工验收”中可修改）。按版式独立列出最新版本的人工审核与 OCR 状态。READY 表示当前选中版式的人工审核与 OCR 证据齐备，可在 M5e 中指定相同的 --variant 单独评分；两种版式的标签与报告不能混用，也都不代表可投放。</p>
@@ -1202,6 +1211,57 @@ $('saveHuman').addEventListener('click',async()=>{
       $('saveHuman').disabled=false;
   }
 });
+const M6_ISSUE_LABELS={
+  GOVERNANCE_PENDING:'授权/独立性声明待补',
+  MISSING_ROW:'缺少应有的版式评审行',
+  OUTPUT_MISSING:'缺少图片引用或有效 SHA-256',
+  REVIEW_PENDING:'人工判断、字段标签、审核员或 UTC 时间尚未齐备'
+};
+$('checkM6Progress').addEventListener('click',async()=>{
+  const registry=$('m6RegistryCsv').files[0];
+  const reviews=$('m6ReviewsCsv').files[0];
+  const summary=$('m6ProgressSummary'),issues=$('m6ProgressIssues');
+  issues.replaceChildren();
+  if(!registry||!reviews){
+    summary.textContent='请先选择 M6 registry 和 output reviews 两个 CSV。';
+    return;
+  }
+  $('checkM6Progress').disabled=true;
+  summary.textContent='正在由本地服务解析 CSV，不访问图片和 OCR…';
+  try{
+    const body=new FormData();
+    body.append('registry',registry,registry.name);
+    body.append('reviews',reviews,reviews.name);
+    const response=await fetch('/api/m6/review-progress',{method:'POST',body});
+    const result=await response.json();
+    if(!response.ok)throw Error(errorText(result));
+    summary.textContent='cohort '+result.cohort_id+' · SKU '+result.sku_total+
+      ' · 人工表格齐备 '+result.review_complete+'/'+result.expected_outputs+
+      ' · 待补 '+result.review_pending+
+      ' · 缺少图片引用 '+result.missing_outputs+
+      ' · 已填写授权/独立性声明 '+result.governance_asserted+'/'+result.sku_total+
+      '。注意：图片与授权真实性、OCR 均未验证，禁止据此投放。';
+    for(const issue of result.issues||[]){
+      const row=document.createElement('div');
+      row.className='execution-row';
+      const item=document.createElement('span');
+      item.className='summary';
+      item.textContent=issue.sku_id+
+        (issue.variant_id?' / '+issue.variant_id:'')+
+        ' · '+(M6_ISSUE_LABELS[issue.code]||issue.code);
+      row.appendChild(item);
+      issues.appendChild(row);
+    }
+    if(!(result.issues||[]).length){
+      issues.textContent='两份 CSV 的人工填写项暂未发现缺口。仍需运行 M6 最终证据门禁与真实 OCR。';
+    }
+  }catch(err){
+    summary.textContent='预览失败：'+err.message;
+  }finally{
+    $('checkM6Progress').disabled=false;
+  }
+});
+
 const BATCH_STORAGE_KEY='poster-agent-active-batch';
 let currentBatchId=null;
 let batchPollTimer=null;

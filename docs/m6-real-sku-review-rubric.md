@@ -99,6 +99,14 @@ uv run --locked python -m scripts.prepare_m6_review \
 - 生成的 CSV 与图片放在**同一目录**下，评审表中图片路径相对 CSV；不要单独移动 CSV。生成的 CSV 仍是草稿，后续应在此基础上填写人工判断、运行 M5j 和本地 M6 证据门禁。
 - 目录位于 `data/eval_runs/` 并被 Git 忽略。不要把图片、填充后的 CSV、源路径和授权证明提交到公开仓库。
 
+### M6 网页人工进度预览（CSV-only）
+
+在本地运行 Poster Agent 工作台（`uv run --locked python -m app.run_local --port 8000`），打开 `http://127.0.0.1:8000` 的「M6 · 本地评测进度预览」。选择 `m6_cohort_registry.csv` 和 `m6_output_reviews.csv`，点击「查看本地评测进度」。
+
+工作台使用 `POST /api/m6/review-progress`，将所选文件交给**本机服务**在内存中解析；每个 CSV 最多 2 MB，registry 最多 100 行，reviews 最多 200 行。只接受官方模板列名及同一 cohort 的 SKU×版式唯一记录，拒绝重复、额外 SKU、跨 cohort 与格式错误。缺少应有的评审行也会继续计入预期分母。输出按 SKU 显示待补授权/独立性声明、人工字段、时间戳及图片路径/摘要的引用缺口。
+
+**这里的“人工表格齐备”只是 CSV 格式与填写情况检查：** 授权声明是未经核实的人工自述；不打开图片文件、不核对实际 SHA-256、尺寸或 Spec、不读取 M5j、**不执行 OCR、不保存 CSV 或触发付费模型**。CSV 的 `N/A` 是否确实适用，必须留给最终 `validate_m6_cohort` 检查。即使预览没有待补项，也不能代替 M6 最终证据门禁和人工视觉质量验收。CSV 含本地运营数据，不要通过公网服务上传；Poster Agent 只支持本机访问。
+
 ## 3. 执行步骤
 
 1. 用 M5g 进行 dry-run 预检；核对 CSV、路径及唯一 SKU ID 后显式 `--apply`。先使用本地免费背景，**不调用付费模型**。
