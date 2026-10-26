@@ -235,3 +235,20 @@ async def restore_m6_review_sidecar(batch_id: str, request: Request):
     """Revalidate a downloaded sidecar against the current frozen evidence."""
     package = _package(batch_id)
     return validate_saved_sidecar(package, await _read_bounded_json(request))
+
+
+@router.post("/{batch_id}/m6-review-sidecar/assess")
+async def assess_m6_review_sidecar(batch_id: str, request: Request):
+    """Give the workbench a verified, read-only summary of its human labels.
+
+    Input is a canonical exported sidecar, never unverified browser draft
+    fields. Reuse the exact offline assessor so local CLI and API agree.
+    """
+    from scripts.assess_m6_sidecar import SidecarAssessmentError, assess_sidecar
+
+    package = _package(batch_id)
+    raw = await _read_bounded_json(request)
+    try:
+        return assess_sidecar(package, raw)
+    except SidecarAssessmentError as exc:
+        raise _unavailable(f"离线审核证据评估失败：{exc}") from exc

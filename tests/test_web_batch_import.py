@@ -1449,3 +1449,91 @@ def test_m6_offline_sidecar_cli_publishes_one_non_clobber_audit_report(
             "--package-dir", str(package), "--sidecar", str(saved),
             "--output", str(package / "m6_output_reviews.csv"),
         ])
+
+
+def test_m6_workbench_assessment_reuses_frozen_sidecar_evidence_gate(
+    tmp_path, monkeypatch,
+):
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
+    before = {
+        name: (package / name).read_bytes()
+        for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
+                     "images/sku-one-square.png")
+    }
+    res = client.post(endpoint, json=sidecar)
+    assert res.status_code == 200, res.text
+    report = res.json()
+    assert report["schema_version"] == "m6-operator-sidecar-assessment-1"
+    assert report["status"] == "PARTIAL"
+    assert report["expected_sku_count"] == 2
+    assert report["operator_decision_count"] == 2
+    assert report["missing_decision_count"] == 2
+    assert report["missing_decisions"][0]["sku_id"] == "sku-two"
+    assert report["approved_for_publication"] is False
+    assert report["quality_verified"] is False
+    assert report["real_ocr_runtime_attested"] is False
+    assert all((package / name).read_bytes() == value for name, value in before.items())
+    assert not (package / "m6_assessment.json").exists()
+
+
+def test_m6_workbench_assessment_complete_labels_and_reported_failure(
+    tmp_path, monkeypatch,
+):
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
+    payload = _m6_review_sidecar_request(package)
+    payload["decisions"].extend(_m6_review_sidecar_request(package, sku="sku-two")["decisions"])
+    complete = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=payload)
+    assert complete.status_code == 200
+    report = client.post(endpoint, json=complete.json())
+    assert report.status_code == 200
+    assert report.json()["status"] == "LABELS_COMPLETE_UNATTESTED"
+    assert report.json()["approved_for_publication"] is False
+    payload["decisions"][-1]["overall_accept"] = "FAIL"
+    payload["decisions"][-1]["checks"]["price"] = "FAIL"
+    payload["decisions"][-1]["overall_reason"] = "Screenshot price mismatch"
+    changed = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=payload)
+    assert changed.status_code == 200
+    failed = client.post(endpoint, json=changed.json())
+    assert failed.status_code == 200
+    assert failed.json()["status"] == "MANUAL_FAILURE_REPORTED"
+    assert failed.json()["reported_fail_count"] == 1
+
+
+def test_m6_workbench_assessment_rejects_stale_images_and_forged_claims(
+    tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
+    for field in ("human_review_verified", "quality_verified", "runtime_attested",
+                  "automatically_accepted"):
+        bad = deepcopy(sidecar)
+        bad[field] = True
+        assert client.post(endpoint, json=bad).status_code in (409, 422), field
+    bad = deepcopy(sidecar)
+    bad["decisions"][0]["image_sha256"] = "0" * 64
+    assert client.post(endpoint, json=bad).status_code == 409
+    image = package / "images/sku-one-square.png"
+    saved = image.read_bytes()
+    image.write_bytes(b"changed after freeze")
+    assert client.post(endpoint, json=sidecar).status_code == 409
+    image.write_bytes(saved)
+    assert client.post(endpoint, json=sidecar).status_code == 200
+    assert client.post(endpoint, content=b"0" * 262145,
+                       headers={"Content-Type": "application/json"}).status_code == 413
+
+
+def test_m6_workbench_assessment_controls_are_explicit_and_read_only():
+    page = client.get("/")
+    assert page.status_code == 200
+    for marker in (
+        'id="m6ReviewAssess"', 'id="m6ReviewDraftProgress"',
+        'id="m6ReviewAssessmentStatus"', 'id="m6ReviewNextMissing"',
+        'id="m6ReviewDownloadAssessment"',
+        '/m6-review-sidecar/assess', 'approved_for_publication',
+        'quality_verified', 'm6ReviewDrafts',
+    ):
+        assert marker in page.text

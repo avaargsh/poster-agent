@@ -315,6 +315,13 @@ pre{max-width:100%}
     <input id="m6ReviewImportFile" type="file" accept=".json,application/json">
     <button id="m6ReviewImportSidecar" type="button" class="secondary" disabled>校验并恢复审核草稿</button>
   </div>
+  <p id="m6ReviewDraftProgress" class="tip" aria-live="polite">尚无已保存的人工审核草稿。</p>
+  <div class="actions">
+    <button id="m6ReviewNextMissing" type="button" class="secondary" disabled>下一待审 SKU</button>
+    <button id="m6ReviewAssess" type="button" class="secondary" disabled>核对草稿与冻结证据</button>
+    <button id="m6ReviewDownloadAssessment" type="button" class="secondary" disabled>下载核对报告 JSON</button>
+  </div>
+  <p id="m6ReviewAssessmentStatus" class="tip" aria-live="polite">核对结果只反映操作员声明及本地证据一致性，不是商品质量或发布批准。</p>
   <p id="m6ReviewSidecarStatus" class="tip" aria-live="polite">
     暂存只在当前浏览器页面内有效。请显式下载后保存；不会覆盖冻结 CSV，不构成 M6 最终验收。
   </p>
@@ -1800,11 +1807,35 @@ const m6ReviewFields=[
 ];
 const m6ReviewDrafts=new Map();
 let m6ReviewSource=null;
+let m6ReviewAssessment=null;
+function invalidateM6ReviewAssessment(){
+  m6ReviewAssessment=null;
+  $('m6ReviewDownloadAssessment').disabled=true;
+  $('m6ReviewAssessmentStatus').textContent='草稿有变动，需重新核对冻结 CSV、OCR 与图片 SHA-256。仍不构成商品质量验收。';
+}
+function updateM6ReviewProgress(){
+  const picker=$('m6OcrSkuPicker');
+  const ids=[...picker.options].map(item=>item.value);
+  const expected=ids.length*2;
+  const recorded=ids.reduce((count,sku)=>count+
+    ['square','feed_4x5_native'].filter(variant=>m6ReviewDrafts.has(sku+'/'+variant)).length,0);
+  const pending=expected-recorded;
+  $('m6ReviewDraftProgress').textContent='页面内暂存 '+recorded+'/'+expected+
+    ' 个版式审核 · 尚缺 '+pending+' 条。这里只表示草稿数量，尚未经独立验收。';
+  $('m6ReviewAssess').disabled=!m6ReviewSource||recorded===0;
+  $('m6ReviewNextMissing').disabled=!m6ReviewSource||pending===0;
+}
 function resetM6OCRReview(){
   m6OcrReviewRequest+=1;
   m6OcrReviewBatch=null;
   m6ReviewDrafts.clear();
   m6ReviewSource=null;
+  m6ReviewAssessment=null;
+  $('m6ReviewAssess').disabled=true;
+  $('m6ReviewNextMissing').disabled=true;
+  $('m6ReviewDownloadAssessment').disabled=true;
+  $('m6ReviewDraftProgress').textContent='尚无已保存的人工审核草稿。';
+  $('m6ReviewAssessmentStatus').textContent='核对结果仅表明操作员声明和本地摘要一致，不是商品质量验收。';
   $('m6ReviewImportFile').value='';
   $('m6ReviewImportSidecar').disabled=true;
   $('m6ReviewSaveSku').disabled=true;
@@ -1831,6 +1862,7 @@ function drawM6OCRReview(data,batchId){
      m6ReviewSource.reviews_csv_sha256!==data.reviews_csv_sha256 ||
      m6ReviewSource.ocr_capture_sha256!==data.ocr_capture_sha256){
     m6ReviewDrafts.clear();
+    invalidateM6ReviewAssessment();
     m6ReviewSource={
       batchId:batchId,
       reviews_csv_sha256:data.reviews_csv_sha256,
@@ -1972,6 +2004,7 @@ function drawM6OCRReview(data,batchId){
     card.appendChild(worksheet);
     host.appendChild(card);
   }
+  updateM6ReviewProgress();
 }
 async function loadM6OCRReview(batchId,skuId=null){
   const id=++m6OcrReviewRequest;
@@ -2041,6 +2074,8 @@ $('m6ReviewImportSidecar').addEventListener('click',async()=>{
     // Commit atomically AFTER all server-side validation and local shape checks.
     m6ReviewDrafts.clear();
     for(const [key,row] of draft)m6ReviewDrafts.set(key,row);
+    invalidateM6ReviewAssessment();
+    updateM6ReviewProgress();
     $('m6ReviewExportSidecar').disabled=false;
     input.value='';
     $('m6ReviewSidecarStatus').textContent='已恢复 '+draft.size+
@@ -2085,6 +2120,8 @@ $('m6ReviewSaveSku').addEventListener('click',()=>{
     const decisions=cards.map(card=>collectM6ReviewCard(card,skuId));
     for(const decision of decisions)
       m6ReviewDrafts.set(decision.sku_id+'/'+decision.variant_id,decision);
+    invalidateM6ReviewAssessment();
+    updateM6ReviewProgress();
     $('m6ReviewExportSidecar').disabled=false;
     $('m6ReviewSidecarStatus').textContent='已在页面内暂存 '+m6ReviewDrafts.size+
       ' 条人工标签，尚未写入任何文件。请点击下载审核侧车 JSON。';
@@ -2092,6 +2129,85 @@ $('m6ReviewSaveSku').addEventListener('click',()=>{
     $('m6ReviewSidecarStatus').textContent='暂存失败：'+err.message;
   }
 });
+$('m6ReviewNextMissing').addEventListener('click',()=>{
+  const source=m6ReviewSource,batchId=currentBatchId;
+  if(!source||source.batchId!==batchId||m6OcrReviewBatch!==batchId)return;
+  const picker=$('m6OcrSkuPicker');
+  const ids=[...picker.options].map(option=>option.value);
+  const start=ids.indexOf(picker.value);
+  const ordered=ids.slice(start+1).concat(ids.slice(0,start+1));
+  const next=ordered.find(sku=>['square','feed_4x5_native']
+    .some(variant=>!m6ReviewDrafts.has(sku+'/'+variant)));
+  if(next)loadM6OCRReview(batchId,next);
+});
+$('m6ReviewAssess').addEventListener('click',async()=>{
+  const source=m6ReviewSource,batchId=currentBatchId;
+  if(!source||source.batchId!==batchId||m6OcrReviewBatch!==batchId||
+     m6ReviewDrafts.size===0)return;
+  const button=$('m6ReviewAssess');
+  const draftSnapshot=JSON.stringify([...m6ReviewDrafts.values()]);
+  button.disabled=true;
+  invalidateM6ReviewAssessment();
+  $('m6ReviewAssessmentStatus').textContent='正在核对已暂存标签、冻结审核表、OCR 与海报哈希…';
+  try{
+    // Keep all draft validation on the server; never treat browser counts as evidence.
+    const exportedResponse=await fetch('/api/batches/'+encodeURIComponent(batchId)+
+      '/m6-review-sidecar',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        reviews_csv_sha256:source.reviews_csv_sha256,
+        ocr_capture_sha256:source.ocr_capture_sha256,
+        decisions:JSON.parse(draftSnapshot)
+      })
+    });
+    const exported=await exportedResponse.json();
+    if(currentBatchId!==batchId||m6ReviewSource!==source||
+       JSON.stringify([...m6ReviewDrafts.values()])!==draftSnapshot)return;
+    if(!exportedResponse.ok)throw Error(errorText(exported));
+    if(exported.status!=='OPERATOR_ASSERTED_NOT_ATTESTED')
+      throw Error('审核声明状态无效');
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+
+      '/m6-review-sidecar/assess',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(exported)
+    });
+    const report=await response.json();
+    if(currentBatchId!==batchId||m6ReviewSource!==source||
+       JSON.stringify([...m6ReviewDrafts.values()])!==draftSnapshot)return;
+    if(!response.ok)throw Error(errorText(report));
+    if(!['PARTIAL','MANUAL_FAILURE_REPORTED','LABELS_COMPLETE_UNATTESTED'].includes(report.status)||
+       report.quality_verified!==false||report.approved_for_publication!==false||
+       report.operator_decision_count!==m6ReviewDrafts.size||
+       report.reviews_csv_sha256!==source.reviews_csv_sha256||
+       report.ocr_capture_sha256!==source.ocr_capture_sha256)
+      throw Error('核对报告与当前草稿或冻结证据不一致');
+    m6ReviewAssessment=report;
+    $('m6ReviewDownloadAssessment').disabled=false;
+    const next=report.missing_decisions?.[0];
+    $('m6ReviewAssessmentStatus').textContent='本地证据核对：'+report.operator_decision_count+
+      '/'+report.expected_output_count+' 条人工声明 · 缺失 '+report.missing_decision_count+
+      ' · 人工 FAIL '+report.reported_fail_count+
+      ' · 状态 '+report.status+
+      (next?' · 下一待审 '+next.sku_id+' / '+next.variant_id:'')+
+      '。未独立证明人工身份、真实 OCR、素材授权或商品质量；禁止据此投放。';
+  }catch(err){
+    if(currentBatchId===batchId&&m6ReviewSource===source)
+      $('m6ReviewAssessmentStatus').textContent='核对失败，原草稿不变：'+err.message;
+  }finally{
+    if(currentBatchId===batchId&&m6ReviewSource===source)
+      button.disabled=m6ReviewDrafts.size===0;
+  }
+});
+$('m6ReviewDownloadAssessment').addEventListener('click',()=>{
+  if(!m6ReviewAssessment||!m6ReviewSource||currentBatchId!==m6ReviewSource.batchId)return;
+  const payload=JSON.stringify(m6ReviewAssessment,null,2)+'\n';
+  const url=URL.createObjectURL(new Blob([payload],{type:'application/json'}));
+  const anchor=document.createElement('a');
+  anchor.href=url;anchor.download='m6-sidecar-assessment-'+currentBatchId+'.json';
+  document.body.appendChild(anchor);anchor.click();anchor.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+});
+
 $('m6ReviewExportSidecar').addEventListener('click',async()=>{
   const source=m6ReviewSource,batchId=currentBatchId;
   if(!source||source.batchId!==batchId||m6ReviewDrafts.size===0)return;
