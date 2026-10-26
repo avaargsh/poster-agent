@@ -1012,3 +1012,218 @@ def test_web_m6_sku_ocr_review_preview_bounded_and_untrusted_text_is_safe(
     assert 'id="m6OcrReviewRows"' in page.text
     assert "/m6-ocr-review" in page.text
     assert "textContent=line.text" in page.text
+
+
+def test_web_m6_sku_image_preview_serves_only_verified_frozen_images(tmp_path, monkeypatch):
+    """Synthetic OCR declaration tests transport integrity, not real model quality."""
+    import hashlib
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review"
+    assert client.get(endpoint + "/sku-one/image/square").status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    assert client.get(endpoint + "/sku-one/image/square").status_code == 409
+    capture = _seed_m6_ocr_capture_for_web(package)
+    before_csv = (package / "m6_output_reviews.csv").read_bytes()
+    before_capture = capture.read_bytes()
+
+    for variant, suffix in (("square", "square"), ("feed_4x5_native", "native-4x5")):
+        image_path = package / f"images/sku-two-{suffix}.png"
+        original = image_path.read_bytes()
+        result = client.get(endpoint + f"/sku-two/image/{variant}")
+        assert result.status_code == 200, result.text
+        assert result.headers["content-type"] == "image/png"
+        assert "no-store" in result.headers["cache-control"]
+        assert result.headers["x-content-type-options"] == "nosniff"
+        assert result.content == original
+        assert hashlib.sha256(result.content).hexdigest() == hashlib.sha256(original).hexdigest()
+
+    assert client.get(endpoint + "/not-in-cohort/image/square").status_code == 404
+    assert client.get(endpoint + "/sku-one/image/thumbnail").status_code == 404
+    assert (package / "m6_output_reviews.csv").read_bytes() == before_csv
+    assert capture.read_bytes() == before_capture
+
+
+def test_web_m6_sku_image_preview_fails_closed_on_stale_or_linked_input(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    capture = _seed_m6_ocr_capture_for_web(package)
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review/sku-one/image/square"
+    assert client.get(endpoint).status_code == 200
+
+    image = package / "images/sku-one-square.png"
+    original = image.read_bytes()
+    image.write_bytes(b"changed after frozen review")
+    assert client.get(endpoint).status_code == 409
+    image.write_bytes(original)
+    outside = tmp_path / "unrelated.png"
+    outside.write_bytes(original)
+    image.unlink()
+    image.symlink_to(outside)
+    assert client.get(endpoint).status_code == 409
+    image.unlink()
+    image.write_bytes(original)
+
+    csv_path = package / "m6_output_reviews.csv"
+    original_csv = csv_path.read_bytes()
+    csv_path.write_bytes(original_csv.replace(b"UNVERIFIED", b"FAIL", 1))
+    assert client.get(endpoint).status_code == 409
+    csv_path.write_bytes(original_csv)
+
+    ocr_original = capture.read_bytes()
+    capture.write_bytes(ocr_original.replace(b"3.3.0", b"test-double"))
+    assert client.get(endpoint).status_code == 409
+    capture.write_bytes(ocr_original)
+    assert client.get(endpoint).status_code == 200
+
+
+def test_web_m6_sku_review_renders_verified_images_without_using_ocr_as_approval():
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "/m6-ocr-review/" in page.text
+    assert "/image/" in page.text
+    assert "m6-ocr-evidence-image" in page.text
+    assert "picture.src='/api/batches/'" in page.text
+    assert "不代表已通过质量验收" in page.text
+
+
+def _m6_review_sidecar_request(package, *, sku="sku-one"):
+    import hashlib
+    raw = (package / "m6_output_reviews.csv").read_bytes()
+    ocr = (package / "m6_paddle_ocr_evidence.json").read_bytes()
+    checks = {
+        field: "PASS" for field in (
+            "sku_integrity", "text_legibility", "title", "subtitle", "price",
+            "original_price", "price_position", "original_price_position",
+            "cta", "composition",
+        )
+    }
+    return {
+        "reviews_csv_sha256": hashlib.sha256(raw).hexdigest(),
+        "ocr_capture_sha256": hashlib.sha256(ocr).hexdigest(),
+        "decisions": [
+            {
+                "sku_id": sku, "variant_id": variant, "reviewer_alias": "reviewer-1",
+                "checks": checks.copy(), "overall_accept": "PASS", "overall_reason": "",
+            }
+            for variant in ("square", "feed_4x5_native")
+        ],
+    }
+
+
+def test_m6_sidecar_export_checks_frozen_images_and_never_writes_source(
+    tmp_path, monkeypatch,
+):
+    import hashlib
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar"
+    assert client.post(endpoint, json={"decisions": []}).status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    # A malformed request is 422 even while OCR evidence is absent.
+    assert client.post(endpoint, json={"decisions": []}).status_code == 422
+    _seed_m6_ocr_capture_for_web(package)
+    request = _m6_review_sidecar_request(package)
+    before = {
+        filename: (package / filename).read_bytes()
+        for filename in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
+                         "images/sku-one-square.png")
+    }
+    response = client.post(endpoint, json=request)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["schema_version"] == "m6-human-review-sidecar-1"
+    assert result["reviews_csv_sha256"] == request["reviews_csv_sha256"]
+    assert result["ocr_capture_sha256"] == request["ocr_capture_sha256"]
+    assert result["decision_count"] == 2
+    assert result["human_review_verified"] is False
+    assert result["automatically_accepted"] is False
+    assert result["quality_verified"] is False
+    assert result["runtime_attested"] is False
+    assert result["status"] == "OPERATOR_ASSERTED_NOT_ATTESTED"
+    assert len(result["decisions"]) == 2
+    for row in result["decisions"]:
+        assert row["manual_overall_label"] == "PASS"
+        assert len(row["image_sha256"]) == 64
+        assert row["reviewer_alias"] == "reviewer-1"
+        assert row["reviewed_at_utc"] is None
+        assert "output_image_path" not in row
+    assert all((package / name).read_bytes() == payload for name, payload in before.items())
+    assert not (package / "m6_review_decisions").exists()
+
+
+def test_m6_sidecar_export_rejects_invalid_or_unproven_human_labels(tmp_path, monkeypatch):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    _seed_m6_ocr_capture_for_web(package)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar"
+    good = _m6_review_sidecar_request(package)
+    assert client.post(endpoint, json=good).status_code == 200
+    from copy import deepcopy
+
+    for label in ("UNVERIFIED", "APPROVED", "INDETERMINATE"):
+        payload = deepcopy(good)
+        payload["decisions"][0]["checks"]["title"] = label
+        assert client.post(endpoint, json=payload).status_code == 422
+    payload = deepcopy(good)
+    payload["decisions"][0]["checks"]["price"] = "FAIL"
+    assert client.post(endpoint, json=payload).status_code == 422
+    payload["decisions"][0]["overall_accept"] = "FAIL"
+    payload["decisions"][0]["overall_reason"] = "Price visibly incorrect"
+    assert client.post(endpoint, json=payload).status_code == 200
+    payload = deepcopy(good)
+    payload["decisions"][0]["overall_accept"] = "FAIL"
+    assert client.post(endpoint, json=payload).status_code == 422
+    payload = deepcopy(good)
+    payload["decisions"].append(deepcopy(payload["decisions"][0]))
+    assert client.post(endpoint, json=payload).status_code == 422
+    payload = deepcopy(good)
+    payload["decisions"][0]["sku_id"] = "not-in-cohort"
+    assert client.post(endpoint, json=payload).status_code == 422
+    payload = deepcopy(good)
+    payload["reviews_csv_sha256"] = "0" * 64
+    assert client.post(endpoint, json=payload).status_code == 409
+    payload = deepcopy(good)
+    payload["ocr_capture_sha256"] = "0" * 64
+    assert client.post(endpoint, json=payload).status_code == 409
+    payload = deepcopy(good)
+    payload["decisions"][0]["reviewer_alias"] = "<script>"
+    assert client.post(endpoint, json=payload).status_code == 422
+
+
+def test_m6_sidecar_export_rejects_changed_ocr_csv_or_png(tmp_path, monkeypatch):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    _seed_m6_ocr_capture_for_web(package)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar"
+    good = _m6_review_sidecar_request(package)
+    for filename in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
+                     "images/sku-one-square.png"):
+        file = package / filename
+        saved = file.read_bytes()
+        file.write_bytes(b"stale")
+        assert client.post(endpoint, json=good).status_code == 409
+        file.write_bytes(saved)
+    assert client.post(endpoint, json=good).status_code == 200
+
+
+def test_m6_sidecar_workbench_exports_draft_with_explicit_operator_action():
+    page = client.get("/")
+    assert page.status_code == 200
+    for item in (
+        'id="m6ReviewSaveSku"', 'id="m6ReviewExportSidecar"',
+        "/m6-review-sidecar", "m6ReviewDrafts", "OPERATOR_ASSERTED_NOT_ATTESTED",
+    ):
+        assert item in page.text

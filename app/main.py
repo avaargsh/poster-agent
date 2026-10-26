@@ -36,6 +36,7 @@ from .m6_review_progress_routes import router as m6_review_progress_router
 from .m6_batch_package_routes import router as m6_batch_package_router
 from .m6_package_download_routes import router as m6_package_download_router
 from .m6_overlay_routes import router as m6_overlay_router
+from .m6_review_sidecar_routes import router as m6_review_sidecar_router
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -174,6 +175,7 @@ app.include_router(m6_review_progress_router)
 app.include_router(m6_batch_package_router)
 app.include_router(m6_package_download_router)
 app.include_router(m6_overlay_router)
+app.include_router(m6_review_sidecar_router)
 MAX_UPLOAD = 10 * 1024 * 1024
 # These limits apply to the *decoded* image, not the compressed upload size.
 # Enforce them BEFORE image.load() to prevent high-memory decompression.

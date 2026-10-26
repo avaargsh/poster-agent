@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from .m6_batch_package_routes import _verified_source
 from .m6_package_download_routes import (
@@ -276,6 +276,48 @@ def inspect_sku_ocr_review(batch_id: str, sku_id: str | None = None):
         "quality_verified": False,
         "runtime_attested": False,
     }
+
+
+
+@router.get("/{batch_id}/m6-ocr-review/{sku_id}/image/{variant_id}")
+def preview_frozen_sku_image(batch_id: str, sku_id: str, variant_id: str):
+    """Serve only a verified source PNG for visual OCR review, never an arbitrary path.
+
+    Reuse the exact full-evidence gate of the text review endpoint and bind the
+    subsequent image snapshot to the same frozen CSV hash and selected row.
+    """
+    from scripts.capture_m6_paddle_ocr import (
+        MAX_PNG_BYTES, OCREvidenceError, _identities, _read_regular, _review_rows,
+    )
+
+    if variant_id not in ("square", "feed_4x5_native"):
+        raise HTTPException(status_code=404, detail="未知的 M6 海报版式")
+    # Checks completed batch, frozen OCR evidence, and BOTH source images
+    # for the selected SKU before allowing either image to be displayed.
+    selected = inspect_sku_ocr_review(batch_id, sku_id)
+    package = _package(batch_id)
+    try:
+        reviews_sha, original_rows = _review_rows(package)
+        if reviews_sha != selected["reviews_csv_sha256"]:
+            raise OCREvidenceError("审核表在预览期间发生变化")
+        _, rows, _ = _identities(original_rows)
+        row = next(row for row in rows if
+                   row["sku_id"] == sku_id and row["variant_id"] == variant_id)
+        inspected_variant = next(row for row in selected["variants"]
+                                 if row["variant_id"] == variant_id)
+        if row["output_image_sha256"] != inspected_variant["image_sha256"]:
+            raise OCREvidenceError("海报版本在预览期间发生变化")
+        snapshot = _read_regular(package / row["output_image_path"], MAX_PNG_BYTES)
+        if _sha(snapshot) != row["output_image_sha256"]:
+            raise OCREvidenceError("原始海报与冻结 SHA-256 不匹配")
+    except (OSError, ValueError, OCREvidenceError, StopIteration) as exc:
+        raise _blocked(f"不能展示已变更或不完整的冻结海报：{exc}") from exc
+
+    return Response(content=snapshot, media_type="image/png", headers={
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+    })
 
 
 @router.get("/{batch_id}/m6-overlay/download")

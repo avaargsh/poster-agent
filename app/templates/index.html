@@ -308,6 +308,13 @@ pre{max-width:100%}
   </div>
   <p id="m6OcrReviewStatus" class="tip" aria-live="polite"></p>
   <div id="m6OcrReviewRows" aria-live="polite"></div>
+  <div class="actions">
+    <button id="m6ReviewSaveSku" type="button" class="secondary" disabled>暂存当前 SKU 的人工审核</button>
+    <button id="m6ReviewExportSidecar" type="button" class="secondary" disabled>下载审核侧车 JSON</button>
+  </div>
+  <p id="m6ReviewSidecarStatus" class="tip" aria-live="polite">
+    暂存只在当前浏览器页面内有效。请显式下载后保存；不会覆盖冻结 CSV，不构成 M6 最终验收。
+  </p>
 </section>
 <p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
 <progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
@@ -1781,16 +1788,30 @@ $('downloadM6Package').addEventListener('click',()=>{
 
 let m6OcrReviewBatch=null;
 let m6OcrReviewRequest=0;
+const m6ReviewFields=[
+  ['sku_integrity','SKU 完整性'],['text_legibility','文字可读性'],
+  ['title','标题'],['subtitle','副标题'],['price','售价'],
+  ['original_price','原价'],['price_position','售价位置'],
+  ['original_price_position','原价位置'],['cta','行动按钮'],
+  ['composition','构图']
+];
+const m6ReviewDrafts=new Map();
+let m6ReviewSource=null;
 function resetM6OCRReview(){
   m6OcrReviewRequest+=1;
   m6OcrReviewBatch=null;
+  m6ReviewDrafts.clear();
+  m6ReviewSource=null;
+  $('m6ReviewSaveSku').disabled=true;
+  $('m6ReviewExportSidecar').disabled=true;
+  $('m6ReviewSidecarStatus').textContent='暂存仅在当前页面内有效；请显式下载 JSON 保存，不会改写冻结 CSV。';
   $('m6OcrReviewPanel').hidden=true;
   $('m6OcrSkuPicker').replaceChildren();
   $('m6OcrSkuPicker').disabled=true;
   $('m6OcrReviewStatus').textContent='';
   $('m6OcrReviewRows').replaceChildren();
 }
-function drawM6OCRReview(data){
+function drawM6OCRReview(data,batchId){
   const picker=$('m6OcrSkuPicker');
   if(!Array.isArray(data.sku_ids)||data.sku_ids.length<1||data.sku_ids.length>100||
      !Array.isArray(data.variants)||data.variants.length!==2)
@@ -1800,8 +1821,21 @@ function drawM6OCRReview(data){
     const option=document.createElement('option');
     option.value=sku;option.textContent=sku;picker.appendChild(option);
   }
+  if(!m6ReviewSource ||
+     m6ReviewSource.batchId!==batchId ||
+     m6ReviewSource.reviews_csv_sha256!==data.reviews_csv_sha256 ||
+     m6ReviewSource.ocr_capture_sha256!==data.ocr_capture_sha256){
+    m6ReviewDrafts.clear();
+    m6ReviewSource={
+      batchId:batchId,
+      reviews_csv_sha256:data.reviews_csv_sha256,
+      ocr_capture_sha256:data.ocr_capture_sha256
+    };
+    $('m6ReviewExportSidecar').disabled=true;
+  }
   picker.value=data.selected_sku_id;
   picker.disabled=false;
+  $('m6ReviewSaveSku').disabled=false;
   $('m6OcrReviewPanel').hidden=false;
   $('m6OcrReviewStatus').textContent='已核对冻结证据：'+data.sku_ids.length+
     ' 个 SKU · 当前 '+data.selected_sku_id+' · OCR 仅供人工复核，不证明模型推理或质量 PASS。';
@@ -1813,20 +1847,54 @@ function drawM6OCRReview(data){
     const heading=document.createElement('h4');
     heading.textContent=variant.variant_id==='square'?'方形 1024×1024':'原生 4:5 1080×1350';
     card.appendChild(heading);
+    // The browser never accepts caller-provided paths: only a server-verified
+    // SKU/variant endpoint can return the exact SHA-pinned original PNG.
+    const comparison=document.createElement('div');
+    comparison.style.display='grid';
+    comparison.style.gridTemplateColumns='repeat(auto-fit, minmax(min(100%, 280px), 1fr))';
+    comparison.style.gap='16px';
+    const figure=document.createElement('figure');
+    figure.style.margin='0';
+    const picture=document.createElement('img');
+    picture.className='m6-ocr-evidence-image';
+    picture.alt='待人工核对的冻结海报：'+data.selected_sku_id+' · '+heading.textContent;
+    picture.loading='lazy';
+    picture.decoding='async';
+    picture.style.width='100%';
+    picture.style.maxWidth='420px';
+    picture.style.height='auto';
+    picture.style.display='block';
+    picture.src='/api/batches/'+encodeURIComponent(batchId)+'/m6-ocr-review/'+
+      encodeURIComponent(data.selected_sku_id)+'/image/'+encodeURIComponent(variant.variant_id);
+    picture.addEventListener('error',()=>{
+      const warning=document.createElement('p');
+      warning.className='tip';
+      warning.textContent='图片验证失败或冻结证据已过期，请重新核对审核包和 OCR 记录。';
+      picture.replaceWith(warning);
+    });
+    figure.appendChild(picture);
+    const imageInfo=document.createElement('figcaption');
+    imageInfo.className='tip';
+    imageInfo.textContent='冻结原图 · SHA-256 '+variant.image_sha256.slice(0,12)+
+      '… · 不代表已通过质量验收';
+    figure.appendChild(imageInfo);
+    comparison.appendChild(figure);
+
+    const detail=document.createElement('div');
     const review=document.createElement('p');
     const labels=variant.review_labels||{};
     review.textContent='人工审核 · 标题 '+(labels.title||'UNVERIFIED')+
       ' · 售价 '+(labels.price||'UNVERIFIED')+
       ' · 价格位置 '+(labels.price_position||'UNVERIFIED')+
       ' · 总体 '+(labels.overall_accept||'UNVERIFIED');
-    card.appendChild(review);
+    detail.appendChild(review);
     const metadata=document.createElement('p');
     metadata.className='tip';
     metadata.textContent='识别行 '+variant.recognized_line_count+
       ' · 无定位 '+variant.unlocated_line_count+
       ' · 仅展示前 '+variant.preview_line_count+
       ' 行；剩余 '+variant.lines_truncated_count+' 行请查看原始 OCR JSON。';
-    card.appendChild(metadata);
+    detail.appendChild(metadata);
     const list=document.createElement('ol');
     for(const line of variant.lines||[]){
       const item=document.createElement('li');
@@ -1840,7 +1908,62 @@ function drawM6OCRReview(data){
       item.appendChild(details);
       list.appendChild(item);
     }
-    card.appendChild(list);
+    detail.appendChild(list);
+    comparison.appendChild(detail);
+    card.appendChild(comparison);
+    card.dataset.m6Variant=variant.variant_id;
+    const key=data.selected_sku_id+'/'+variant.variant_id;
+    const saved=m6ReviewDrafts.get(key);
+    const worksheet=document.createElement('fieldset');
+    const legend=document.createElement('legend');
+    legend.textContent='人工审核草稿（不会自动判定）';
+    worksheet.appendChild(legend);
+    const grid=document.createElement('div');
+    grid.style.display='grid';
+    grid.style.gridTemplateColumns='repeat(auto-fit, minmax(min(100%, 200px), 1fr))';
+    grid.style.gap='10px';
+    for(const [field,labelText] of m6ReviewFields){
+      const label=document.createElement('label');
+      label.textContent=labelText;
+      const select=document.createElement('select');
+      select.dataset.m6Check=field;
+      for(const value of ['UNVERIFIED','PASS','FAIL','N/A']){
+        const option=document.createElement('option');
+        option.value=value;option.textContent=value;select.appendChild(option);
+      }
+      select.value=saved?.checks[field]||variant.review_labels?.[field]||'UNVERIFIED';
+      label.appendChild(select);
+      grid.appendChild(label);
+    }
+    worksheet.appendChild(grid);
+    const reviewer=document.createElement('label');
+    reviewer.textContent='审核员代号';
+    const alias=document.createElement('input');
+    alias.dataset.m6Alias='true';
+    alias.maxLength=64;
+    alias.value=saved?.reviewer_alias||variant.review_labels?.reviewer_alias||'';
+    reviewer.appendChild(alias);
+    worksheet.appendChild(reviewer);
+    const overall=document.createElement('label');
+    overall.textContent='人工总体标签';
+    const overallSelect=document.createElement('select');
+    overallSelect.dataset.m6Overall='true';
+    for(const value of ['UNVERIFIED','PASS','FAIL']){
+      const option=document.createElement('option');
+      option.value=value;option.textContent=value;overallSelect.appendChild(option);
+    }
+    overallSelect.value=saved?.overall_accept||variant.review_labels?.overall_accept||'UNVERIFIED';
+    overall.appendChild(overallSelect);
+    worksheet.appendChild(overall);
+    const reason=document.createElement('label');
+    reason.textContent='失败原因（FAIL 必填）';
+    const reasonField=document.createElement('input');
+    reasonField.dataset.m6Reason='true';
+    reasonField.maxLength=500;
+    reasonField.value=saved?.overall_reason||variant.review_labels?.overall_reason||'';
+    reason.appendChild(reasonField);
+    worksheet.appendChild(reason);
+    card.appendChild(worksheet);
     host.appendChild(card);
   }
 }
@@ -1855,7 +1978,7 @@ async function loadM6OCRReview(batchId,skuId=null){
     const data=await response.json();
     if(currentBatchId!==batchId||id!==m6OcrReviewRequest)return;
     if(!response.ok)throw Error(errorText(data));
-    drawM6OCRReview(data);
+    drawM6OCRReview(data,batchId);
     m6OcrReviewBatch=batchId;
   }catch(err){
     if(currentBatchId===batchId&&id===m6OcrReviewRequest){
@@ -1868,6 +1991,85 @@ async function loadM6OCRReview(batchId,skuId=null){
       $('inspectM6OCR').disabled=lastBatchStatus!=='COMPLETED';
   }
 }
+function collectM6ReviewCard(card,skuId){
+  const checks={};
+  for(const input of card.querySelectorAll('select[data-m6-check]')){
+    if(!['PASS','FAIL','N/A'].includes(input.value))
+      throw Error('请填写全部 10 项检查标签，不能保留 UNVERIFIED');
+    checks[input.dataset.m6Check]=input.value;
+  }
+  if(Object.keys(checks).length!==m6ReviewFields.length)throw Error('检查字段缺失');
+  const reviewer_alias=card.querySelector('input[data-m6-alias]').value.trim();
+  const overall_accept=card.querySelector('select[data-m6-overall]').value;
+  const overall_reason=card.querySelector('input[data-m6-reason]').value.trim();
+  if(!/^[A-Za-z0-9_.-]{2,64}$/.test(reviewer_alias))
+    throw Error('请填写 2–64 字符的英文/数字审核员代号');
+  if(!['PASS','FAIL'].includes(overall_accept))throw Error('需要明确的 PASS 或 FAIL 总体标签');
+  if(overall_accept==='PASS'&&Object.values(checks).includes('FAIL'))
+    throw Error('有失败项目时不能将总体标签设为 PASS');
+  if(overall_accept==='FAIL'&&!overall_reason)throw Error('FAIL 必须填写具体原因');
+  return {sku_id:skuId,variant_id:card.dataset.m6Variant,reviewer_alias,
+          checks,overall_accept,overall_reason};
+}
+$('m6ReviewSaveSku').addEventListener('click',()=>{
+  if(currentBatchId!==m6OcrReviewBatch||!m6ReviewSource)return;
+  try{
+    const skuId=$('m6OcrSkuPicker').value;
+    const cards=[...$('m6OcrReviewRows').querySelectorAll('section[data-m6-variant]')];
+    if(cards.length!==2)throw Error('需要两种版式的完整审核');
+    // Validate both before mutating in-memory drafts.
+    const decisions=cards.map(card=>collectM6ReviewCard(card,skuId));
+    for(const decision of decisions)
+      m6ReviewDrafts.set(decision.sku_id+'/'+decision.variant_id,decision);
+    $('m6ReviewExportSidecar').disabled=false;
+    $('m6ReviewSidecarStatus').textContent='已在页面内暂存 '+m6ReviewDrafts.size+
+      ' 条人工标签，尚未写入任何文件。请点击下载审核侧车 JSON。';
+  }catch(err){
+    $('m6ReviewSidecarStatus').textContent='暂存失败：'+err.message;
+  }
+});
+$('m6ReviewExportSidecar').addEventListener('click',async()=>{
+  const source=m6ReviewSource,batchId=currentBatchId;
+  if(!source||source.batchId!==batchId||m6ReviewDrafts.size===0)return;
+  const button=$('m6ReviewExportSidecar');
+  button.disabled=true;
+  $('m6ReviewSidecarStatus').textContent='正在复核冻结 OCR 与图片哈希后导出…';
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-review-sidecar',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        reviews_csv_sha256:source.reviews_csv_sha256,
+        ocr_capture_sha256:source.ocr_capture_sha256,
+        decisions:[...m6ReviewDrafts.values()]
+      })
+    });
+    const exported=await response.json();
+    if(currentBatchId!==batchId||source!==m6ReviewSource)return;
+    if(!response.ok)throw Error(errorText(exported));
+    if(exported.status!=='OPERATOR_ASSERTED_NOT_ATTESTED')
+      throw Error('服务器返回了意外的审核状态');
+    const blob=new Blob([JSON.stringify(exported,null,2)+'\n'],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');
+    anchor.href=url;
+    anchor.download='m6-human-review-'+batchId+'.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // Keep the blob alive until the browser has accepted the download.
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    $('m6ReviewSidecarStatus').textContent='已生成 '+exported.decision_count+
+      ' 条侧车记录，请保存下载文件。仅为操作员声明，不代表人工验证或质量 PASS。';
+  }catch(err){
+    if(currentBatchId===batchId)
+      $('m6ReviewSidecarStatus').textContent='审核侧车导出失败：'+err.message;
+  }finally{
+    if(currentBatchId===batchId&&source===m6ReviewSource)
+      button.disabled=m6ReviewDrafts.size===0;
+  }
+});
+
 $('inspectM6OCR').addEventListener('click',()=>{
   if(currentBatchId&&lastBatchStatus==='COMPLETED')
     loadM6OCRReview(currentBatchId);
