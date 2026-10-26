@@ -105,6 +105,14 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
 
+### 通过网页生成与下载 OCR 标注预览
+
+在已经完成的网页批次中，先使用「准备 M6 离线审核包」生成审核 CSV 与两种版式图片，再在本机安装适用版本的 PaddleOCR/PaddlePaddle 并执行真正的 OCR 采集命令。回到批次页面（也可从「历史网页批次」进入），点击「准备 OCR 标注预览」后，可使用「下载 OCR 标注 ZIP」保存本地审核辅助文件。
+
+此入口不接收用户指定路径、不运行 OCR、不调用付费模型；仅从本机既有的 `m6_review_package` 读取冻结证据。接口 `GET /api/batches/{batch_id}/m6-overlay` 只报告文件是否存在；`POST` 必须显式执行，且已有 ZIP 时绝不覆盖；`GET .../download` 在实际返回文件前重新核对当前的 CSV/OCR/image SHA-256 和 ZIP 内所有预览图的 SHA-256。批次未完成、缺失或篡改证据、图片变化、危险符号链接和失效 ZIP 会阻断操作。
+
+请注意：OCR JSON 中 `real_ocr_inference_attempted` 是本机自述，单独看网页状态或标注 ZIP 不代表独立证明真实推理、源素材许可、价格/商品正确或 M6 验收通过。网页仅支持可信本机回环地址，不具备用户身份验证和公网服务能力。
+
 ### 为人工审核生成 OCR 检测框标注图
 
 M6 保存 `m6_paddle_ocr_evidence.json` 以后，可在本地运行：

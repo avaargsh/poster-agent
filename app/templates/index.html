@@ -100,8 +100,11 @@
 <button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button>
 <button id="prepareM6Package" type="button" class="secondary" disabled>准备 M6 离线审核包</button>
 <button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button>
+<button id="prepareM6Overlay" type="button" class="secondary" disabled>准备 OCR 标注预览</button>
+<button id="downloadM6Overlay" type="button" class="secondary" disabled>下载 OCR 标注 ZIP</button>
 </div>
 <p id="m6PackageStatus" class="tip" aria-live="polite">批次完成后可生成本机 M6 审核包；仅生成 UNVERIFIED 草稿，不执行 OCR 或付费模型。</p>
+<p id="m6OverlayStatus" class="tip" aria-live="polite">先准备 M6 审核包并在本机采集 OCR 证据，才可生成只读标注预览。</p>
 <p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
 <progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
 <div id="batchPlanSummary" class="tip"></div>
@@ -1283,6 +1286,9 @@ function resetBatchForNewFiles(){
   $('reviewCurrentBatch').disabled=true;
   $('prepareM6Package').disabled=true;
   $('downloadM6Package').disabled=true;
+  $('prepareM6Overlay').disabled=true;
+  $('downloadM6Overlay').disabled=true;
+  $('m6OverlayStatus').textContent='先准备 M6 审核包并在本机采集 OCR 证据。';
   $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('batchProgress').value=0;
   $('batchRows').replaceChildren();
@@ -1310,6 +1316,8 @@ function renderBatchState(state){
   $('reviewCurrentBatch').disabled=state.status!=='COMPLETED';
   $('prepareM6Package').disabled=state.status!=='COMPLETED';
   $('downloadM6Package').disabled=true;
+  $('prepareM6Overlay').disabled=true;
+  $('downloadM6Overlay').disabled=true;
   if(state.status==='COMPLETED')refreshM6PackageStatus(state.batch_id);
   else $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('applyBatch').textContent=(state.status==='FAILED'||state.status==='INTERRUPTED')
@@ -1423,6 +1431,12 @@ async function refreshM6PackageStatus(batchId){
     if(!response.ok)throw Error(errorText(result));
     $('prepareM6Package').disabled=result.prepared;
     $('downloadM6Package').disabled=!result.prepared;
+    if(result.prepared)refreshM6OverlayStatus(batchId);
+    else{
+      $('prepareM6Overlay').disabled=true;
+      $('downloadM6Overlay').disabled=true;
+      $('m6OverlayStatus').textContent='请先生成 M6 审核包并在本机采集 OCR 证据。';
+    }
     label.textContent=result.prepared
       ? 'M6 审核包已存在：POSTER_BATCH_DIR/'+result.relative_directory+
         '。为保护人工修改，不能再次覆盖。'
@@ -1432,6 +1446,8 @@ async function refreshM6PackageStatus(batchId){
     if(currentBatchId===batchId){
       $('prepareM6Package').disabled=true;
       $('downloadM6Package').disabled=true;
+      $('prepareM6Overlay').disabled=true;
+      $('downloadM6Overlay').disabled=true;
       label.textContent='M6 审核包预检未通过：'+err.message;
     }
   }
@@ -1450,6 +1466,7 @@ $('prepareM6Package').addEventListener('click',async()=>{
     if(currentBatchId!==batchId)return;
     if(!response.ok)throw Error(errorText(result));
     $('downloadM6Package').disabled=false;
+    refreshM6OverlayStatus(batchId);
     label.textContent='已生成 M6 草稿：POSTER_BATCH_DIR/'+result.relative_directory+
       ' · SKU '+result.batch_sku_count+' · 审核行 '+result.review_rows_created+
       ' · 缺失输出 '+result.missing_output_count+
@@ -1473,6 +1490,69 @@ $('downloadM6Package').addEventListener('click',()=>{
   const link=document.createElement('a');
   link.href='/api/batches/'+encodeURIComponent(batchId)+'/m6-package/download';
   link.download='m6-review-'+batchId+'.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+});
+
+async function refreshM6OverlayStatus(batchId){
+  if(currentBatchId!==batchId)return;
+  const label=$('m6OverlayStatus');
+  label.textContent='正在检查本机 OCR 标注预览文件状态…';
+  $('prepareM6Overlay').disabled=true;
+  $('downloadM6Overlay').disabled=true;
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-overlay');
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    $('prepareM6Overlay').disabled=!result.ocr_capture_present||result.overlay_prepared;
+    $('downloadM6Overlay').disabled=!result.overlay_prepared;
+    label.textContent=result.overlay_prepared
+      ? 'OCR 标注包已存在；可下载方形和 4:5 的检测框预览。仅供人工复核，不证明 OCR 质量通过。'
+      : result.ocr_capture_present
+        ? '已检测到本机 OCR 采集记录，可显式生成只读标注预览；不会执行 OCR、修改原图或自动批准。'
+        : '尚未在本地审核包找到 OCR 采集记录。请先独立运行真实 PaddleOCR 采集。';
+  }catch(err){
+    if(currentBatchId===batchId){
+      $('prepareM6Overlay').disabled=true;
+      $('downloadM6Overlay').disabled=true;
+      label.textContent='OCR 标注包不可用：'+err.message;
+    }
+  }
+}
+$('prepareM6Overlay').addEventListener('click',async()=>{
+  const batchId=currentBatchId;
+  if(!batchId||lastBatchStatus!=='COMPLETED'||$('prepareM6Overlay').disabled)return;
+  const button=$('prepareM6Overlay'),label=$('m6OverlayStatus');
+  button.disabled=true;
+  label.textContent='正在基于冻结 OCR 证据生成标注 ZIP；不会运行 OCR 或覆盖已有评审…';
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-overlay',{
+      method:'POST'
+    });
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    $('downloadM6Overlay').disabled=false;
+    label.textContent='OCR 标注预览已生成：'+result.overlay_count+
+      ' 张 · 已定位文字 '+result.positioned_line_count+
+      ' 条 · 待人工定位 '+result.unlocated_line_count+
+      ' 条。仅供目视核对，未进行质量验收。';
+  }catch(err){
+    if(currentBatchId===batchId){
+      label.textContent='无法生成 OCR 标注包：'+err.message;
+      // Do not re-run preparation blindly; inspect existing file state.
+      await refreshM6OverlayStatus(batchId);
+    }
+  }
+});
+$('downloadM6Overlay').addEventListener('click',()=>{
+  const batchId=currentBatchId;
+  if(!batchId||lastBatchStatus!=='COMPLETED'||$('downloadM6Overlay').disabled)return;
+  const link=document.createElement('a');
+  link.href='/api/batches/'+encodeURIComponent(batchId)+'/m6-overlay/download';
+  link.download='m6-ocr-overlay-'+batchId+'.zip';
   document.body.appendChild(link);
   link.click();
   link.remove();

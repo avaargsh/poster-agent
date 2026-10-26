@@ -745,3 +745,161 @@ def test_web_m6_zip_ui_download_is_available_only_for_prepared_batch():
     assert 'id="downloadM6Package"' in html
     assert "/m6-package/download" in html
     assert "$('downloadM6Package').disabled=!result.prepared" in html
+
+
+def _seed_m6_ocr_capture_for_web(package):
+    """Synthetic declaration fixture. It is NOT a real OCR execution record."""
+    import hashlib
+
+    reviews_raw = (package / "m6_output_reviews.csv").read_bytes()
+    rows = list(csv.DictReader(io.StringIO(reviews_raw.decode("utf-8"))))
+    observations = []
+    for row in rows:
+        observations.append({
+            "sku_id": row["sku_id"],
+            "variant_id": row["variant_id"],
+            "poster_id": row["poster_id"],
+            "image_sha256": row["output_image_sha256"],
+            "recognized_line_count": 2,
+            "recognized_lines": [
+                {"text": "¥129", "confidence": 0.95, "bbox": [65, 668, 200, 724]},
+                {"text": "Headline", "confidence": 0.82, "bbox": None},
+            ],
+            "status": "CAPTURED_REVIEW_REQUIRED",
+        })
+    document = {
+        "schema_version": "m6-paddle-ocr-evidence-1",
+        "cohort_id": rows[0]["cohort_id"],
+        "reviews_csv_sha256": hashlib.sha256(reviews_raw).hexdigest(),
+        "sku_count": len(rows) // 2,
+        "expected_variant_count": len(rows),
+        "captured_variant_count": len(rows),
+        "real_ocr_inference_attempted": True,  # fixture-only assertion
+        "paddleocr_version": "3.3.0",
+        "paddlepaddle_version": "3.2.0",
+        "model_digests": {
+            "detection": {"sha256": "a" * 64, "file_count": 1, "total_bytes": 4},
+            "recognition": {"sha256": "b" * 64, "file_count": 1, "total_bytes": 4},
+        },
+        "captured_at_utc": "2026-10-26T00:00:00+00:00",
+        "elapsed_seconds": 1.2,
+        "human_review_performed": False,
+        "automatically_accepted": False,
+        "source_authorizations_verified": False,
+        "min_20_real_skus_proven": False,
+        "positioned_line_count": len(rows),
+        "unlocated_line_count": len(rows),
+        "observations": observations,
+    }
+    path = package / "m6_paddle_ocr_evidence.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_web_m6_ocr_overlay_full_user_flow_is_explicit_and_non_destructive(
+    tmp_path, monkeypatch,
+):
+    import hashlib
+    import zipfile
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    before = {
+        "reviews": (package / "m6_output_reviews.csv").read_bytes(),
+        "image": (package / "images/sku-one-square.png").read_bytes(),
+    }
+    status_url = f"/api/batches/{batch_id}/m6-overlay"
+    status = client.get(status_url)
+    assert status.status_code == 200
+    assert status.json()["ocr_capture_present"] is False
+    assert status.json()["overlay_prepared"] is False
+    assert status.json()["automatically_accepted"] is False
+    assert client.post(status_url).status_code == 409
+    assert client.get(status_url + "/download").status_code == 409
+
+    capture = _seed_m6_ocr_capture_for_web(package)
+    assert client.get(status_url).json()["ocr_capture_present"] is True
+    (package / "extra-private.txt").write_text("do not disclose", encoding="utf-8")
+    created = client.post(status_url)
+    assert created.status_code == 201, created.text
+    assert created.json()["overlay_count"] == 4
+    assert created.json()["positioned_line_count"] == 4
+    assert created.json()["unlocated_line_count"] == 4
+    assert created.json()["automatically_accepted"] is False
+    assert client.get(status_url).json()["overlay_prepared"] is True
+
+    download = client.get(status_url + "/download")
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"] == "application/zip"
+    assert "attachment" in download.headers["content-disposition"]
+    assert "no-store" in download.headers["cache-control"]
+    assert str(tmp_path) not in str(download.headers)
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        names = set(archive.namelist())
+        assert names == {
+            "m6_ocr_overlay_manifest.json",
+            "images/sku-one-square.png", "images/sku-one-native-4x5.png",
+            "images/sku-two-square.png", "images/sku-two-native-4x5.png",
+        }
+        manifest = json.loads(archive.read("m6_ocr_overlay_manifest.json"))
+        assert manifest["ocr_capture_sha256"] == hashlib.sha256(capture.read_bytes()).hexdigest()
+        for row in manifest["items"]:
+            assert hashlib.sha256(archive.read(row["overlay_path"])).hexdigest() == row["overlay_sha256"]
+    assert b"do not disclose" not in download.content
+    assert (package / "m6_output_reviews.csv").read_bytes() == before["reviews"]
+    assert (package / "images/sku-one-square.png").read_bytes() == before["image"]
+    assert client.post(status_url).status_code == 409
+    assert client.get(status_url + "/download").status_code == 200
+
+
+def test_web_m6_ocr_overlay_blocks_stale_capture_and_never_leaks_archive(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    ocr = _seed_m6_ocr_capture_for_web(package)
+    endpoint = f"/api/batches/{batch_id}/m6-overlay"
+    assert client.post(endpoint).status_code == 201
+    original = ocr.read_bytes()
+    ocr.write_bytes(original.replace(b"3.3.0", b"3.3.1"))
+    assert client.get(endpoint + "/download").status_code == 409
+    ocr.write_bytes(original)
+    assert client.get(endpoint + "/download").status_code == 200
+
+    out = package / "m6_ocr_review_overlays.zip"
+    backed_up = out.read_bytes()
+    out.unlink()
+    outside = tmp_path / "other-auditor.zip"
+    outside.write_bytes(backed_up)
+    out.symlink_to(outside)
+    assert client.get(endpoint + "/download").status_code == 409
+    assert client.post(endpoint).status_code == 409
+    assert outside.read_bytes() == backed_up
+
+
+def test_web_m6_ocr_overlay_refuses_forged_or_unfinished_batches(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.get(f"/api/batches/{batch_id}/m6-overlay").status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/m6-overlay").status_code == 409
+    assert client.get(f"/api/batches/{batch_id}/m6-overlay/download").status_code == 409
+    assert client.get("/api/batches/../../m6-overlay").status_code in (404, 422)
+
+
+def test_web_m6_overlay_ui_is_offline_and_disabled_by_default():
+    page = client.get("/")
+    assert page.status_code == 200
+    for marker in (
+        'id="prepareM6Overlay"',
+        'id="downloadM6Overlay"',
+        'id="m6OverlayStatus"',
+        "/m6-overlay",
+        "ocr_capture_present",
+        "overlay_prepared",
+    ):
+        assert marker in page.text
