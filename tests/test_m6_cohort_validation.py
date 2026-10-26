@@ -59,7 +59,7 @@ def _png(path: Path, size: tuple[int, int], color: tuple[int, int, int]) -> None
     Image.new("RGB", size, color).save(path, format="PNG")
 
 
-def _bundle(tmp_path, monkeypatch, count: int = 2) -> dict:
+def _bundle(tmp_path, monkeypatch, count: int = 2, source_format: str = "PNG") -> dict:
     store = tmp_path / "poster_store"
     monkeypatch.setenv("POSTER_DATA_DIR", str(store))
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
@@ -68,10 +68,14 @@ def _bundle(tmp_path, monkeypatch, count: int = 2) -> dict:
     manifest_rows = []
     for i in range(count):
         sku = f"sku-{i + 1:02d}"
-        _png(source_dir / f"{sku}.png", (128, 160), (30 + i, 80, 120))
+        suffix = ".jpg" if source_format == "JPEG" else ".png"
+        source_name = f"{sku}{suffix}"
+        Image.new("RGB", (128, 160), (30 + i, 80, 120)).save(
+            source_dir / source_name, format=source_format
+        )
         manifest_rows.append({
             "sku_id": sku,
-            "product_image": f"{sku}.png",
+            "product_image": source_name,
             "title": f"测试商品{i + 1}",
             "price": str(99 + i),
             "original_price": "",
@@ -116,7 +120,7 @@ def _bundle(tmp_path, monkeypatch, count: int = 2) -> dict:
             "definite_labels": "8",
             "ocr_text_labels": "5",
             "unsure_labels": "0",
-            "product_sha256": journal_row["product_sha256"],
+            "product_sha256": _sha(storage.poster_dir(poster_id) / "assets" / "product.png"),
             "native_image_sha256": native_sha,
             "action": "synthetic test fixture",
         })
@@ -213,6 +217,42 @@ def _validate(bundle: dict, *, min_skus: int = 2) -> dict:
         bundle["reviews"], bundle["native_manifest"], bundle["readiness"],
         min_skus=min_skus,
     )
+
+
+@pytest.mark.parametrize("source_format", ["JPEG", "PNG"])
+def test_real_native_audit_compares_normalized_assets_not_upload_bytes(
+    tmp_path, monkeypatch, source_format,
+):
+    from evals.native_batch_scope import load_batch_scope
+    from evals.native_trial import run_trial
+
+    bundle = _bundle(tmp_path, monkeypatch, source_format=source_format)
+    audit_dir = tmp_path / "real-audit"
+    run_trial("test-reviewer", audit_dir, batch_scope=load_batch_scope(bundle["journal"]))
+    bundle["native_manifest"] = audit_dir / "native_trial_manifest.csv"
+    bundle["readiness"] = audit_dir / "native_trial_readiness.json"
+    journal = json.loads(bundle["journal"].read_text())
+    with bundle["native_manifest"].open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            # An RGB source is normalized to RGBA PNG on upload. These are
+            # deliberately different byte identities, even for a PNG input.
+            assert row["product_sha256"] != journal["rows"][row["sku_id"]]["product_sha256"]
+    report = _validate(bundle)
+    assert report["status"] == "BLOCKED"  # Human review and real OCR remain required.
+    assert not any("product_sha256" in error for error in report["errors"])
+
+
+def test_native_manifest_cannot_substitute_original_upload_hash(tmp_path, monkeypatch):
+    bundle = _bundle(tmp_path, monkeypatch, source_format="JPEG")
+    journal = json.loads(bundle["journal"].read_text())
+    row = bundle["native_manifest_rows"][0]
+    row["product_sha256"] = journal["rows"][row["sku_id"]]["product_sha256"]
+    _write_csv(bundle["native_manifest"], NATIVE_MANIFEST_FIELDS, bundle["native_manifest_rows"])
+    bundle["readiness_data"]["native_trial_manifest_sha256"] = _sha(bundle["native_manifest"])
+    bundle["readiness"].write_text(json.dumps(bundle["readiness_data"]), encoding="utf-8")
+    report = _validate(bundle)
+    assert report["status"] == "BLOCKED"
+    assert any("product_sha256" in error for error in report["errors"])
 
 
 def test_valid_synthetic_bundle_passes_without_quality_score(tmp_path, monkeypatch):
