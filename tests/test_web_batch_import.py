@@ -903,3 +903,112 @@ def test_web_m6_overlay_ui_is_offline_and_disabled_by_default():
         "overlay_prepared",
     ):
         assert marker in page.text
+
+
+def test_web_m6_sku_ocr_review_pairs_readonly_labels_and_text(tmp_path, monkeypatch):
+    """A synthetic declaration is enough to exercise UI transport, not real OCR."""
+    import hashlib
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review"
+    assert client.get(endpoint).status_code == 409
+    capture = _seed_m6_ocr_capture_for_web(package)
+    reviews_before = (package / "m6_output_reviews.csv").read_bytes()
+    capture_before = capture.read_bytes()
+
+    response = client.get(endpoint, params={"sku_id": "sku-two"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["sku_ids"] == ["sku-one", "sku-two"]
+    assert data["selected_sku_id"] == "sku-two"
+    assert data["ocr_capture_consistency"] == "MATCHED_DECLARED_REAL"
+    assert data["ocr_capture_sha256"] == hashlib.sha256(capture_before).hexdigest()
+    assert data["reviews_csv_sha256"] == hashlib.sha256(reviews_before).hexdigest()
+    assert data["automatically_accepted"] is False
+    assert data["runtime_attested"] is False
+    assert data["quality_verified"] is False
+    assert len(data["variants"]) == 2
+    assert {v["variant_id"] for v in data["variants"]} == {
+        "square", "feed_4x5_native",
+    }
+    for variant in data["variants"]:
+        assert variant["review_labels"]["overall_accept"] == "UNVERIFIED"
+        assert variant["review_labels"]["price"] == "UNVERIFIED"
+        assert variant["recognized_line_count"] == 2
+        assert variant["preview_line_count"] == 2
+        assert variant["lines_truncated_count"] == 0
+        assert variant["lines"][0] == {
+            "text": "¥129", "confidence": 0.95, "bbox": [65, 668, 200, 724],
+        }
+        assert variant["lines"][1]["bbox"] is None
+        assert len(variant["image_sha256"]) == 64
+        assert "image_path" not in variant
+    assert (package / "m6_output_reviews.csv").read_bytes() == reviews_before
+    assert capture.read_bytes() == capture_before
+
+
+def test_web_m6_sku_ocr_review_rejects_bad_selection_or_stale_artifacts(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-review"
+    assert client.get(endpoint).status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.get(endpoint).status_code == 409
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    capture = _seed_m6_ocr_capture_for_web(package)
+    assert client.get(endpoint, params={"sku_id": "unknown-sku"}).status_code == 404
+    assert client.get(endpoint).status_code == 200
+    csv_path = package / "m6_output_reviews.csv"
+    original_csv = csv_path.read_bytes()
+    csv_path.write_bytes(original_csv.replace(b"UNVERIFIED", b"FAIL", 1))
+    assert client.get(endpoint).status_code == 409
+    csv_path.write_bytes(original_csv)
+
+    image_path = package / "images/sku-one-square.png"
+    image_bytes = image_path.read_bytes()
+    image_path.write_bytes(b"bad image")
+    assert client.get(endpoint, params={"sku_id": "sku-one"}).status_code == 409
+    image_path.write_bytes(image_bytes)
+    assert client.get(endpoint, params={"sku_id": "sku-one"}).status_code == 200
+
+    previous = capture.read_bytes()
+    capture.write_bytes(previous.replace(b"3.3.0", b"test-double"))
+    assert client.get(endpoint).status_code == 409
+
+
+def test_web_m6_sku_ocr_review_preview_bounded_and_untrusted_text_is_safe(
+    tmp_path, monkeypatch,
+):
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    package = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    capture = _seed_m6_ocr_capture_for_web(package)
+    data = json.loads(capture.read_text(encoding="utf-8"))
+    lines = [{"text": "<img src=x onerror=alert(1)>" + "字" * 500,
+              "confidence": 0.77, "bbox": None} for _ in range(60)]
+    for observation in data["observations"]:
+        observation["recognized_lines"] = lines
+        observation["recognized_line_count"] = len(lines)
+    data["positioned_line_count"] = 0
+    data["unlocated_line_count"] = 4 * len(lines)
+    capture.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    res = client.get(f"/api/batches/{batch_id}/m6-ocr-review")
+    assert res.status_code == 200, res.text
+    for variant in res.json()["variants"]:
+        assert variant["recognized_line_count"] == 60
+        assert variant["preview_line_count"] <= 20
+        assert variant["lines_truncated_count"] >= 40
+        assert len(variant["lines"][0]["text"]) <= 160
+    page = client.get("/")
+    assert page.status_code == 200
+    assert 'id="inspectM6OCR"' in page.text
+    assert 'id="m6OcrSkuPicker"' in page.text
+    assert 'id="m6OcrReviewRows"' in page.text
+    assert "/m6-ocr-review" in page.text
+    assert "textContent=line.text" in page.text

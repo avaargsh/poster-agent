@@ -105,6 +105,14 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
 
+### 网页逐 SKU OCR 对照检查
+
+当一个已完成的批次已准备 M6 审核包，并且保存了 `m6_paddle_ocr_evidence.json`，可在同一批次点击「查看逐 SKU OCR 核对」。服务器使用已有的 `verify_ocr_capture` 对整个冻结 cohort、评审 CSV 和 OCR 声明执行一致性检查，然后对所选 SKU 的方形/原生 4:5 两张原始 PNG 再做 SHA-256 核验。界面同步展示 CSV 人工标签（标题、价格、价格位置、总体状态）、OCR 文本、置信度和检测框坐标。可以在 SKU 下拉列表中切换；不会向服务发送任意文件路径。
+
+API：`GET /api/batches/{batch_id}/m6-ocr-review?sku_id=<SKU>`。首次请求不带 `sku_id` 时默认选择排序后的第一件商品。为控制响应与前端绘制开销，仅返回当前 SKU 的两个版式，每版式至多 20 行、文本截断到 160 个字符，并返回总行数、剩余行数与缺坐标行数。需要全部识别行时查看原始 JSON；**不要把截断视图用于计算准确率**。数据仅在本地回环 HTTP 页面显示，前端使用 `textContent` 处理 OCR 与 CSV 字符串，避免将不可信识别文本解释为 HTML。对失效批次、缺证据、旧 CSV、图片哈希变化及非法 SKU 请求会拒绝输出。
+
+该视图只是供人工核对的 **read-only review aide**。即使 OCR 文本恰好匹配人工评分、字段标为 PASS，仍不表示独立验证了模型真实性、价格准确性、素材使用许可或 20 SKU 业务验收。人工结果仍在现有 CSV 和最终 M6 门禁管理，不在该页面写入或自动审批。
+
 ### 通过网页生成与下载 OCR 标注预览
 
 在已经完成的网页批次中，先使用「准备 M6 离线审核包」生成审核 CSV 与两种版式图片，再在本机安装适用版本的 PaddleOCR/PaddlePaddle 并执行真正的 OCR 采集命令。回到批次页面（也可从「历史网页批次」进入），点击「准备 OCR 标注预览」后，可使用「下载 OCR 标注 ZIP」保存本地审核辅助文件。

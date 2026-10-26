@@ -182,6 +182,102 @@ def _archive_snapshot(package: Path):
         raise
 
 
+
+
+# Read only one SKU at a time. Full-cohort evidence membership is verified once
+# by the existing verifier; only the chosen poster images are then hashed.
+_MAX_PREVIEW_LINES = 20
+_MAX_TEXT_CHARS = 160
+_REVIEW_LABEL_FIELDS = (
+    "title", "subtitle", "price", "original_price", "price_position",
+    "original_price_position", "text_legibility", "overall_accept",
+    "overall_reason", "reviewer_alias", "reviewed_at_utc",
+)
+
+
+@router.get("/{batch_id}/m6-ocr-review")
+def inspect_sku_ocr_review(batch_id: str, sku_id: str | None = None):
+    """Pair frozen human CSV judgments with bounded OCR line previews.
+
+    This is NOT an accuracy score or model-execution attestation. It never
+    writes reviews, changes status or runs PaddleOCR.
+    """
+    from scripts.capture_m6_paddle_ocr import (
+        MAX_PNG_BYTES, OCREvidenceError, _identities, _read_regular, _review_rows,
+    )
+    from scripts.verify_m6_ocr_capture import (
+        OCRCaptureEvidenceError, _read_snapshot, verify_ocr_capture,
+    )
+
+    package = _package(batch_id)
+    try:
+        reviews_sha, original_rows = _review_rows(package)
+        cohort, rows, _ = _identities(original_rows)
+        evidence_file = package / "m6_paddle_ocr_evidence.json"
+        verified = verify_ocr_capture(
+            evidence_file, rows, cohort_id=cohort, reviews_sha256=reviews_sha,
+        )
+        document, evidence_sha = _read_snapshot(evidence_file)
+        if evidence_sha != verified["evidence_sha256"]:
+            raise OCRCaptureEvidenceError("OCR 证据在校验后被替换")
+        ids = sorted({row["sku_id"] for row in rows})
+        selected = sku_id if sku_id is not None else ids[0]
+        if selected not in ids:
+            raise HTTPException(status_code=404, detail="该批次中没有指定的 SKU")
+
+        row_by_key = {(row["sku_id"], row["variant_id"]): row for row in rows}
+        observation_by_key = {
+            (row["sku_id"], row["variant_id"]): row
+            for row in document["observations"]
+        }
+        previews = []
+        for variant in ("square", "feed_4x5_native"):
+            row = row_by_key[(selected, variant)]
+            # Read and verify the exact same bytes that the CSV identifies.
+            image = _read_regular(package / row["output_image_path"], MAX_PNG_BYTES)
+            if hashlib.sha256(image).hexdigest() != row["output_image_sha256"]:
+                raise OCRCaptureEvidenceError("原始图片已改变；当前 OCR 复核已过期")
+            observation = observation_by_key[(selected, variant)]
+            lines = observation["recognized_lines"]
+            preview_lines = [
+                {
+                    "text": line["text"][:_MAX_TEXT_CHARS],
+                    "confidence": line["confidence"],
+                    "bbox": line.get("bbox"),
+                }
+                for line in lines[:_MAX_PREVIEW_LINES]
+            ]
+            previews.append({
+                "variant_id": variant,
+                "poster_id": row["poster_id"],
+                "image_sha256": row["output_image_sha256"],
+                "review_labels": {key: row.get(key, "") for key in _REVIEW_LABEL_FIELDS},
+                "recognized_line_count": len(lines),
+                "preview_line_count": len(preview_lines),
+                "lines_truncated_count": len(lines) - len(preview_lines),
+                "unlocated_line_count": sum(line.get("bbox") is None for line in lines),
+                "lines": preview_lines,
+                "status": "CAPTURED_REVIEW_REQUIRED",
+            })
+    except HTTPException:
+        raise
+    except (OSError, ValueError, OCRCaptureEvidenceError, OCREvidenceError) as exc:
+        raise _blocked(f"OCR 逐 SKU 核对所需证据不完整或已过期：{exc}") from exc
+
+    return {
+        "cohort_id": cohort,
+        "reviews_csv_sha256": reviews_sha,
+        "ocr_capture_sha256": verified["evidence_sha256"],
+        "ocr_capture_consistency": verified["status"],
+        "sku_ids": ids,
+        "selected_sku_id": selected,
+        "variants": previews,
+        "automatically_accepted": False,
+        "quality_verified": False,
+        "runtime_attested": False,
+    }
+
+
 @router.get("/{batch_id}/m6-overlay/download")
 def download_overlay(batch_id: str):
     """Read-only, snapshot-verified local archive download."""

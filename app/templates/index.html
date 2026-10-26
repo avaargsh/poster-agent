@@ -105,6 +105,16 @@
 </div>
 <p id="m6PackageStatus" class="tip" aria-live="polite">批次完成后可生成本机 M6 审核包；仅生成 UNVERIFIED 草稿，不执行 OCR 或付费模型。</p>
 <p id="m6OverlayStatus" class="tip" aria-live="polite">先准备 M6 审核包并在本机采集 OCR 证据，才可生成只读标注预览。</p>
+<div class="actions"><button id="inspectM6OCR" type="button" class="secondary" disabled>查看逐 SKU OCR 核对</button></div>
+<section id="m6OcrReviewPanel" class="mt" hidden aria-label="逐 SKU OCR 与人工标签核对">
+  <h3>OCR 文字与人工标签逐项核对</h3>
+  <p class="tip">内容来自本地冻结的审核 CSV 和 OCR 证据；仅供人工检查，不能据此自动批准海报或证明真实模型执行。</p>
+  <div class="row"><label for="m6OcrSkuPicker">选择 SKU</label>
+    <select id="m6OcrSkuPicker" disabled></select>
+  </div>
+  <p id="m6OcrReviewStatus" class="tip" aria-live="polite"></p>
+  <div id="m6OcrReviewRows" aria-live="polite"></div>
+</section>
 <p id="batchStatus" class="tip" aria-live="polite">尚未选择批次。预检不会创建海报；只有点击生成后才开始处理。</p>
 <progress id="batchProgress" max="100" value="0" aria-label="批量生成进度"></progress>
 <div id="batchPlanSummary" class="tip"></div>
@@ -1288,6 +1298,8 @@ function resetBatchForNewFiles(){
   $('downloadM6Package').disabled=true;
   $('prepareM6Overlay').disabled=true;
   $('downloadM6Overlay').disabled=true;
+  $('inspectM6OCR').disabled=true;
+  resetM6OCRReview();
   $('m6OverlayStatus').textContent='先准备 M6 审核包并在本机采集 OCR 证据。';
   $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('batchProgress').value=0;
@@ -1318,8 +1330,13 @@ function renderBatchState(state){
   $('downloadM6Package').disabled=true;
   $('prepareM6Overlay').disabled=true;
   $('downloadM6Overlay').disabled=true;
+  $('inspectM6OCR').disabled=true;
+  if(m6OcrReviewBatch && m6OcrReviewBatch!==state.batch_id)resetM6OCRReview();
   if(state.status==='COMPLETED')refreshM6PackageStatus(state.batch_id);
-  else $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
+  else{
+    resetM6OCRReview();
+    $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
+  }
   $('applyBatch').textContent=(state.status==='FAILED'||state.status==='INTERRUPTED')
     ? '继续批次' : state.status==='COMPLETED' ? '批次已完成' : '生成海报（本地背景）';
   $('preflightBatch').disabled=state.status==='RUNNING';
@@ -1495,12 +1512,111 @@ $('downloadM6Package').addEventListener('click',()=>{
   link.remove();
 });
 
+let m6OcrReviewBatch=null;
+let m6OcrReviewRequest=0;
+function resetM6OCRReview(){
+  m6OcrReviewRequest+=1;
+  m6OcrReviewBatch=null;
+  $('m6OcrReviewPanel').hidden=true;
+  $('m6OcrSkuPicker').replaceChildren();
+  $('m6OcrSkuPicker').disabled=true;
+  $('m6OcrReviewStatus').textContent='';
+  $('m6OcrReviewRows').replaceChildren();
+}
+function drawM6OCRReview(data){
+  const picker=$('m6OcrSkuPicker');
+  if(!Array.isArray(data.sku_ids)||data.sku_ids.length<1||data.sku_ids.length>100||
+     !Array.isArray(data.variants)||data.variants.length!==2)
+    throw Error('服务器返回的逐 SKU 证据结构无效');
+  picker.replaceChildren();
+  for(const sku of data.sku_ids){
+    const option=document.createElement('option');
+    option.value=sku;option.textContent=sku;picker.appendChild(option);
+  }
+  picker.value=data.selected_sku_id;
+  picker.disabled=false;
+  $('m6OcrReviewPanel').hidden=false;
+  $('m6OcrReviewStatus').textContent='已核对冻结证据：'+data.sku_ids.length+
+    ' 个 SKU · 当前 '+data.selected_sku_id+' · OCR 仅供人工复核，不证明模型推理或质量 PASS。';
+  const host=$('m6OcrReviewRows');
+  host.replaceChildren();
+  for(const variant of data.variants){
+    const card=document.createElement('section');
+    card.className='mt';
+    const heading=document.createElement('h4');
+    heading.textContent=variant.variant_id==='square'?'方形 1024×1024':'原生 4:5 1080×1350';
+    card.appendChild(heading);
+    const review=document.createElement('p');
+    const labels=variant.review_labels||{};
+    review.textContent='人工审核 · 标题 '+(labels.title||'UNVERIFIED')+
+      ' · 售价 '+(labels.price||'UNVERIFIED')+
+      ' · 价格位置 '+(labels.price_position||'UNVERIFIED')+
+      ' · 总体 '+(labels.overall_accept||'UNVERIFIED');
+    card.appendChild(review);
+    const metadata=document.createElement('p');
+    metadata.className='tip';
+    metadata.textContent='识别行 '+variant.recognized_line_count+
+      ' · 无定位 '+variant.unlocated_line_count+
+      ' · 仅展示前 '+variant.preview_line_count+
+      ' 行；剩余 '+variant.lines_truncated_count+' 行请查看原始 OCR JSON。';
+    card.appendChild(metadata);
+    const list=document.createElement('ol');
+    for(const line of variant.lines||[]){
+      const item=document.createElement('li');
+      const lineNode=document.createElement('span');
+      lineNode.textContent=line.text;
+      item.appendChild(lineNode);
+      const details=document.createElement('span');
+      details.className='tip';
+      details.textContent=' · 置信度 '+line.confidence.toFixed(2)+
+        (Array.isArray(line.bbox)?' · 坐标 '+line.bbox.join(','):' · 坐标未知');
+      item.appendChild(details);
+      list.appendChild(item);
+    }
+    card.appendChild(list);
+    host.appendChild(card);
+  }
+}
+async function loadM6OCRReview(batchId,skuId=null){
+  const id=++m6OcrReviewRequest;
+  $('inspectM6OCR').disabled=true;
+  $('m6OcrReviewStatus').textContent='正在核对该 SKU 的冻结审核表、OCR 与图片摘要…';
+  try{
+    const path='/api/batches/'+encodeURIComponent(batchId)+'/m6-ocr-review'+
+      (skuId?'?sku_id='+encodeURIComponent(skuId):'');
+    const response=await fetch(path);
+    const data=await response.json();
+    if(currentBatchId!==batchId||id!==m6OcrReviewRequest)return;
+    if(!response.ok)throw Error(errorText(data));
+    drawM6OCRReview(data);
+    m6OcrReviewBatch=batchId;
+  }catch(err){
+    if(currentBatchId===batchId&&id===m6OcrReviewRequest){
+      $('m6OcrReviewPanel').hidden=false;
+      $('m6OcrReviewStatus').textContent='无法核对 OCR 证据：'+err.message;
+      $('m6OcrReviewRows').replaceChildren();
+    }
+  }finally{
+    if(currentBatchId===batchId&&id===m6OcrReviewRequest)
+      $('inspectM6OCR').disabled=lastBatchStatus!=='COMPLETED';
+  }
+}
+$('inspectM6OCR').addEventListener('click',()=>{
+  if(currentBatchId&&lastBatchStatus==='COMPLETED')
+    loadM6OCRReview(currentBatchId);
+});
+$('m6OcrSkuPicker').addEventListener('change',()=>{
+  if(currentBatchId&&m6OcrReviewBatch===currentBatchId)
+    loadM6OCRReview(currentBatchId,$('m6OcrSkuPicker').value);
+});
+
 async function refreshM6OverlayStatus(batchId){
   if(currentBatchId!==batchId)return;
   const label=$('m6OverlayStatus');
   label.textContent='正在检查本机 OCR 标注预览文件状态…';
   $('prepareM6Overlay').disabled=true;
   $('downloadM6Overlay').disabled=true;
+  $('inspectM6OCR').disabled=true;
   try{
     const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-overlay');
     const result=await response.json();
@@ -1508,6 +1624,7 @@ async function refreshM6OverlayStatus(batchId){
     if(!response.ok)throw Error(errorText(result));
     $('prepareM6Overlay').disabled=!result.ocr_capture_present||result.overlay_prepared;
     $('downloadM6Overlay').disabled=!result.overlay_prepared;
+    $('inspectM6OCR').disabled=!result.ocr_capture_present;
     label.textContent=result.overlay_prepared
       ? 'OCR 标注包已存在；可下载方形和 4:5 的检测框预览。仅供人工复核，不证明 OCR 质量通过。'
       : result.ocr_capture_present
@@ -1517,6 +1634,8 @@ async function refreshM6OverlayStatus(batchId){
     if(currentBatchId===batchId){
       $('prepareM6Overlay').disabled=true;
       $('downloadM6Overlay').disabled=true;
+      $('inspectM6OCR').disabled=true;
+      resetM6OCRReview();
       label.textContent='OCR 标注包不可用：'+err.message;
     }
   }

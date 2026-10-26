@@ -60,6 +60,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **M5j 已支持按导入批次独立评分：** 使用 `uv run --locked python -m scripts.native_trial --reviewer local-operator --batch-journal data/eval_runs/m5g_import/batch_import_results.json` 仅盘点本批次最新 SKU 版本；全批 READY 后显式 `--score`，结果附带批次账本 SHA 和 SKU 清单。缺一个样本也不会自动缩小分母。详见 [M5j 批次独立评测](docs/m5j-batch-evaluation.md)。
 
+**M6 逐 SKU OCR 与人工标签核对：** 已完成的网页批次在本地存在 OCR 采集证据后，可点击「查看逐 SKU OCR 核对」，选择 SKU，逐版式浏览经哈希校验的 OCR 文本、置信度、坐标及人工评审 CSV 的标题、售价和价格位置标签。只读取单个 SKU 的原图片验证 SHA-256，每版式最多展示 20 行、每行 160 字；无坐标明确标注未知。只读、不触发模型、不修改人工标签，也不自动计算质量 PASS。详见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
+
 **M6 OCR 标注预览网页闭环：** 已完成且准备好本地 M6 审核包的批次，网页新增「准备 OCR 标注预览」「下载 OCR 标注 ZIP」。仅当运营人员已通过 CLI 自行采集本地 OCR 证据时允许点击准备；下载时复核当前冻结 CSV、OCR 记录、来源图片和标注 ZIP 完整性。旧批次也可通过历史记录重新进入；按钮只生成预览，不执行 OCR、不自动评分。详见 [M6 操作协议](docs/m6-real-sku-review-rubric.md)。
 
 **M6 OCR 人工复核标注包：** 保存真实 OCR 证据后，可运行 `uv run --locked python -m scripts.render_m6_ocr_overlays --package-dir /path/to/m6_review_package`。脚本复用冻结 CSV、OCR JSON 和图片 SHA-256 校验，生成**不覆盖原图**的 `m6_ocr_review_overlays.zip`（编号检测框 PNG + 来源清单），供人工查看文字位置；缺坐标保留未知，不自动评分或批准。详细见 [M6 评测协议](docs/m6-real-sku-review-rubric.md)。
