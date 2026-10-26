@@ -155,6 +155,8 @@ uv run --locked python -m scripts.validate_m6_cohort \
 
 脚本会记录 manifest、journal、registry、review CSV、M5j native manifest 与 readiness 的 SHA-256，检查至少 20 个 SKU、素材授权状态、SKU 集合一致性、每 SKU 两种输出、最新版本、规格/图片哈希与尺寸，并要求原生 4:5 人工评审 PNG 的哈希与 M5j `native_image_sha256` 一致。缺失输出必须保留为 `UNVERIFIED`，仍计入应有输出分母，并阻塞通过。
 
+**评审 PNG 文件边界：** M6 校验最多读取每张 20 MiB 的本地 PNG，空文件或超限文件必须 `BLOCKED`；拒绝直接以符号链接指定的图片文件，避免审核路径被悄然重定向。校验先有界读取一次图片字节，然后对同一份字节计算 SHA-256 并由 Pillow 解码，避免哈希与解码期间分别重开路径导致结果不一致。只有 PNG 格式且尺寸与目标版式相符时才做完整像素解码。文件哈希和解码合法仍不等于商品视觉保真或真实 OCR 验收。
+
 M6 最终校验还会对每个 SKU 重新检查 M5g 创建时保存的不可变 v1 凭据，包括原始商品图、可选 Logo、背景、v1 方图和 v1 规格。校验复用 `app.batch_artifact_integrity.verify_batch_artifact`。即使评审表中的当前图片哈希与 M5j 报告一致，只要原始凭据或源素材已改动，最终状态仍为 `BLOCKED`。后续修订版本继续按原有规则核对当前最新版本，不会替代原始创建凭据。此检查验证本地一致性，不证明素材授权、OCR 真实性或人工评分质量。
 
 ## 4. 汇总报告模板

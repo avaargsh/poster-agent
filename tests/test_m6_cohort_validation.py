@@ -398,3 +398,83 @@ def test_m6_gate_rejects_changed_original_m5g_artifact(
         "M5g 原始产物与执行凭据不一致" in error
         for error in report["errors"]
     )
+
+
+def test_m6_gate_rejects_symlinked_review_png_even_when_digest_matches(tmp_path, monkeypatch):
+    """The review CSV must not silently follow a mutable image link."""
+    bundle = _bundle(tmp_path, monkeypatch)
+    row = next(
+        row for row in bundle["review_rows"]
+        if row["sku_id"] == "sku-01" and row["variant_id"] == "feed_4x5_native"
+    )
+    original = Path(row["output_image_path"])
+    link = original.parent / "review-linked.png"
+    link.symlink_to(original)
+    row["output_image_path"] = str(link)
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, bundle["review_rows"])
+
+    report = _validate(bundle)
+
+    assert report["status"] == "BLOCKED"
+    assert any("符号链接" in error for error in report["errors"])
+
+
+def test_m6_gate_bounds_review_png_bytes_before_decoding(tmp_path, monkeypatch):
+    """A parseable PNG with large trailing bytes cannot exhaust review memory."""
+    bundle = _bundle(tmp_path, monkeypatch)
+    row = next(
+        row for row in bundle["review_rows"]
+        if row["sku_id"] == "sku-01" and row["variant_id"] == "feed_4x5_native"
+    )
+    image_path = Path(row["output_image_path"])
+    # Pillow accepts arbitrary trailing bytes after IEND. The old gate read the
+    # whole file and considered it valid if the operator also updated hashes.
+    with image_path.open("ab") as handle:
+        handle.write(b"X" * (20 * 1024 * 1024 + 1))
+    updated_sha = _sha(image_path)
+    row["output_image_sha256"] = updated_sha
+    native = next(
+        item for item in bundle["native_manifest_rows"]
+        if item["sku_id"] == "sku-01"
+    )
+    native["native_image_sha256"] = updated_sha
+    _write_csv(
+        bundle["native_manifest"], NATIVE_MANIFEST_FIELDS,
+        bundle["native_manifest_rows"],
+    )
+    bundle["readiness_data"]["native_trial_manifest_sha256"] = _sha(
+        bundle["native_manifest"]
+    )
+    bundle["readiness"].write_text(
+        json.dumps(bundle["readiness_data"]), encoding="utf-8"
+    )
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, bundle["review_rows"])
+
+    report = _validate(bundle)
+
+    assert report["status"] == "BLOCKED"
+    assert any("20 MiB" in error for error in report["errors"])
+
+
+def test_m6_gate_reports_decompression_bomb_as_blocker(tmp_path, monkeypatch):
+    """A tiny PNG claiming massive dimensions must not crash the whole audit."""
+    import struct
+    import zlib
+
+    bundle = _bundle(tmp_path, monkeypatch)
+    row = next(
+        row for row in bundle["review_rows"]
+        if row["sku_id"] == "sku-01" and row["variant_id"] == "feed_4x5_native"
+    )
+    image_path = Path(row["output_image_path"])
+    raw = bytearray(image_path.read_bytes())
+    assert raw[12:16] == b"IHDR"
+    raw[16:24] = struct.pack(">II", 40_000, 40_000)
+    raw[29:33] = struct.pack(">I", zlib.crc32(raw[12:29]) & 0xffffffff)
+    image_path.write_bytes(raw)
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, bundle["review_rows"])
+
+    report = _validate(bundle)
+
+    assert report["status"] == "BLOCKED"
+    assert any("输出 PNG 不可读取" in error for error in report["errors"])

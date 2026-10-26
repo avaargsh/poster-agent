@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import re
 from collections import Counter
@@ -24,6 +25,7 @@ from scripts.real_sku_batch import BatchError, preflight
 
 SCHEMA = "m6-validation-1"
 MIN_SKUS = 20
+MAX_REVIEWED_PNG_BYTES = 20 * 1024 * 1024
 SHA = re.compile(r"^[0-9a-f]{64}$")
 SKU = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 VERSION = re.compile(r"^[1-9][0-9]*$")
@@ -124,6 +126,10 @@ def _output_path(value: str, reviews_path: Path) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = reviews_path.parent / path
+    # A link can be retargeted after the review worksheet was frozen. Do not
+    # silently trust a symlinked leaf as an immutable reviewed artifact.
+    if path.is_symlink():
+        raise M6ValidationError("输出图片不能是符号链接")
     return path.resolve(strict=True)
 
 
@@ -437,20 +443,28 @@ def validate_bundle(
             errors.append(f"{sku}/{variant}: output_image_sha256 格式无效")
         try:
             actual_path = _output_path(path_value, reviews_path)
-            output_raw = actual_path.read_bytes()
+            # Hash and decode the exact same bounded snapshot. Opening the path
+            # twice could validate a different PNG than the one whose digest
+            # was checked, while read_bytes() had no memory upper bound.
+            with actual_path.open("rb") as handle:
+                output_raw = handle.read(MAX_REVIEWED_PNG_BYTES + 1)
+            if not output_raw or len(output_raw) > MAX_REVIEWED_PNG_BYTES:
+                raise M6ValidationError("输出 PNG 为空或超过 20 MiB")
             actual_sha = _sha(output_raw)
-            with Image.open(actual_path) as image:
-                image.load()
+            expected_size = (1024, 1024) if variant == "square" else (1080, 1350)
+            with Image.open(io.BytesIO(output_raw)) as image:
                 actual_size = image.size
                 image_format = image.format
+                # Reject unexpected dimensions before decompressing the image.
+                if image_format == "PNG" and actual_size == expected_size:
+                    image.load()
             present_output_count += 1
-        except (OSError, ValueError, M6ValidationError) as exc:
+        except (OSError, ValueError, M6ValidationError, Image.DecompressionBombError) as exc:
             missing_output_count += 1
             errors.append(f"{sku}/{variant}: 输出 PNG 不可读取：{exc}")
             continue
         if actual_sha != hash_value:
             errors.append(f"{sku}/{variant}: output_image_sha256 与实际文件不一致")
-        expected_size = (1024, 1024) if variant == "square" else (1080, 1350)
         if image_format != "PNG" or actual_size != expected_size:
             errors.append(
                 f"{sku}/{variant}: 输出必须是 {expected_size[0]}x{expected_size[1]} PNG，"
