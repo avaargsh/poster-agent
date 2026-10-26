@@ -200,20 +200,14 @@ async def export_m6_review_sidecar(batch_id: str, request: Request):
     return _canonical_sidecar(package, submitted)
 
 
-@router.post("/{batch_id}/m6-review-sidecar/restore")
-async def restore_m6_review_sidecar(batch_id: str, request: Request):
-    """Validate a downloaded sidecar against CURRENT frozen OCR, CSV and images.
+def validate_saved_sidecar(package, raw: bytes) -> dict:
+    """Verify a saved sidecar using exactly the web restore integrity checks.
 
-    Returns only a canonical, read-only human-asserted document. No human
-    approval or provenance is inferred, and nothing is written to disk.
+    The returned canonical object is an operator statement, not authenticated
+    review provenance. No files are created or changed.
     """
-    package = _package(batch_id)
     try:
-        saved = RestoredSidecar.model_validate_json(
-            await _read_bounded_json(request)
-        )
-        # Convert the saved output labels into the original request contract,
-        # then rerun ALL current integrity checks instead of trusting JSON.
+        saved = RestoredSidecar.model_validate_json(raw)
         submitted = ReviewSidecarRequest.model_validate({
             "reviews_csv_sha256": saved.reviews_csv_sha256,
             "ocr_capture_sha256": saved.ocr_capture_sha256,
@@ -231,8 +225,13 @@ async def restore_m6_review_sidecar(batch_id: str, request: Request):
     except ValidationError as exc:
         raise _invalid("导入 JSON 不符合先前导出的侧车格式") from exc
     canonical = _canonical_sidecar(package, submitted)
-    # Covers source cohort identity, counts, exact review references, each
-    # poster/image digest, all labels and flags, and the fixed audit note.
     if saved.model_dump() != canonical:
         raise _unavailable("导入侧车与当前冻结证据或人工标签声明不一致")
     return canonical
+
+
+@router.post("/{batch_id}/m6-review-sidecar/restore")
+async def restore_m6_review_sidecar(batch_id: str, request: Request):
+    """Revalidate a downloaded sidecar against the current frozen evidence."""
+    package = _package(batch_id)
+    return validate_saved_sidecar(package, await _read_bounded_json(request))

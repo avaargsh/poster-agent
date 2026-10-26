@@ -8,6 +8,7 @@ from importlib import import_module
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
 
 from app import storage
 from app.main import app
@@ -1340,3 +1341,111 @@ def test_m6_review_workbench_supports_manual_sidecar_restore():
         'OPERATOR_ASSERTED_NOT_ATTESTED',
     ):
         assert marker in html
+
+
+def test_m6_offline_sidecar_assessment_reports_operator_coverage_without_quality_pass(
+    tmp_path, monkeypatch,
+):
+    from scripts.assess_m6_sidecar import assess_sidecar
+
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    raw = json.dumps(sidecar, ensure_ascii=False).encode("utf-8")
+    report = assess_sidecar(package, raw)
+    assert report["schema_version"] == "m6-operator-sidecar-assessment-1"
+    assert report["status"] == "PARTIAL"
+    assert report["expected_sku_count"] == 2
+    assert report["expected_output_count"] == 4
+    assert report["operator_decision_count"] == 2
+    assert report["missing_decision_count"] == 2
+    assert {item["sku_id"] for item in report["missing_decisions"]} == {"sku-two"}
+    assert report["reported_pass_count"] == 2
+    assert report["reported_fail_count"] == 0
+    assert report["ocr_capture_consistency_checked"] is True
+    assert report["operator_authenticity_verified"] is False
+    assert report["real_ocr_runtime_attested"] is False
+    assert report["source_authorizations_verified"] is False
+    assert report["quality_verified"] is False
+    assert report["approved_for_publication"] is False
+    assert report["minimum_sku_count_met"] is False
+    assert report["minimum_skus_required"] == 20
+
+
+def test_m6_offline_sidecar_assessment_distinguishes_complete_and_manual_fail(
+    tmp_path, monkeypatch,
+):
+    from scripts.assess_m6_sidecar import assess_sidecar
+
+    batch_id, package, original = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    request = _m6_review_sidecar_request(package, sku="sku-two")
+    request["decisions"].extend(_m6_review_sidecar_request(package)["decisions"])
+    full = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=request)
+    assert full.status_code == 200, full.text
+    completed = assess_sidecar(package, json.dumps(full.json()).encode())
+    assert completed["status"] == "LABELS_COMPLETE_UNATTESTED"
+    assert completed["missing_decision_count"] == 0
+    assert completed["reported_pass_count"] == 4
+    assert completed["approved_for_publication"] is False
+
+    request["decisions"][0]["overall_accept"] = "FAIL"
+    request["decisions"][0]["checks"]["price"] = "FAIL"
+    request["decisions"][0]["overall_reason"] = "Visible price mismatch"
+    rejected = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=request)
+    assert rejected.status_code == 200, rejected.text
+    failed = assess_sidecar(package, json.dumps(rejected.json()).encode())
+    assert failed["status"] == "MANUAL_FAILURE_REPORTED"
+    assert failed["reported_fail_count"] == 1
+    assert failed["manual_failures"][0]["sku_id"] == "sku-two"
+    assert failed["approved_for_publication"] is False
+
+
+def test_m6_offline_sidecar_assessment_rejects_tamper_and_stale_source(
+    tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+    from scripts.assess_m6_sidecar import SidecarAssessmentError, assess_sidecar
+
+    _, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    forged = deepcopy(sidecar)
+    forged["quality_verified"] = True
+    with pytest.raises(SidecarAssessmentError):
+        assess_sidecar(package, json.dumps(forged).encode())
+    forged = deepcopy(sidecar)
+    forged["decisions"][0]["image_sha256"] = "0" * 64
+    with pytest.raises(SidecarAssessmentError):
+        assess_sidecar(package, json.dumps(forged).encode())
+
+    img = package / "images/sku-one-square.png"
+    original_image = img.read_bytes()
+    img.write_bytes(b"overwritten")
+    with pytest.raises(SidecarAssessmentError):
+        assess_sidecar(package, json.dumps(sidecar).encode())
+    img.write_bytes(original_image)
+    assert assess_sidecar(package, json.dumps(sidecar).encode())["status"] == "PARTIAL"
+
+
+def test_m6_offline_sidecar_cli_publishes_one_non_clobber_audit_report(
+    tmp_path, monkeypatch,
+):
+    from scripts.assess_m6_sidecar import main
+    _, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    saved = tmp_path / "review.json"
+    saved.write_text(json.dumps(sidecar), encoding="utf-8")
+    target = tmp_path / "reports" / "sidecar_assessment.json"
+    args = [
+        "--package-dir", str(package), "--sidecar", str(saved),
+        "--output", str(target),
+    ]
+    assert main(args) == 0
+    report = json.loads(target.read_text(encoding="utf-8"))
+    assert report["status"] == "PARTIAL"
+    assert report["quality_verified"] is False
+    original = target.read_bytes()
+    with pytest.raises(SystemExit):
+        main(args)
+    assert target.read_bytes() == original
+    assert not list(target.parent.glob(".m6-report-*.tmp"))
+    with pytest.raises(SystemExit):
+        main([
+            "--package-dir", str(package), "--sidecar", str(saved),
+            "--output", str(package / "m6_output_reviews.csv"),
+        ])
