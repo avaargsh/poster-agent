@@ -65,7 +65,7 @@ def download_channel_export(poster_id: str, version: int, preset: str):
         if preset in NATIVE_LAYOUTS:
             spec_bytes = (poster / "versions" / f"v{version}.json").read_bytes()
             spec = PosterSpec.model_validate_json(spec_bytes)
-            product, logo, background = storage.read_assets(poster_id)
+            product, logo, background = storage.read_assets_for_spec(poster_id, spec)
             # Keep the established classic renderer as a direct call: M6's
             # failure-path tests and callers monkeypatch this symbol to verify
             # that a failed export remains UNVERIFIED instead of being counted

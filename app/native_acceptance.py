@@ -64,13 +64,16 @@ def _sources(poster_id: str, version: int) -> tuple[PosterSpec, bytes, dict, byt
         "logo": _sha((asset_dir / "logo.png").read_bytes()) if
             (asset_dir / "logo.png").is_file() else None,
     }
+    cutout_path = asset_dir / "product_cutout.png"
+    if cutout_path.is_file():
+        asset_digest["product_cutout"] = _sha(cutout_path.read_bytes())
     return spec, spec_bytes, asset_digest, source_png
 
 
 def _render(
     poster_id: str, spec: PosterSpec, variant: NativeVariant = VARIANT,
 ) -> bytes:
-    product, logo, background = storage.read_assets(poster_id)
+    product, logo, background = storage.read_assets_for_spec(poster_id, spec)
     if variant == VARIANT:
         return render_native_feed(spec, product, logo, background)
     if variant == PRODUCT_FOCUS_VARIANT:
@@ -105,7 +108,15 @@ def _rule_checks(spec: PosterSpec, image: Image.Image, asset_hashes: dict) -> li
         Check(
             name="sku_asset_present", status="PASS",
             detail="已读取保存的 SKU 资产；未独立验证画面保真度",
-            evidence={"source_sha256": asset_hashes["product"]},
+            evidence={
+                "source_sha256": asset_hashes["product"],
+                "product_source_mode": spec.product_source_mode,
+                "render_source_sha256": (
+                    asset_hashes["product_cutout"] if
+                    spec.product_source_mode == "cutout"
+                    else asset_hashes["product"]
+                ),
+            },
         ),
         Check(
             name="logo_asset_present", status="PASS" if asset_hashes["logo"] else "UNVERIFIED",

@@ -13,11 +13,15 @@ from typing import Annotated, Literal
 import warnings
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Request, Query
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 from . import storage, execution_store, worker_lock
 from .compositor import compose, local_background, validate_square_layout
+from .cutout_service import (
+    CutoutExecutionError, CutoutRejected, CutoutUnavailable,
+    local_preview, png_sha256, verify_candidate,
+)
 from .layout_collision import repair_square_layout
 from .color_management import InvalidColorProfile, normalize_upload_color
 from .image_provider import generate_ai_background, ImageProviderError
@@ -237,16 +241,26 @@ async def health():
     return {"ok": True, "version": "0.3.2"}
 
 
-def _fingerprint(spec: PosterSpec, product: Image.Image, logo: Image.Image | None) -> str:
+def _fingerprint(spec: PosterSpec, product: Image.Image, logo: Image.Image | None,
+                 cutout: Image.Image | None = None) -> str:
     """Hash normalized input pixels and fields, not arbitrary file paths."""
     digest = hashlib.sha256()
-    digest.update(json.dumps(spec.model_dump(mode="json"), sort_keys=True).encode("utf-8"))
+    fields = spec.model_dump(mode="json")
+    if spec.product_source_mode == "original":
+        # Preserve existing default-mode idempotency hashes across upgrades.
+        # Old persisted receipts were computed before this optional field.
+        fields.pop("product_source_mode", None)
+    digest.update(json.dumps(fields, sort_keys=True).encode("utf-8"))
     for asset in (product, logo):
         if asset is None:
             digest.update(b"none")
         else:
             digest.update(f"{asset.mode}:{asset.width}x{asset.height}".encode())
             digest.update(asset.tobytes())
+    if cutout is not None:
+        digest.update(b"product-cutout:")
+        digest.update(f"{cutout.mode}:{cutout.width}x{cutout.height}".encode())
+        digest.update(cutout.tobytes())
     return digest.hexdigest()
 
 
@@ -295,6 +309,25 @@ def inspect_layout(spec: PosterSpec):
     return {**repair["before"], "repair": repair}
 
 
+@app.post("/api/product-cutouts/preview")
+async def preview_product_cutout(product: UploadFile = File(...)):
+    """Explicit local CLI inference only; PNG is transient and never published."""
+    original = await read_upload(product)
+    try:
+        result = await asyncio.to_thread(local_preview, original)
+    except CutoutUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CutoutRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CutoutExecutionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(
+        content=result, media_type="image/png",
+        headers={"Cache-Control": "no-store", "X-Cutout-Model": "u2netp",
+                 "X-Cutout-Sha256": png_sha256(result)},
+    )
+
+
 @app.post("/api/posters", status_code=201)
 async def create_poster(
     product: Annotated[UploadFile, File(description="SKU 商品图片")],
@@ -308,7 +341,9 @@ async def create_poster(
     layout_id: Annotated[str, Form()] = "classic",
     product_align: Annotated[str, Form()] = "center",
     product_scale: Annotated[str, Form()] = "full",
+    product_source_mode: Annotated[str, Form()] = "original",
     layer_layout: Annotated[str, Form()] = "",
+    product_cutout: UploadFile | None = File(default=None),
     logo: UploadFile | None = File(default=None),
     review_run_id: Annotated[str, Form()] = "",
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -328,6 +363,7 @@ async def create_poster(
                           original_price=original_price.strip() or None, cta=cta,
                           background_mode=background_mode, layout_id=layout_id,
                           product_align=product_align, product_scale=product_scale,
+                          product_source_mode=product_source_mode,
                           layer_layout=offsets)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors(include_context=False, include_input=False)) from exc
@@ -367,6 +403,21 @@ async def create_poster(
             raise HTTPException(status_code=409, detail="当前字段与已确认的规格不一致，请重新编译并确认")
     sku = await read_upload(product)
     brand_logo = await read_upload(logo) if logo is not None and logo.filename else None
+    has_cutout = product_cutout is not None and bool(product_cutout.filename)
+    if has_cutout != (spec.product_source_mode == "cutout"):
+        raise HTTPException(
+            status_code=422,
+            detail="选择抠图时必须同时上传抠图 PNG；使用原图时请移除抠图文件",
+        )
+    cutout_candidate = None
+    if has_cutout:
+        if product_cutout.content_type != "image/png":
+            raise HTTPException(status_code=422, detail="抠图候选只接受 PNG")
+        cutout_candidate = await read_upload(product_cutout)
+        try:
+            cutout_candidate = verify_candidate(sku, cutout_candidate)
+        except CutoutRejected as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Layout errors are deterministic input failures. Reject them before the
     # idempotency claim and before any paid image-provider call.
     try:
@@ -375,7 +426,7 @@ async def create_poster(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Record the same normalized hash in SQLite and the completed disk receipt.
-    request_hash = _fingerprint(spec, sku, brand_logo) if idempotency_key is not None else None
+    request_hash = _fingerprint(spec, sku, brand_logo, cutout_candidate) if idempotency_key is not None else None
     # Claim BEFORE calling a paid model. Local-background requests retain the
     # legacy optional-key behavior; AI requests above cannot proceed without a key.
     if idempotency_key is not None:
@@ -403,10 +454,12 @@ async def create_poster(
             background = await generate_ai_background(spec.style)
         else:
             background = local_background(spec.style)
-        rendered = compose(spec, sku, brand_logo, background)
+        rendered = compose(spec, cutout_candidate if cutout_candidate is not None else sku,
+                           brand_logo, background)
         result = storage.create(
             spec, sku, brand_logo, background, rendered,
             idempotency_key=idempotency_key, request_hash=request_hash,
+            product_cutout=cutout_candidate,
         )
         if idempotency_key is not None:
             execution_store.finish(idempotency_key, result)
@@ -457,7 +510,7 @@ async def revise_poster(poster_id: str, edit: PosterEdit):
                 )
             existing = PosterSpec.model_validate(current["spec"])
             spec = PosterSpec.model_validate({**existing.model_dump(), **changes})
-            product, logo, background = storage.read_assets(poster_id)
+            product, logo, background = storage.read_assets_for_spec(poster_id, spec)
             rendered = compose(spec, product, logo, background)
             return storage.new_version(poster_id, spec, rendered)
     except FileNotFoundError as exc:

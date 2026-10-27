@@ -36,6 +36,9 @@ class PosterSpec(BaseModel):
     layout_id: Literal["classic", "hero"] = "classic"
     product_align: Literal["top", "center", "bottom"] = "center"
     product_scale: Literal["full", "compact"] = "full"
+    # Original source and optional operator-approved processed candidate both
+    # survive every revision. Old posters default to original pixels.
+    product_source_mode: Literal["original", "cutout"] = "original"
     layer_layout: LayerLayoutV1 = Field(default_factory=LayerLayoutV1)
 
     @field_validator("title", "subtitle", "style", "cta")
@@ -64,6 +67,7 @@ class PosterEdit(BaseModel):
     layout_id: Literal["classic", "hero"] | None = None
     product_align: Literal["top", "center", "bottom"] | None = None
     product_scale: Literal["full", "compact"] | None = None
+    product_source_mode: Literal["original", "cutout"] | None = None
     layer_layout: LayerLayoutV1 | None = None
 
     @field_validator("title", "subtitle", "cta")

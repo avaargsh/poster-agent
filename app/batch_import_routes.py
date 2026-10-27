@@ -315,7 +315,7 @@ async def create_batch(
         referenced = {
             path.name
             for item in prepared
-            for path in (item["product"], item["logo"])
+            for path in (item["product"], item["logo"], item.get("cutout"))
             if path is not None
         }
         uploaded = {name for name, _ in image_payloads}
