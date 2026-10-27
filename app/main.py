@@ -501,9 +501,7 @@ async def revise_poster(poster_id: str, edit: PosterEdit):
                 )
             existing = PosterSpec.model_validate(current["spec"])
             spec = PosterSpec.model_validate({**existing.model_dump(), **changes})
-            product, logo, background = storage.read_assets(poster_id)
-            if spec.product_source_mode == "cutout":
-                product = storage.read_product_cutout(poster_id)
+            product, logo, background = storage.read_assets_for_spec(poster_id, spec)
             rendered = compose(spec, product, logo, background)
             return storage.new_version(poster_id, spec, rendered)
     except FileNotFoundError as exc:
