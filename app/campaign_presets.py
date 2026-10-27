@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/campaign-presets", tags=["campaign-presets"])
 
 MAX_CSV_BYTES = 1024 * 1024
 _REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
-_OPTIONAL = frozenset({"original_price", "subtitle", "cta", "style", "logo_image"})
+_OPTIONAL = frozenset({"original_price", "subtitle", "cta", "style", "logo_image", "product_cutout_image"})
 _ALLOWED = _REQUIRED | _OPTIONAL
 _SKU = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 _FILLABLE = ("subtitle", "cta", "style")
