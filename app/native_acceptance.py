@@ -70,7 +70,7 @@ def _sources(poster_id: str, version: int) -> tuple[PosterSpec, bytes, dict, byt
 def _render(
     poster_id: str, spec: PosterSpec, variant: NativeVariant = VARIANT,
 ) -> bytes:
-    product, logo, background = storage.read_assets(poster_id)
+    product, logo, background = storage.read_assets_for_spec(poster_id, spec)
     if variant == VARIANT:
         return render_native_feed(spec, product, logo, background)
     if variant == PRODUCT_FOCUS_VARIANT:
