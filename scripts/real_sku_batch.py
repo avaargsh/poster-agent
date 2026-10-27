@@ -25,12 +25,14 @@ from pydantic import ValidationError
 from app import storage
 from app.main import MAX_UPLOAD, app, read_upload
 from app.compositor import validate_square_layout
+from app.cutout_service import CutoutRejected, verify_candidate
 from app.schemas import PosterSpec
 
 REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
 OPTIONAL = frozenset({
     "original_price", "subtitle", "cta", "style", "logo_image",
     "layout_id", "product_align", "product_scale", "layer_layout",
+    "product_cutout_image",
 })
 ALLOWED = REQUIRED | OPTIONAL
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
@@ -150,6 +152,23 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
                 )
             product = _source_file(row["product_image"], base)
             product_sha = _validated_image(product)
+            cutout = None
+            cutout_sha = None
+            if (row.get("product_cutout_image") or "").strip():
+                cutout = _source_file(row["product_cutout_image"], base)
+                cutout_sha = _validated_image(cutout)
+                async def _read_validated(path):
+                    blob = path.read_bytes()
+                    return await read_upload(UploadFile(
+                        file=io.BytesIO(blob), filename=path.name
+                    ))
+                try:
+                    original_img = asyncio.run(_read_validated(product))
+                    candidate_img = asyncio.run(_read_validated(cutout))
+                    verify_candidate(original_img, candidate_img)
+                except (HTTPException, CutoutRejected) as exc:
+                    raise BatchError("该 SKU 抠图与原图不匹配或缺少有效透明主体") from exc
+                data["product_source_mode"] = "cutout"
             logo = None
             logo_sha = None
             if (row.get("logo_image") or "").strip():
@@ -161,11 +180,13 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
             request_digest = _sha(json.dumps({
                 "sku_id": sku, "data": data,
                 "product_sha256": product_sha, "logo_sha256": logo_sha,
+                "product_cutout_sha256": cutout_sha,
             }, ensure_ascii=False, sort_keys=True).encode())
             prepared.append({
                 "sku_id": sku, "data": data, "product": product,
-                "logo": logo, "product_sha256": product_sha,
-                "logo_sha256": logo_sha, "idempotency_key": key,
+                "logo": logo, "cutout": cutout,
+                "product_sha256": product_sha, "logo_sha256": logo_sha,
+                "cutout_sha256": cutout_sha, "idempotency_key": key,
                 "request_sha256": request_digest,
             })
         except (BatchError, ValidationError, OSError, ValueError) as exc:
@@ -183,10 +204,18 @@ def _write_json_atomic(destination: Path, value: dict) -> None:
 
 def _file_parts(item: dict) -> dict:
     parts = {}
-    for key, path in (("product", item["product"]), ("logo", item["logo"])):
+    for key, path in (
+        ("product", item["product"]),
+        ("logo", item["logo"]),
+        ("product_cutout", item.get("cutout")),
+    ):
         if path is not None:
             data = path.read_bytes()
-            expected = item["product_sha256"] if key == "product" else item["logo_sha256"]
+            expected = {
+                "product": item["product_sha256"],
+                "logo": item["logo_sha256"],
+                "product_cutout": item.get("cutout_sha256"),
+            }[key]
             if _sha(data) != expected:
                 raise BatchError(f"{item['sku_id']}：预检后 {key} 文件发生变化，拒绝生成")
             parts[key] = (path.name, data, IMAGE_TYPES[path.suffix.lower()])
@@ -301,6 +330,7 @@ def run_batch(
                 "request_sha256": item["request_sha256"],
                 "product_sha256": item["product_sha256"],
                 "logo_sha256": item["logo_sha256"],
+                "product_cutout_sha256": item.get("cutout_sha256"),
                 "idempotency_key": item["idempotency_key"],
             }
             # Commit success after every SKU. If the process dies between API
