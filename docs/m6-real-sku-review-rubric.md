@@ -2,6 +2,21 @@
 
 关联 [Issue #31](https://github.com/musuntana/poster-agent/issues/31)。本文件是**待执行的评测协议**，不代表真实 SKU、真实 OCR 或产品质量已通过验证。
 
+## M14→M5g→M6 来源链只读验证（M15）
+
+使用固定的原图与授权登记、已成功执行的 M14 `cutout_trial.json`、M5g `batch_import_results.json` 和 M6 `m6_review_package/`，运行下面的命令。验证器逐 SKU 重读实际图片文件和创建凭据，检查 M14 输出清单与 M5g 输入 SHA-256 相同，再重放 M6 方形图片与 4:5 原生导出，校验其 SHA 和人工审核表的身份关系。所有文件保持原样，且不会启动模型、OCR 或付费服务。
+
+```bash
+uv run --locked python -m scripts.verify_m14_lineage \\
+  --trial-dir data/eval_runs/u2netp_trial_001 \\
+  --source-manifest data/real_trial/real_skus.csv \\
+  --registry data/real_trial/m6_cohort_registry.csv \\
+  --m5g-journal data/eval_runs/m5g_trial_001/batch_import_results.json \\
+  --m6-package data/eval_runs/m5g_trial_001/m6_review_package
+```
+
+完整来源链达到 `LINEAGE_VERIFIED_REVIEW_PENDING` 时，请继续人工逐图审核、真实 OCR 运行和授权复核。手工 PASS 由审核员声明，验证报告将状态区分为操作员声明、拒绝或待审核，固定保留 `model_runtime_attested=false` 与 `quality_accepted=false`。这项检查聚焦跨阶段字节一致性和可恢复性；独立可信的模型执行证明及真实商品质量验收仍需要额外证据。
+
 ## Mac M1 本地 u2netp 真实 20 SKU 抠图试验（M14）
 
 使用隔离的 CPU rembg CLI 环境（推荐 Python 3.12），预装 `u2netp.onnx` 到 `$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx`。参照 [rembg 官方文档](https://github.com/danielgatis/rembg) 核对 CLI `rembg i -m u2netp` 与模型缓存位置。操作者须自行验证权重的可信来源和供应链摘要，固定 `POSTER_CUTOUT_MODEL_SHA256`，并确保项目进程能在 PATH 中找到独立环境的 `rembg`。运行器阻断旧环境变量 `U2NET_HOME` 劫持选择，且只走本地模型和本地图片。
