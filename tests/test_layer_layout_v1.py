@@ -131,3 +131,40 @@ def test_ui_exposes_individual_layers_and_revision_reload():
     assert "layer_layout:readLayerLayout('edit')" in html
     assert "layer_layout:readLayerLayout('create')" in html
     assert "writeLayerLayout('edit',data.spec.layer_layout)" in html
+
+
+def test_approved_brief_must_include_exact_confirmed_layer_positions(tmp_path, monkeypatch, product_bytes):
+    monkeypatch.setenv("POSTER_CHECKPOINT_DB", str(tmp_path / "checkpoint.sqlite3"))
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    new = client.post("/api/briefs/runs", json={
+        "brief": "主标题：电动牙刷，活动价199元，原价399元",
+        "compiler": "demo",
+    })
+    assert new.status_code == 201, new.text
+    rid = new.json()["run_id"]
+    approved = {
+        "title": "电动牙刷", "subtitle": "促销活动",
+        "price": "199", "original_price": "399",
+        "style": "蓝色科技风", "cta": "立即抢购",
+        "background_mode": "local", "layer_layout": {
+            "schema_version": 1, "title_dx": 10, "price_dy": -6,
+        },
+    }
+    decision = client.post(f"/api/briefs/runs/{rid}/decision", json={
+        "approved": True, "spec": approved,
+    })
+    assert decision.status_code == 200, decision.text
+    files = {"product": ("sku.png", product_bytes, "image/png")}
+    base_data = {key: value for key, value in approved.items() if key != "layer_layout"}
+    base_data["review_run_id"] = rid
+    # A changed coordinate cannot reuse an approval for a different layout.
+    tampered = client.post("/api/posters", files=files, data={
+        **base_data, "layer_layout": json.dumps({"title_dx": 11, "price_dy": -6}),
+    })
+    assert tampered.status_code == 409, tampered.text
+    assert not storage.root().exists()
+    valid = client.post("/api/posters", files=files, data={
+        **base_data, "layer_layout": json.dumps(approved["layer_layout"]),
+    })
+    assert valid.status_code == 201, valid.text
+    assert valid.json()["spec"]["layer_layout"]["title_dx"] == 10
