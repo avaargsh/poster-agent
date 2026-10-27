@@ -213,3 +213,37 @@ def test_changed_authorization_or_model_hash_cannot_resume(tmp_path, monkeypatch
     registry.write_text(registry.read_text() + "\n", encoding="utf-8")
     with pytest.raises(CutoutCohortError, match="授权|清单|摘要"):
         prepare_cohort(manifest, registry, out, apply=True, min_skus=2)
+
+
+
+def test_verifier_is_read_only_when_export_manifest_missing(tmp_path, monkeypatch):
+    manifest, registry = _inputs(tmp_path)
+    out = tmp_path / "trial"
+    _model(tmp_path, monkeypatch)
+    monkeypatch.setattr("scripts.local_cutout_cohort.local_preview",
+                        lambda original: _png(alpha=True))
+    prepare_cohort(manifest, registry, out, apply=True, min_skus=2)
+    exported = out / "manifest_with_cutouts.csv"
+    exported.unlink()
+    with pytest.raises(CutoutCohortError, match="输出清单"):
+        verify_cohort(out, manifest, registry, min_skus=2)
+    assert not exported.exists()
+
+
+def test_local_cli_overrides_legacy_u2net_home(tmp_path, monkeypatch):
+    """An inherited U2NET_HOME cannot silently redirect to another model."""
+    from subprocess import CompletedProcess
+    _model(tmp_path, monkeypatch)
+    monkeypatch.setenv("U2NET_HOME", str(tmp_path / "attacker-models"))
+    observed = []
+    def stub(argv, *, env, timeout, capture_output, check):
+        observed.append(env)
+        from pathlib import Path
+        Path(argv[-1]).write_bytes(_png(alpha=True))
+        return CompletedProcess(argv, 0, b"", b"")
+    monkeypatch.setattr(cutout_service.subprocess, "run", stub)
+    with Image.open(io.BytesIO(_png())) as original:
+        result = cutout_service.local_preview(original)
+    assert result.startswith(bytes([137, 80, 78, 71]))
+    assert "U2NET_HOME" not in observed[0]
+    assert observed[0]["REMBG_HOME"] == str(tmp_path / "models")
