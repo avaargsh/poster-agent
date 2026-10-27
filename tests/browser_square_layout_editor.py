@@ -152,6 +152,50 @@ def main():
                     print("PASS: real Chromium create hero with title/logo layer offsets, "
                           "edit price/CTA layers, new image, retained v1 and history gallery")
 
+                    # An intentionally crowded two-line heading must be
+                    # detected with the actual CJK font, repaired only on
+                    # explicit click, then saved as another immutable version.
+                    page.locator("#editLayout").select_option("hero")
+                    page.locator("#editTitle").fill(
+                        "智能电动牙刷限时优惠购买新品即刻体验强劲清洁能力"
+                    )
+                    page.locator("#editSubtitle").fill("高效清洁 · 品质生活")
+                    page.locator("#edit-layer-title_dy").fill("20")
+                    page.locator("#edit-layer-price_dy").fill("-8")
+                    if page.locator("#edit-layer-editor").get_attribute("open") is None:
+                        page.locator("#edit-layer-editor summary").click()
+                    page.locator("#checkEditLayout").click()
+                    page.locator("#editLayoutStatus").filter(
+                        has_text="发现遮挡"
+                    ).wait_for(timeout=15000)
+                    _check(
+                        page.locator("#fixEditLayout").is_enabled(),
+                        "Missing bounded repair suggestion",
+                    )
+                    page.locator("#fixEditLayout").click()
+                    _check(
+                        page.locator("#editLayoutStatus").inner_text().startswith(
+                            "已应用安全偏移"
+                        ), "Repair was not explicitly applied",
+                    )
+                    page.locator("#saveEdit").click()
+                    page.wait_for_function(
+                        "() => !!current && current.version === 3",
+                        timeout=20000,
+                    )
+                    safe = page.evaluate("() => structuredClone(current)")
+                    _check(
+                        safe["spec"]["layer_layout"]["title_dy"] != 20 or
+                        safe["spec"]["layer_layout"]["price_dy"] != -8,
+                        "Repair did not modify colliding geometry",
+                    )
+                    _check(
+                        page.request.get(origin + first["image_url"]).body() == old_image,
+                        "Repair overwrote an immutable earlier poster",
+                    )
+                    print("PASS: Chromium detected colliding text, applied safe offsets "
+                          "only on explicit click and saved v3 without rewriting v1")
+
                     # Reuse the immutable v1 layout after the editor already
                     # changed the source poster to a different v2 layout.
                     page.locator("#nav-batch").click()

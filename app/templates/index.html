@@ -171,6 +171,8 @@ pre{max-width:100%}
 <div class="row"><label for="create-layer-cta_dy">CTA 垂直（-12～12 px）</label><input id="create-layer-cta_dy" type="number" min="-12" max="12" step="1" value="0" required></div>
 <div class="row"><label for="create-layer-logo_dx">Logo 水平（-16～16 px）</label><input id="create-layer-logo_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
 <div class="row"><label for="create-layer-logo_dy">Logo 垂直（-16～16 px）</label><input id="create-layer-logo_dy" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="actions"><button id="checkCreateLayout" type="button" class="secondary">检测图层碰撞</button><button id="fixCreateLayout" type="button" class="secondary" disabled>应用安全偏移建议</button></div>
+<p id="createLayoutStatus" class="tip" aria-live="polite">检测当前方形版式的文本、价格与 CTA 交叠。建议需主动应用，再保存版本。上传 Logo 的实际尺寸会在最终生成时再次验证。</p>
 </details>
 <div class="row"><label id="stylePresetLabel">本地背景配色（快速选择，非完整布局模板）</label>
 <div class="style-presets" role="group" aria-labelledby="stylePresetLabel">
@@ -235,6 +237,8 @@ pre{max-width:100%}
 <div class="row"><label for="edit-layer-cta_dy">CTA 垂直（-12～12 px）</label><input id="edit-layer-cta_dy" type="number" min="-12" max="12" step="1" value="0" required></div>
 <div class="row"><label for="edit-layer-logo_dx">Logo 水平（-16～16 px）</label><input id="edit-layer-logo_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
 <div class="row"><label for="edit-layer-logo_dy">Logo 垂直（-16～16 px）</label><input id="edit-layer-logo_dy" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="actions"><button id="checkEditLayout" type="button" class="secondary">检测图层碰撞</button><button id="fixEditLayout" type="button" class="secondary" disabled>应用安全偏移建议</button></div>
+<p id="editLayoutStatus" class="tip" aria-live="polite">检测当前方形版式的文本、价格与 CTA 交叠。建议需主动应用，再保存版本。上传 Logo 的实际尺寸会在最终生成时再次验证。</p>
 </details>
 <div class="actions"><button id="saveEdit" type="submit">保存新版本</button><button id="reloadPoster" class="secondary" type="button">加载最新版本</button><a id="download" href="#" download="poster.png">导出 PNG</a></div>
 </form>
@@ -603,6 +607,87 @@ function writeLayerLayout(prefix,raw){
     $(prefix+'-layer-'+key).value=String(data[key] ?? 0);
   }
 }
+// Inspect once in a read-only API, and apply a suggestion only if every form
+// value still matches the inspected snapshot. Never mutate an approved Brief.
+const layoutInspections={create:null,edit:null};
+function specForLayoutInspection(prefix){
+  if(prefix==='create')return currentSpec();
+  if(!current)throw Error('请先生成或打开海报');
+  return {
+    ...current.spec,
+    title:$('editTitle').value,
+    subtitle:$('editSubtitle').value,
+    price:$('editPrice').value,
+    original_price:$('editOriginal').value||null,
+    cta:$('editCta').value,
+    layout_id:$('editLayout').value,
+    product_align:$('editProductAlign').value,
+    product_scale:$('editProductScale').value,
+    layer_layout:readLayerLayout('edit'),
+  };
+}
+for(const prefix of ['create','edit']){
+  const label=prefix==='create'?'Create':'Edit';
+  $('check'+label+'Layout').addEventListener('click',async()=>{
+    const button=$('check'+label+'Layout'),status=$(prefix+'LayoutStatus');
+    layoutInspections[prefix]=null;
+    $('fix'+label+'Layout').disabled=true;
+    button.disabled=true;
+    status.className='tip';
+    status.textContent='正在检测真实字体的图层边界…';
+    try{
+      const spec=specForLayoutInspection(prefix);
+      const fingerprint=JSON.stringify(spec);
+      const response=await fetch('/api/layout/inspect',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:fingerprint,
+      });
+      const report=await response.json();
+      if(!response.ok)throw Error(errorText(report));
+      if(JSON.stringify(specForLayoutInspection(prefix))!==fingerprint){
+        status.textContent='表单已变更，请重新检测。';return;
+      }
+      if(report.status==='PASS'){
+        status.textContent='图层几何检查通过。仍需对实际商品图与 Logo 做人工检查。';
+        status.className='tip good';
+      }else{
+        const details=report.issues.map(issue=>issue.message).join('；');
+        status.textContent='发现遮挡：'+details+
+          (report.repair.status==='REPAIRED'?'。可应用受控的最小纵向偏移建议。'
+            :'。当前安全区内无可用修正，请缩短文案或更换版式。');
+        status.className='tip bad';
+        if(report.repair.status==='REPAIRED'){
+          layoutInspections[prefix]={
+            fingerprint,offsets:report.repair.proposed_layer_layout,
+          };
+          $('fix'+label+'Layout').disabled=false;
+        }
+      }
+    }catch(err){
+      status.textContent='检测失败：'+err.message;status.className='tip bad';
+    }finally{button.disabled=false;}
+  });
+  $('fix'+label+'Layout').addEventListener('click',()=>{
+    const status=$(prefix+'LayoutStatus');
+    if(prefix==='create' && activeReviewRunId){
+      status.textContent='当前存在 Brief 审核任务。先清除任务并重新确认规格后才可修改图层。';
+      status.className='tip bad';return;
+    }
+    const proposal=layoutInspections[prefix];
+    if(!proposal)return;
+    try{
+      if(JSON.stringify(specForLayoutInspection(prefix))!==proposal.fingerprint){
+        throw Error('表单已更改，请重新检测再应用修正。');
+      }
+      writeLayerLayout(prefix,proposal.offsets);
+      layoutInspections[prefix]=null;
+      $('fix'+label+'Layout').disabled=true;
+      status.textContent='已应用安全偏移。请保存新版本并重新执行 OCR 与人工审核。';
+      status.className='tip good';
+    }catch(err){status.textContent=err.message;status.className='tip bad';}
+  });
+}
+
 const reviewFields = ['title','subtitle','price','original_price','style','cta','background_mode','layout_id','product_align','product_scale'];
 const stylePresetButtons=[...document.querySelectorAll('[data-style-preset]')];
 function syncStylePresetPicker(){
