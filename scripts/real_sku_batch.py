@@ -27,7 +27,10 @@ from app.main import MAX_UPLOAD, app, read_upload
 from app.schemas import PosterSpec
 
 REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
-OPTIONAL = frozenset({"original_price", "subtitle", "cta", "style", "logo_image"})
+OPTIONAL = frozenset({
+    "original_price", "subtitle", "cta", "style", "logo_image",
+    "layout_id", "product_align", "product_scale", "layer_layout",
+})
 ALLOWED = REQUIRED | OPTIONAL
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
                ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -111,9 +114,36 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
                 "cta": spec_fields["cta"] or "立即抢购",
                 "background_mode": "local",
             }
-            PosterSpec.model_validate({
-                **data, "original_price": data["original_price"] or None,
+            # Layout columns are optional for old M5g manifests. When
+            # present, the exact validated layout travels through the same
+            # API, request digest, idempotency ledger and immutable poster spec.
+            extra = {}
+            for name in ("layout_id", "product_align", "product_scale"):
+                value = (row.get(name) or "").strip()
+                if value:
+                    extra[name] = value
+            layer_raw = (row.get("layer_layout") or "").strip()
+            if layer_raw:
+                if len(layer_raw.encode("utf-8")) > 2048:
+                    raise BatchError("layer_layout 超过 2048 字节")
+                try:
+                    parsed_layer = json.loads(layer_raw)
+                except json.JSONDecodeError as exc:
+                    raise BatchError("layer_layout 不是有效 JSON") from exc
+                if not isinstance(parsed_layer, dict):
+                    raise BatchError("layer_layout 必须是 JSON 对象")
+                extra["layer_layout"] = parsed_layer
+            checked = PosterSpec.model_validate({
+                **data, "original_price": data["original_price"] or None, **extra,
             })
+            for name in ("layout_id", "product_align", "product_scale"):
+                if name in extra:
+                    data[name] = getattr(checked, name)
+            if "layer_layout" in extra:
+                data["layer_layout"] = json.dumps(
+                    checked.layer_layout.model_dump(mode="json"),
+                    ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                )
             product = _source_file(row["product_image"], base)
             product_sha = _validated_image(product)
             logo = None
