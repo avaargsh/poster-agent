@@ -101,3 +101,38 @@ jobs:
       - name: Generate deterministic demo
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.level == 'full' }}
         run: uv run --locked python -m scripts.generate_demo
+
+  # Explicit and isolated: run only when a reviewer adds "ci:browser".
+  # Loads the actual FastAPI page in Chromium, but substitutes synthetic OCR
+  # API responses. This does NOT prove real PaddleOCR or customer acceptance.
+  browser-smoke:
+    if: >-
+      ${{ github.event_name == 'pull_request' &&
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'ci:browser' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout exact PR source
+        uses: actions/checkout@v4
+      - name: Setup pinned uv and dependency cache
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.10.0"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install pinned Python and locked dependencies
+        run: |
+          uv python install 3.12
+          uv sync --locked
+      - name: Reuse hosted Chrome, fall back to explicit Chromium install
+        run: |
+          if command -v google-chrome >/dev/null || command -v google-chrome-stable >/dev/null; then
+            echo "Using runner-provided Chrome for the M6 browser smoke."
+          else
+            uv run --no-sync --with 'playwright>=1.55,<2' playwright install chromium --with-deps
+          fi
+      - name: Exercise actual FastAPI page in headless Chromium
+        timeout-minutes: 5
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_m6_review_triage.py
