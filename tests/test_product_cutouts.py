@@ -152,3 +152,68 @@ def test_ui_contains_explicit_preview_comparison_and_mode_selection():
         assert marker in html
     assert "/api/product-cutouts/preview" in html
     assert "body.append('product_cutout'" in html
+
+
+
+def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path, monkeypatch):
+    import csv
+    from scripts import real_sku_batch
+
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
+    folder = tmp_path / "input"
+    folder.mkdir()
+    (folder / "source.png").write_bytes(png())
+    (folder / "cutout.png").write_bytes(png(alpha=True))
+    path = folder / "products.csv"
+    with path.open("w", encoding="utf-8", newline="") as out:
+        rows = csv.DictWriter(out, fieldnames=[
+            "sku_id", "product_image", "product_cutout_image", "title", "price",
+        ])
+        rows.writeheader()
+        rows.writerow({
+            "sku_id": "sku-01", "product_image": "source.png",
+            "product_cutout_image": "cutout.png",
+            "title": "智能好物", "price": "99",
+        })
+    sha, prepared = real_sku_batch.preflight(path)
+    assert len(sha) == 64
+    assert prepared[0]["data"]["product_source_mode"] == "cutout"
+    assert prepared[0]["cutout_sha256"] == hashlib.sha256(png(alpha=True)).hexdigest()
+    output = tmp_path / "result"
+    created = real_sku_batch.run_batch(path, output, apply=True)
+    assert created["created_or_reused"] == 1
+    ident = created["poster_ids"]["sku-01"]
+    assert storage.view(ident)["spec"]["product_source_mode"] == "cutout"
+    assert (storage.poster_dir(ident) / "assets" / "product_cutout.png").is_file()
+    second = real_sku_batch.run_batch(path, output, apply=True)
+    assert second["poster_ids"] == created["poster_ids"]
+    assert len(list(storage.root().iterdir())) == 1
+
+
+def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkeypatch):
+    import csv
+    from scripts import real_sku_batch
+
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    folder = tmp_path / "input"
+    folder.mkdir()
+    (folder / "source.png").write_bytes(png())
+    (folder / "cutout.png").write_bytes(png())
+    path = folder / "products.csv"
+    with path.open("w", encoding="utf-8", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=[
+            "sku_id", "product_image", "product_cutout_image", "title", "price",
+        ])
+        writer.writeheader()
+        writer.writerow({
+            "sku_id": "sku-01", "product_image": "source.png",
+            "product_cutout_image": "cutout.png", "title": "好物", "price": "99",
+        })
+    try:
+        real_sku_batch.preflight(path)
+    except real_sku_batch.BatchError:
+        pass
+    else:
+        raise AssertionError("Opaque PNG was incorrectly accepted as a cutout")
+    assert not storage.root().exists()
