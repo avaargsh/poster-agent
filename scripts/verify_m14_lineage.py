@@ -14,6 +14,7 @@ import io
 import json
 from pathlib import Path
 
+from fastapi import HTTPException
 from PIL import Image
 
 from app import storage
@@ -62,7 +63,7 @@ def _m6_review_rows(package: Path, expected: dict[str, str], cohort: str):
     # Reuse the existing ZIP exporter registry/variant membership gate.
     try:
         return _read_review_rows(raw, expected, cohort), _sha(raw)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, HTTPException) as exc:
         raise LineageError("M6 审核表 SKU×版式集合或版本字段无效") from exc
 
 
@@ -140,6 +141,10 @@ def verify_lineage(
                 raise
             raise LineageError(f"{sku}: M5g 已保存海报和执行凭据校验失败") from exc
 
+        pinned_square_sha = _sha(_bytes(storage.version_path(pid, 1)))
+        pinned_spec_sha = _sha(_bytes(
+            storage.poster_dir(pid) / "versions" / "v1.json", 2 * 1024 * 1024
+        ))
         for variant, suffix, dims in (
             ("square", "square", (1024, 1024)),
             ("feed_4x5_native", "native-4x5", (1080, 1350)),
@@ -151,6 +156,8 @@ def verify_lineage(
                     or row["source_version"] != "1"
                     or row["source_product_sha256"] != record["product_sha256"]
                     or row["request_sha256"] != record["request_sha256"]
+                    or row["spec_sha256"] != pinned_spec_sha
+                    or row["source_square_image_sha256"] != pinned_square_sha
                     or row["output_image_path"] != name
                     or not row["output_image_sha256"]
                     or row["overall_accept"] not in ("PASS", "FAIL", "UNVERIFIED")):
