@@ -294,6 +294,10 @@ def find_completed_execution(key: str, request_hash: str) -> dict | None:
                 files["logo"] = path / "assets" / "logo.png"
             elif (path / "assets" / "logo.png").exists():
                 return None
+            if "product_cutout" in expected:
+                files["product_cutout"] = path / "assets" / "product_cutout.png"
+            elif (path / "assets" / "product_cutout.png").exists():
+                return None
             if set(expected) != set(files):
                 return None
             for name, file in files.items():
@@ -320,6 +324,7 @@ def find_completed_execution(key: str, request_hash: str) -> dict | None:
                 "image_url": f"/api/posters/{poster_id}/versions/1/image",
                 "versions": [1],
                 "background_mode": meta["background_mode"],
+                "product_cutout_available": "product_cutout" in files,
             })
             if len(matches) > 1:
                 return None
