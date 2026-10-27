@@ -158,10 +158,10 @@ def main():
                     page.locator("#batchUseSavedLayout").check()
                     page.locator("#batchTemplateVersion").select_option("1")
                     manifest_text = (
-                        "sku_id,product_image,title,price,original_price,subtitle,cta,style\\n"
-                        "sku-one,one.png,牙刷新品,199,399,品质生活,查看商品,蓝色科技风\\n"
-                        "sku-two,two.png,护肤单品,89,119,精选好物,立即查看,粉色浪漫\\n"
-                    ).replace("\\\\n", "\\n")
+                        "sku_id,product_image,title,price,original_price,subtitle,cta,style\n"
+                        "sku-one,one.png,牙刷新品,199,399,品质生活,查看商品,蓝色科技风\n"
+                        "sku-two,two.png,护肤单品,89,119,精选好物,立即查看,粉色浪漫\n"
+                    )
                     page.locator("#batchManifest").set_input_files({
                         "name": "batch.csv", "mimeType": "text/csv",
                         "buffer": manifest_text.encode("utf-8"),
