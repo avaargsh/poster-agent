@@ -47,7 +47,9 @@ def verify_candidate(original: Image.Image, candidate: Image.Image) -> Image.Ima
     alpha = candidate.getchannel("A")
     # Basic damage guard: never replace a product with an almost empty mask.
     thumbnail = alpha.resize((64, 64), Image.Resampling.BOX)
-    values = list(thumbnail.getdata())
+    # L-mode alpha pixels are already one byte each; avoid Pillow's
+    # deprecated Image.getdata() (removed in the upcoming Pillow release).
+    values = thumbnail.tobytes()
     coverage = sum(v > 96 for v in values) / len(values)
     if not 0.01 <= coverage <= 0.98:
         raise CutoutRejected("抠图候选主体面积异常，请检查边缘并保留原图")
