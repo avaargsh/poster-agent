@@ -122,12 +122,16 @@ def test_preview_uses_local_cli_with_preloaded_weight_and_validates_png(tmp_path
     model.parent.mkdir(parents=True)
     model.write_bytes(b"pretend-model-for-offline-stub")
     monkeypatch.setenv("POSTER_CUTOUT_REMBG_HOME", str(home))
+    monkeypatch.setenv("POSTER_CUTOUT_MODEL_SHA256", hashlib.sha256(
+        model.read_bytes()).hexdigest())
     monkeypatch.setattr(cutout_service.shutil, "which", lambda name: "/usr/bin/rembg")
     runs = []
     def fake_run(argv, *, env, timeout, capture_output, check):
         assert argv[0] == "/usr/bin/rembg"
         assert argv[1:4] == ["i", "-m", "u2netp"]
         assert env["REMBG_HOME"] == str(home)
+        assert env["MODEL_CHECKSUM_DISABLED"] == "1"
+        assert env["HTTPS_PROXY"].endswith(":9")
         assert "withoutbg" not in argv
         assert timeout <= 60
         Path(argv[-1]).write_bytes(png(alpha=True))
@@ -239,3 +243,24 @@ def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkey
     else:
         raise AssertionError("Opaque PNG was incorrectly accepted as a cutout")
     assert not storage.root().exists()
+
+
+
+def test_invalid_local_model_digest_never_invokes_rembg(tmp_path, monkeypatch):
+    from app import cutout_service
+    home = tmp_path / "rembg"
+    model = home / "models" / "u2netp" / "u2netp.onnx"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"pretend-model")
+    monkeypatch.setenv("POSTER_CUTOUT_REMBG_HOME", str(home))
+    monkeypatch.setenv("POSTER_CUTOUT_MODEL_SHA256", "0" * 64)
+    monkeypatch.setattr(cutout_service.shutil, "which", lambda _: "/usr/bin/rembg")
+    monkeypatch.setattr(
+        cutout_service.subprocess, "run",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("Unpinned model was executed")),
+    )
+    result = client.post("/api/product-cutouts/preview",
+        files={"product": ("source.png", png(), "image/png")})
+    assert result.status_code == 503
+    assert "SHA-256" in result.text
