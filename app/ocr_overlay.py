@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from app.acceptance import AcceptanceReport
-from app.ocr_price_layout import SQUARE_PRICE_ZONES
+from app.ocr_price_layout import square_price_zones
 from app.schemas import PosterSpec
 from app import storage
 
@@ -92,7 +92,7 @@ def render_overlay(
         # _verified_source already hashed this exact spec snapshot.
         spec_path = storage.poster_dir(poster_id) / "versions" / f"v{version}.json"
         spec = PosterSpec.model_validate_json(spec_path.read_bytes())
-        for name, zone in SQUARE_PRICE_ZONES[spec.layout_id].items():
+        for name, zone in square_price_zones(spec).items():
             check_name = "ocr_" + name + "_position"
             if check_name not in status:
                 continue
