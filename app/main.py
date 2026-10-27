@@ -290,6 +290,9 @@ async def create_poster(
     original_price: Annotated[str, Form()] = "",
     cta: Annotated[str, Form()] = "立即抢购",
     background_mode: Annotated[str, Form()] = "local",
+    layout_id: Annotated[str, Form()] = "classic",
+    product_align: Annotated[str, Form()] = "center",
+    product_scale: Annotated[str, Form()] = "full",
     logo: UploadFile | None = File(default=None),
     review_run_id: Annotated[str, Form()] = "",
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -297,7 +300,8 @@ async def create_poster(
     try:
         spec = PosterSpec(title=title, price=price, subtitle=subtitle, style=style,
                           original_price=original_price.strip() or None, cta=cta,
-                          background_mode=background_mode)
+                          background_mode=background_mode, layout_id=layout_id,
+                          product_align=product_align, product_scale=product_scale)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors(include_context=False, include_input=False)) from exc
     # Fail fast for paid AI requests before reading or decoding uploaded files.
@@ -325,7 +329,14 @@ async def create_poster(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if review["status"] != "APPROVED":
             raise HTTPException(status_code=409, detail="请先完成并确认海报规格，再生成海报")
-        if review["confirmed_spec"] != spec.model_dump(mode="json"):
+        # Historical approved checkpoints lack newer optional layout fields.
+        # Normalize the approved spec before an exact comparison; defaults are
+        # compatible, but a changed layout still requires renewed approval.
+        try:
+            confirmed = PosterSpec.model_validate(review["confirmed_spec"])
+        except ValidationError as exc:
+            raise HTTPException(status_code=409, detail="审批规格格式不兼容，请重新编译确认") from exc
+        if confirmed.model_dump(mode="json") != spec.model_dump(mode="json"):
             raise HTTPException(status_code=409, detail="当前字段与已确认的规格不一致，请重新编译并确认")
     sku = await read_upload(product)
     brand_logo = await read_upload(logo) if logo is not None and logo.filename else None

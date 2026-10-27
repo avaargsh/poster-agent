@@ -133,6 +133,15 @@ jobs:
           else
             uv run --no-sync --with 'playwright>=1.55,<2' playwright install chromium --with-deps
           fi
+      - name: Install Chinese fonts for actual local poster rendering
+        timeout-minutes: 4
+        run: |
+          if fc-list :lang=zh 2>/dev/null | grep -q .; then
+            echo "CJK fonts are already available."
+          else
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
+          fi
       - name: Exercise actual FastAPI page in headless Chromium
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_m6_review_triage.py
@@ -142,3 +151,6 @@ jobs:
       - name: Exercise campaign preset CSV download and Brief lock in real Chromium
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_campaign_presets.py
+      - name: Exercise versioned square templates in real Chromium
+        timeout-minutes: 5
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_square_layout_editor.py

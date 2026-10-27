@@ -22,6 +22,12 @@ PRICE_ZONES = {
     "price": (45, 645, 512, 790),
     "original_price": (60, 790, 512, 858),
 }
+# Square hero footer is a different, independently bounded OCR region.
+HERO_PRICE_ZONES = {
+    "price": (45, 812, 610, 932),
+    "original_price": (60, 932, 610, 985),
+}
+SQUARE_PRICE_ZONES = {"classic": PRICE_ZONES, "hero": HERO_PRICE_ZONES}
 PRICE_TOKEN = re.compile(r"[¥￥]\s*([0-9][0-9.,．]*)")
 MIN_SCORE = 0.40
 
@@ -87,7 +93,10 @@ def assess_price_zones(
     layout_size: tuple[int, int] = LAYOUT_SIZE,
 ) -> list[dict]:
     """Template-aware price checks; original 1024px behavior remains default."""
-    zones = PRICE_ZONES if zones is None else zones
+    # Native 4:5 callers explicitly supply their own zones; only square
+    # callers follow the saved layout ID. Never reuse classic square zones for
+    # the hero footer, or old OCR results could be incorrectly classified.
+    zones = SQUARE_PRICE_ZONES[spec.layout_id] if zones is None else zones
     checks = []
     observations, uncertain = _tokens(lines, layout_size) if ocr_status == "OK" else ([], 0)
     for field in ("price", "original_price"):

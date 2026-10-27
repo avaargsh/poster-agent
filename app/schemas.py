@@ -12,6 +12,11 @@ class PosterSpec(BaseModel):
     style: str = Field(default="蓝色科技风", min_length=1, max_length=80)
     cta: str = Field(default="立即抢购", min_length=1, max_length=12)
     background_mode: Literal["local", "ai"] = "local"
+    # Bounded, deterministic square layout controls. Old saved versions
+    # without these keys continue to render with the original composition.
+    layout_id: Literal["classic", "hero"] = "classic"
+    product_align: Literal["top", "center", "bottom"] = "center"
+    product_scale: Literal["full", "compact"] = "full"
 
     @field_validator("title", "subtitle", "style", "cta")
     @classmethod
@@ -36,6 +41,9 @@ class PosterEdit(BaseModel):
     price: Decimal | None = Field(default=None, gt=0, le=999999, decimal_places=2)
     original_price: Decimal | None = Field(default=None, gt=0, le=999999, decimal_places=2)
     cta: str | None = Field(default=None, min_length=1, max_length=12)
+    layout_id: Literal["classic", "hero"] | None = None
+    product_align: Literal["top", "center", "bottom"] | None = None
+    product_scale: Literal["full", "compact"] | None = None
 
     @field_validator("title", "subtitle", "cta")
     @classmethod

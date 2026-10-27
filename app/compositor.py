@@ -135,13 +135,130 @@ def _measure_text_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
     }
 
 
+def _product_in_frame(
+    product: Image.Image, frame: tuple[int, int, int, int], spec: PosterSpec
+) -> tuple[Image.Image, tuple[int, int]]:
+    """Contain original pixels inside an explicit safe frame; never crop the SKU."""
+    x, y, width, height = frame
+    factor = 0.78 if spec.product_scale == "compact" else 1.0
+    # An image exactly as tall as its frame cannot move vertically: all three
+    # position controls would produce the same pixels. Reserve travel space
+    # for the hero template and explicit top/bottom placement.
+    # The historical classic + center + full path deliberately stays identical.
+    travel = 80 if spec.layout_id == "hero" or spec.product_align != "center" else 0
+    image = _contain(
+        product, (int(width * factor), int((height - travel) * factor))
+    )
+    room = height - image.height
+    align_y = {"top": 0, "center": room // 2, "bottom": room}[spec.product_align]
+    return image, (x + (width - image.width) // 2, y + align_y)
+
+
+def _measure_hero_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
+    title_font = _fit_text(draw, spec.title, 580, max_size=54, min_size=31)
+    lines = _break_lines(draw, spec.title, title_font, 580)
+    subtitle_y = 692 + 64 * (len(lines) - 1)
+    subtitle_font = _fit_text(draw, spec.subtitle, 585, max_size=27, min_size=19)
+    if spec.subtitle:
+        box = draw.textbbox((0, 0), spec.subtitle, font=subtitle_font)
+        if box[2] - box[0] > 585 or subtitle_y + box[3] - box[1] > 801:
+            raise ValueError("副标题超出商品主体优先版式安全区域，请缩短文案")
+    price_value = "¥" + price_text(spec.price)
+    price_font = _fit_text(draw, price_value, 545, max_size=79, min_size=43)
+    price_box = draw.textbbox((0, 0), price_value, font=price_font)
+    if price_box[2] - price_box[0] > 545:
+        raise ValueError("价格过长，无法安全排版")
+    original_value = None
+    original_font = None
+    if spec.original_price is not None:
+        original_value = "原价 ¥" + price_text(spec.original_price)
+        original_font = _fit_text(draw, original_value, 530, max_size=25, min_size=19)
+        old_box = draw.textbbox((0, 0), original_value, font=original_font)
+        if old_box[2] - old_box[0] > 530:
+            raise ValueError("原价过长，无法安全排版")
+    cta_font = _fit_text(draw, spec.cta, 260, max_size=32, min_size=20)
+    cta_box = draw.textbbox((0, 0), spec.cta, font=cta_font)
+    if cta_box[2] - cta_box[0] > 260:
+        raise ValueError("CTA 文案过长，无法放入按钮")
+    return {
+        "title_font": title_font, "title_lines": lines, "subtitle_y": subtitle_y,
+        "subtitle_font": subtitle_font, "price_value": price_value,
+        "price_font": price_font, "original_value": original_value,
+        "original_font": original_font, "cta_font": cta_font, "cta_box": cta_box,
+    }
+
+
+def _compose_hero(
+    spec: PosterSpec, product: Image.Image,
+    logo: Image.Image | None, background: Image.Image,
+) -> bytes:
+    """Square hero template: product above and price/copy in protected footer."""
+    canvas = _cover(background, (SIZE, SIZE)).convert("RGBA")
+    overlay = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    ImageDraw.Draw(overlay).rounded_rectangle(
+        (32, 615, 992, 985), radius=30, fill=(2, 18, 42, 219)
+    )
+    canvas = Image.alpha_composite(canvas, overlay)
+    product_img, (x, y) = _product_in_frame(product, (257, 112, 510, 480), spec)
+    if product_img.getextrema()[3][0] == 255:
+        card = Image.new("RGBA", (554, 514), (255, 255, 255, 241))
+        mask = Image.new("L", card.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, 553, 513), radius=30, fill=255
+        )
+        card.putalpha(mask)
+        canvas.alpha_composite(card, (235, 92))
+    canvas.alpha_composite(product_img, (x, y))
+    if logo is not None:
+        logo_img = _contain(logo, (200, 68))
+        canvas.alpha_composite(logo_img, (755, 641))
+
+    draw = ImageDraw.Draw(canvas)
+    layout = _measure_hero_layout(draw, spec)
+    for index, line in enumerate(layout["title_lines"]):
+        draw.text(
+            (75, 637 + index * 64), line,
+            font=layout["title_font"], fill="#FFFFFF",
+        )
+    if spec.subtitle:
+        draw.text(
+            (76, layout["subtitle_y"]), spec.subtitle,
+            font=layout["subtitle_font"], fill="#CAE4FF",
+        )
+    draw.text((76, 801), "活动价", font=get_font(27), fill="#CDE6FF")
+    draw.text(
+        (66, 830), layout["price_value"], font=layout["price_font"],
+        fill="#FFE596", stroke_width=1, stroke_fill="#D59F52",
+    )
+    if layout["original_value"] is not None:
+        draw.text(
+            (80, 944), layout["original_value"],
+            font=layout["original_font"], fill="#BBD2ED",
+        )
+    draw.rounded_rectangle((660, 877, 959, 951), radius=26, fill="#F8CA5A")
+    cta_box = layout["cta_box"]
+    draw.text(
+        (809 - (cta_box[2] - cta_box[0]) / 2, 894),
+        spec.cta, font=layout["cta_font"], fill="#203653",
+    )
+    output = io.BytesIO()
+    canvas.convert("RGB").save(output, "PNG", optimize=True)
+    return output.getvalue()
+
+
 def validate_square_layout(spec: PosterSpec) -> None:
-    """Reject fixed-layout text overflow before claiming an execution or calling a model."""
+    """Reject both square templates' text overflow before paid provider claims."""
     probe = Image.new("RGB", (1, 1))
-    _measure_text_layout(ImageDraw.Draw(probe), spec)
+    draw = ImageDraw.Draw(probe)
+    if spec.layout_id == "hero":
+        _measure_hero_layout(draw, spec)
+    else:
+        _measure_text_layout(draw, spec)
 
 
 def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, background: Image.Image) -> bytes:
+    if spec.layout_id == "hero":
+        return _compose_hero(spec, product, logo, background)
     canvas = _cover(background, (SIZE, SIZE)).convert("RGBA")
     overlay = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
@@ -149,7 +266,9 @@ def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, ba
     canvas = Image.alpha_composite(canvas, overlay)
 
     # 商品主体使用原图，透明 PNG 能获得最佳合成效果。
-    product_rgba = _contain(product, (460, 680))
+    product_rgba, (product_x, product_y) = _product_in_frame(
+        product, (542, 205, 460, 680), spec
+    )
     if product_rgba.getextrema()[3][0] == 255:  # 白底或不透明图，保留完整素材而非虚假抠图
         card = Image.new("RGBA", (474, 700), (255, 255, 255, 241))
         mask = Image.new("L", card.size, 0)
@@ -157,8 +276,6 @@ def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, ba
         md.rounded_rectangle((0, 0, 473, 699), radius=30, fill=255)
         card.putalpha(mask)
         canvas.alpha_composite(card, (535, 190))
-    product_x = 542 + (460 - product_rgba.width) // 2
-    product_y = 205 + (680 - product_rgba.height) // 2
     canvas.alpha_composite(product_rgba, (product_x, product_y))
 
     if logo is not None:

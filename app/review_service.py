@@ -93,7 +93,10 @@ def decide_run(run_id: str, approved: bool, spec: PosterSpec | None) -> dict:
             before = _view(run_id, graph)
             if not before["pending_approval"]:
                 if before["status"] == "APPROVED" and approved and spec is not None:
-                    if before["confirmed_spec"] == spec.model_dump(mode="json"):
+                    # Older checkpoints may omit default layout controls.
+                    # Normalize both sides while preserving exact field values.
+                    prior = PosterSpec.model_validate(before["confirmed_spec"])
+                    if prior.model_dump(mode="json") == spec.model_dump(mode="json"):
                         return before  # exact duplicate is idempotent
                 if before["status"] == "REJECTED" and not approved:
                     return before

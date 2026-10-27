@@ -1,0 +1,155 @@
+"""Opt-in Chromium acceptance for versioned square layout editing on real FastAPI.
+
+Uses synthetic SKU pixels, local background, and temporary storage. Not a
+real-customer image, OCR/visual quality attestation, or production benchmark.
+"""
+from __future__ import annotations
+
+import io
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from urllib.request import urlopen
+
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+
+def _port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _check(condition, label):
+    if not condition:
+        raise AssertionError(label)
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix="poster-layout-browser-") as directory:
+        port = _port()
+        origin = f"http://127.0.0.1:{port}"
+        env = {
+            **os.environ,
+            "POSTER_DATA_DIR": directory + "/posters",
+            "POSTER_EXECUTION_DB": directory + "/executions.sqlite3",
+            "POSTER_CHECKPOINT_DB": directory + "/checkpoint.sqlite3",
+        }
+        log_path = Path(directory) / "server.log"
+        server_log = log_path.open("wb")
+        server = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app.main:app",
+             "--host", "127.0.0.1", "--port", str(port), "--no-access-log"],
+            env=env, stdout=server_log, stderr=subprocess.STDOUT,
+        )
+        try:
+            for _ in range(80):
+                if server.poll() is not None:
+                    raise RuntimeError("FastAPI exited before browser smoke")
+                try:
+                    with urlopen(origin + "/", timeout=1) as response:
+                        if response.status == 200:
+                            break
+                except OSError:
+                    time.sleep(0.15)
+            else:
+                raise RuntimeError("FastAPI did not start")
+
+            product = io.BytesIO()
+            Image.new("RGBA", (160, 240), (110, 186, 226, 255)).save(
+                product, format="PNG"
+            )
+            with sync_playwright() as pw:
+                executable = shutil.which("google-chrome") or shutil.which(
+                    "google-chrome-stable"
+                )
+                opts = {"executable_path": executable} if executable else {}
+                browser = pw.chromium.launch(
+                    headless=True, args=["--no-sandbox"], **opts
+                )
+                try:
+                    page = browser.new_page(viewport={"width": 1440, "height": 960})
+                    page_errors = []
+                    post_responses = []
+                    page.on("pageerror", lambda error: page_errors.append(str(error)))
+                    page.on("response", lambda response: post_responses.append(
+                        (response.status, response.url)
+                    ) if "/api/posters" in response.url else None)
+                    page.goto(origin + "/", wait_until="domcontentloaded")
+                    page.locator("#create-product").set_input_files({
+                        "name": "synthetic-sku.png", "mimeType": "image/png",
+                        "buffer": product.getvalue(),
+                    })
+                    page.locator("#create-layout_id").select_option("hero")
+                    page.locator("#create-product_align").select_option("bottom")
+                    page.locator("#create-product_scale").select_option("compact")
+                    page.locator("#generate").click()
+                    try:
+                        page.wait_for_function(
+                            "() => (!!current && current.version === 1) || "
+                            "document.querySelector('#createStatus').classList.contains('bad')",
+                            timeout=15000,
+                        )
+                    except Exception as exc:
+                        raise AssertionError(
+                            "Create did not complete: " +
+                            page.locator("#createStatus").inner_text() +
+                            " | requests=" + repr(post_responses) +
+                            " | browser errors=" + repr(page_errors) +
+                            " | server log=" + log_path.read_text(errors="replace")[-3500:]
+                        ) from exc
+                    _check(
+                        page.evaluate("() => !!current && current.version === 1"),
+                        "Create failed: " + page.locator("#createStatus").inner_text() +
+                        " | requests=" + repr(post_responses) +
+                        " | browser errors=" + repr(page_errors) +
+                        " | server log=" + log_path.read_text(errors="replace")[-3500:],
+                    )
+                    first = page.evaluate("() => structuredClone(current)")
+                    _check(first["spec"]["layout_id"] == "hero", "hero create failed")
+                    _check(first["spec"]["product_align"] == "bottom", "product align lost")
+                    _check(first["spec"]["product_scale"] == "compact", "scale lost")
+                    old_image = page.request.get(origin + first["image_url"]).body()
+                    page.locator("#editLayout").select_option("classic")
+                    page.locator("#editProductAlign").select_option("top")
+                    page.locator("#editProductScale").select_option("full")
+                    page.locator("#saveEdit").click()
+                    page.wait_for_function(
+                        "() => !!current && current.version === 2"
+                    )
+                    latest = page.evaluate("() => structuredClone(current)")
+                    _check(latest["spec"]["layout_id"] == "classic", "edit lost template")
+                    _check(latest["spec"]["product_align"] == "top", "edit lost alignment")
+                    _check(latest["spec"]["product_scale"] == "full", "edit lost scale")
+                    new_image = page.request.get(origin + latest["image_url"]).body()
+                    _check(new_image != old_image, "layout produced identical PNG")
+                    _check(
+                        page.request.get(origin + first["image_url"]).body() == old_image,
+                        "editing rewrote immutable old PNG",
+                    )
+                    page.locator("#versionGallery summary").click()
+                    page.locator("#historyVersionSelect").select_option("1")
+                    page.locator("#viewHistoryVersion").click()
+                    page.locator("#historyVersionStatus").filter(has_text="只读历史 v1").wait_for()
+                    print("PASS: real Chromium create hero, layout/placement edit, "
+                          "new image, retained v1 and history gallery")
+                finally:
+                    browser.close()
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+            server_log.close()
+
+
+if __name__ == "__main__":
+    main()

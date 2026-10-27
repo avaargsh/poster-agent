@@ -14,7 +14,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from app.acceptance import AcceptanceReport
-from app.ocr_price_layout import PRICE_ZONES
+from app.ocr_price_layout import SQUARE_PRICE_ZONES
+from app.schemas import PosterSpec
 from app import storage
 
 STATUS_COLORS = {
@@ -88,7 +89,10 @@ def render_overlay(
     # must not reuse the coordinates as if they were valid.
     zones_drawn = 0
     if (w, h) == (1024, 1024):
-        for name, zone in PRICE_ZONES.items():
+        # _verified_source already hashed this exact spec snapshot.
+        spec_path = storage.poster_dir(poster_id) / "versions" / f"v{version}.json"
+        spec = PosterSpec.model_validate_json(spec_path.read_bytes())
+        for name, zone in SQUARE_PRICE_ZONES[spec.layout_id].items():
             check_name = "ocr_" + name + "_position"
             if check_name not in status:
                 continue
