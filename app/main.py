@@ -293,15 +293,27 @@ async def create_poster(
     layout_id: Annotated[str, Form()] = "classic",
     product_align: Annotated[str, Form()] = "center",
     product_scale: Annotated[str, Form()] = "full",
+    layer_layout: Annotated[str, Form()] = "",
     logo: UploadFile | None = File(default=None),
     review_run_id: Annotated[str, Form()] = "",
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    # Never accept executable layer definitions or an unbounded JSON payload.
+    # The nested Pydantic schema also rejects unknown properties and overflows.
+    if len(layer_layout.encode("utf-8")) > 2048:
+        raise HTTPException(status_code=422, detail="图层参数超出大小限制")
+    try:
+        offsets = json.loads(layer_layout) if layer_layout else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="图层参数必须是 JSON 对象") from exc
+    if not isinstance(offsets, dict):
+        raise HTTPException(status_code=422, detail="图层参数必须是 JSON 对象")
     try:
         spec = PosterSpec(title=title, price=price, subtitle=subtitle, style=style,
                           original_price=original_price.strip() or None, cta=cta,
                           background_mode=background_mode, layout_id=layout_id,
-                          product_align=product_align, product_scale=product_scale)
+                          product_align=product_align, product_scale=product_scale,
+                          layer_layout=offsets)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors(include_context=False, include_input=False)) from exc
     # Fail fast for paid AI requests before reading or decoding uploaded files.
