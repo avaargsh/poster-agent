@@ -193,6 +193,7 @@ def _compose_hero(
     logo: Image.Image | None, background: Image.Image,
 ) -> bytes:
     """Square hero template: product above and price/copy in protected footer."""
+    offset = spec.layer_layout
     canvas = _cover(background, (SIZE, SIZE)).convert("RGBA")
     overlay = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     ImageDraw.Draw(overlay).rounded_rectangle(
@@ -211,34 +212,39 @@ def _compose_hero(
     canvas.alpha_composite(product_img, (x, y))
     if logo is not None:
         logo_img = _contain(logo, (200, 68))
-        canvas.alpha_composite(logo_img, (755, 641))
+        canvas.alpha_composite(logo_img, (755 + offset.logo_dx, 641 + offset.logo_dy))
 
     draw = ImageDraw.Draw(canvas)
     layout = _measure_hero_layout(draw, spec)
     for index, line in enumerate(layout["title_lines"]):
         draw.text(
-            (75, 637 + index * 64), line,
+            (75 + offset.title_dx, 637 + index * 64 + offset.title_dy), line,
             font=layout["title_font"], fill="#FFFFFF",
         )
     if spec.subtitle:
         draw.text(
-            (76, layout["subtitle_y"]), spec.subtitle,
+            (76 + offset.title_dx, layout["subtitle_y"] + offset.title_dy), spec.subtitle,
             font=layout["subtitle_font"], fill="#CAE4FF",
         )
-    draw.text((76, 801), "活动价", font=get_font(27), fill="#CDE6FF")
+    draw.text((76 + offset.price_dx, 801 + offset.price_dy), "活动价", font=get_font(27), fill="#CDE6FF")
     draw.text(
-        (66, 830), layout["price_value"], font=layout["price_font"],
+        (66 + offset.price_dx, 830 + offset.price_dy), layout["price_value"], font=layout["price_font"],
         fill="#FFE596", stroke_width=1, stroke_fill="#D59F52",
     )
     if layout["original_value"] is not None:
         draw.text(
-            (80, 944), layout["original_value"],
+            (80 + offset.price_dx, 944 + offset.price_dy), layout["original_value"],
             font=layout["original_font"], fill="#BBD2ED",
         )
-    draw.rounded_rectangle((660, 877, 959, 951), radius=26, fill="#F8CA5A")
+    draw.rounded_rectangle(
+        (660 + offset.cta_dx, 877 + offset.cta_dy,
+         959 + offset.cta_dx, 951 + offset.cta_dy),
+        radius=26, fill="#F8CA5A"
+    )
     cta_box = layout["cta_box"]
     draw.text(
-        (809 - (cta_box[2] - cta_box[0]) / 2, 894),
+        (809 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2,
+         894 + offset.cta_dy),
         spec.cta, font=layout["cta_font"], fill="#203653",
     )
     output = io.BytesIO()
@@ -259,6 +265,7 @@ def validate_square_layout(spec: PosterSpec) -> None:
 def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, background: Image.Image) -> bytes:
     if spec.layout_id == "hero":
         return _compose_hero(spec, product, logo, background)
+    offset = spec.layer_layout
     canvas = _cover(background, (SIZE, SIZE)).convert("RGBA")
     overlay = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
@@ -280,35 +287,40 @@ def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, ba
 
     if logo is not None:
         logo_image = _contain(logo, (260, 105))
-        canvas.alpha_composite(logo_image, (75, 82))
+        canvas.alpha_composite(logo_image, (75 + offset.logo_dx, 82 + offset.logo_dy))
 
     draw = ImageDraw.Draw(canvas)
     layout = _measure_text_layout(draw, spec)
     for index, line in enumerate(layout["title_lines"]):
         draw.text(
-            (75, layout["title_top"] + index * 86), line,
+            (75 + offset.title_dx, layout["title_top"] + index * 86 + offset.title_dy), line,
             font=layout["title_font"], fill="#FFFFFF", stroke_width=0,
         )
     if spec.subtitle:
         draw.text(
-            (75, layout["subtitle_top"]), spec.subtitle,
+            (75 + offset.title_dx, layout["subtitle_top"] + offset.title_dy), spec.subtitle,
             font=layout["subtitle_font"], fill="#CAE4FF",
         )
 
-    draw.text((75, 610), "限时到手价", font=get_font(31), fill="#CDE6FF")
+    draw.text((75 + offset.price_dx, 610 + offset.price_dy), "限时到手价", font=get_font(31), fill="#CDE6FF")
     draw.text(
-        (65, 668), layout["price_value"], font=layout["price_font"],
+        (65 + offset.price_dx, 668 + offset.price_dy), layout["price_value"], font=layout["price_font"],
         fill="#FFE596", stroke_width=1, stroke_fill="#D59F52",
     )
     if layout["original_value"] is not None:
         draw.text(
-            (78, 800), layout["original_value"], font=layout["original_font"],
+            (78 + offset.price_dx, 800 + offset.price_dy), layout["original_value"], font=layout["original_font"],
             fill="#BBD2ED",
         )
-    draw.rounded_rectangle((76, 867, 410, 934), radius=28, fill="#F8CA5A")
+    draw.rounded_rectangle(
+        (76 + offset.cta_dx, 867 + offset.cta_dy,
+         410 + offset.cta_dx, 934 + offset.cta_dy),
+        radius=28, fill="#F8CA5A"
+    )
     cta_box = layout["cta_box"]
     draw.text(
-        (243 - (cta_box[2] - cta_box[0]) / 2, 877), spec.cta,
+        (243 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2,
+         877 + offset.cta_dy), spec.cta,
         font=layout["cta_font"], fill="#203653",
     )
     output = io.BytesIO()
