@@ -178,6 +178,42 @@ def _zip_contents(
             MAX_REVIEWED_PNG_BYTES, total, expected_sha256=digest,
         )
 
+    # Cutout reports are an additive, separately governed M6 evidence channel.
+    # Never package only part of the evidence or arbitrary local images.
+    cutout_csv = folder / "m6_cutout_reviews.csv"
+    cutout_json = folder / "m6_cutout_evidence.json"
+    if (cutout_csv.exists() or cutout_csv.is_symlink()
+            or cutout_json.exists() or cutout_json.is_symlink()):
+        if not cutout_csv.is_file() or not cutout_json.is_file():
+            raise _blocked("抠图证据 JSON 与审核 CSV 必须同时存在")
+        from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
+
+        verified = verify_cutout_evidence(
+            folder, folder.parent / "batch_import_results.json", min_skus=1
+        )
+        cutout_csv_raw = _bounded_bytes(cutout_csv, MAX_CSV_BYTES)
+        cutout_json_raw = _bounded_bytes(cutout_json, MAX_CSV_BYTES)
+        if (hashlib.sha256(cutout_csv_raw).hexdigest()
+                != verified["reviews_csv_sha256"]
+                or hashlib.sha256(cutout_json_raw).hexdigest()
+                != verified["evidence_json_sha256"]):
+            raise _blocked("M6 抠图审核证据在验证后发生变化")
+        total += len(cutout_csv_raw) + len(cutout_json_raw)
+        if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
+            raise _blocked("抠图证据使 ZIP 大小超出上限")
+        archive.writestr("m6_cutout_reviews.csv", cutout_csv_raw)
+        archive.writestr("m6_cutout_evidence.json", cutout_json_raw)
+        for row in csv.DictReader(io.StringIO(cutout_csv_raw.decode("utf-8-sig"))):
+            if row["quality_state"] != "REVIEW_REQUIRED":
+                continue
+            sku = row["sku_id"]
+            name = f"images/{sku}-cutout-comparison.png"
+            total = _add_bounded_file(
+                archive, folder / name, name,
+                MAX_REVIEWED_PNG_BYTES, total,
+                expected_sha256=row["comparison_image_sha256"],
+            )
+
 
 @router.get("/{batch_id}/m6-package/download")
 def download_m6_package(batch_id: str):
