@@ -228,3 +228,31 @@ def test_cutout_verifier_enforces_twenty_distinct_skus_for_real_acceptance(
     prepare_package(journal, output, apply=True)
     with pytest.raises(CutoutEvidenceError, match="20"):
         verify_cutout_evidence(output, journal)
+
+
+
+def test_zip_contains_actual_cutout_contact_sheet_and_is_hash_bound(tmp_path, monkeypatch):
+    import zipfile
+    import pytest
+    from app.m6_package_download_routes import _zip_contents
+
+    journal = _batch(tmp_path, monkeypatch)
+    folder = journal.parent / "m6_review_package"
+    prepare_package(journal, folder, apply=True)
+    record = json.loads(journal.read_text())["rows"]["test-sku"]
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        _zip_contents(archive, folder, {"test-sku": record["poster_id"]})
+    with zipfile.ZipFile(io.BytesIO(out.getvalue())) as archive:
+        names = archive.namelist()
+        assert "m6_cutout_evidence.json" in names
+        assert "m6_cutout_reviews.csv" in names
+        assert "images/test-sku-cutout-comparison.png" in names
+        row = _rows(folder / "m6_cutout_reviews.csv")[0]
+        assert (hashlib.sha256(archive.read(row["comparison_image_path"])).hexdigest()
+                == row["comparison_image_sha256"])
+    picture = folder / "images" / "test-sku-cutout-comparison.png"
+    picture.write_bytes(b"swapped")
+    with pytest.raises(Exception):
+        with zipfile.ZipFile(io.BytesIO(), "w") as archive:
+            _zip_contents(archive, folder, {"test-sku": record["poster_id"]})
