@@ -76,6 +76,11 @@ def test_selected_cutout_preserves_original_and_revision_can_switch(tmp_path, mo
     assert v2["spec"]["product_source_mode"] == "original"
     assert client.get(v2["image_url"]).content != old_png
     assert client.get(record["image_url"]).content == old_png
+    # Native 4:5 exports must use each immutable version's selected source.
+    v1_native = client.get(f"/api/posters/{pid}/versions/1/exports/feed_4x5_native")
+    v2_native = client.get(f"/api/posters/{pid}/versions/2/exports/feed_4x5_native")
+    assert v1_native.status_code == 200 and v2_native.status_code == 200
+    assert v1_native.content != v2_native.content
     assert client.post(f"/api/posters/{pid}/revisions",
         json={"expected_version": 1, "product_source_mode": "cutout"}).status_code == 409
 
@@ -189,6 +194,23 @@ def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path
     second = real_sku_batch.run_batch(path, output, apply=True)
     assert second["poster_ids"] == created["poster_ids"]
     assert len(list(storage.root().iterdir())) == 1
+    # The saved cutout is part of the batch integrity attestation.
+    from app.batch_artifact_integrity import (
+        BatchArtifactIntegrityError, verify_batch_artifact,
+    )
+    ledger = json.loads((output / "batch_import_results.json").read_text())
+    verify_batch_artifact(ident, ledger["rows"]["sku-01"])
+    asset = storage.poster_dir(ident) / "assets" / "product_cutout.png"
+    original_cutout_bytes = asset.read_bytes()
+    asset.write_bytes(b"corrupted-png")
+    try:
+        verify_batch_artifact(ident, ledger["rows"]["sku-01"])
+    except BatchArtifactIntegrityError:
+        pass
+    else:
+        raise AssertionError("Tampered cutout passed batch receipt verification")
+    asset.write_bytes(original_cutout_bytes)
+    verify_batch_artifact(ident, ledger["rows"]["sku-01"])
 
 
 def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkeypatch):
