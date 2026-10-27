@@ -10,8 +10,6 @@ import hashlib
 import io
 import json
 
-from pydantic import ValidationError
-
 from app import storage
 from app.schemas import PosterSpec
 
