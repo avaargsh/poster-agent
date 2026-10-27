@@ -2,6 +2,40 @@
 
 关联 [Issue #31](https://github.com/musuntana/poster-agent/issues/31)。本文件是**待执行的评测协议**，不代表真实 SKU、真实 OCR 或产品质量已通过验证。
 
+## Mac M1 本地 u2netp 真实 20 SKU 抠图试验（M14）
+
+使用隔离的 CPU rembg CLI 环境（推荐 Python 3.12），预装 `u2netp.onnx` 到 `$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx`。参照 [rembg 官方文档](https://github.com/danielgatis/rembg) 核对 CLI `rembg i -m u2netp` 与模型缓存位置。操作者须自行验证权重的可信来源和供应链摘要，固定 `POSTER_CUTOUT_MODEL_SHA256`，并确保项目进程能在 PATH 中找到独立环境的 `rembg`。运行器阻断旧环境变量 `U2NET_HOME` 劫持选择，且只走本地模型和本地图片。
+
+```bash
+# 在仓库根目录执行（不自动下载模型，也不发送私有素材）
+export POSTER_CUTOUT_REMBG_HOME=\"$HOME/.rembg\"
+shasum -a 256 \"$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx\"
+# 将人工核对过可信来源的 SHA-256 填入下面变量
+export POSTER_CUTOUT_MODEL_SHA256='<已核验的64位SHA256>'
+
+# 数据目录在 .gitignore 中；先填好授权登记表里的 AUTHORIZED/来源哈希/独立SKU审核
+uv run --locked python -m scripts.local_cutout_cohort \\
+  --manifest data/real_trial/real_skus.csv \\
+  --registry data/real_trial/m6_cohort_registry.csv \\
+  --output-dir data/eval_runs/u2netp_trial_001
+
+# 清单/授权/模型全部就绪时，主动进行 20 SKU 本地推理
+uv run --locked python -m scripts.local_cutout_cohort \\
+  --manifest data/real_trial/real_skus.csv \\
+  --registry data/real_trial/m6_cohort_registry.csv \\
+  --output-dir data/eval_runs/u2netp_trial_001 --apply
+
+# 只读验证已完成的生成账本、原图、抠图 PNG 和 M5g 清单
+uv run --locked python -m scripts.local_cutout_cohort \\
+  --manifest data/real_trial/real_skus.csv \\
+  --registry data/real_trial/m6_cohort_registry.csv \\
+  --output-dir data/eval_runs/u2netp_trial_001 --verify
+```
+
+失败后首先检查 `cutout_trial.json` 中的 `FAILED` 行；确认本地模型/图片后再显式加 `--apply --retry-failed`。已标记 `COMPLETED` 的 SKU 会先核对原始输入、候选 PNG 和像素指标，然后原样复用。孤立 PNG、模型摘要变化、授权登记被修改都会阻断续跑，保留目录供人工对账。完整成功后，使用 `data/eval_runs/u2netp_trial_001/manifest_with_cutouts.csv` 作为 M5g 批量导入清单；之后沿用现有 M6 审核包生成和本节的原图/抠图对照审核。
+
+请把 `cutout_trial.json` 理解为本地程序记录：其中的 SHA、命令类型和系统信息便于核对复现，缺少可信独立执行环境认证。因此固定保留 `model_runtime_attested=false`、`real_model_quality_verified=false`。请勿把测试中 mock 生成的透明 PNG 作为真实 u2netp 推理结果，也不要把试验素材提交到公开 Git 仓库。
+
 ## 抠图候选的补充人工证据（M13）\n\nM6 准备包现在会额外产生 `m6_cutout_evidence.json`、`m6_cutout_reviews.csv`，以及每个实际使用抠图候选的 `images/<sku>-cutout-comparison.png`。左侧始终是原商品图，右侧是透明主体在棋盘背景上的实际像素。自动指标包括主体覆盖率、边缘接触比例、连通组件数量、半透明比例和原图保留区域 RGB 差异，全部只用于人工优先级；可视化呈现不推断商品真实性或切图质量合格。\n\n完成审核表时必须独立核对 subject_integrity_review（主体完整性）、edge_artifact_review（边缘与残影）、brand_mark_review（品牌与包装细节）；使用 PASS/FAIL，标记 reviewer_alias 和 UTC reviewed_at_utc，填写 human_accept。完整证据验证命令：`python -m scripts.verify_m6_cutout_evidence --package data/.../m6_review_package --journal data/.../batch_import_results.json`。要求 20 个独立 SKU，且验证会重读执行凭据、原始 PNG、抠图、对照图并重新计算诊断指标。断言是操作员声明，模型运行的真实 ONNX 来源需另行记录和独立验收；不要把此证据作为审核通过或实际运行真实性。\n\n## 1. 样本冻结
 
 - 至少 20 个**不同 SKU**，每个 SKU 有合法使用的商品图片及可选 Logo；同 SKU 的多次生成不增加独立样本数。
