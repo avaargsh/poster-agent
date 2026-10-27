@@ -266,3 +266,94 @@ def test_reapply_rejects_altered_copied_source_without_model_call(tmp_path, monk
     )
     with pytest.raises(CutoutCohortError, match="源图|源素材|文件"):
         prepare_cohort(manifest, registry, out, apply=True, min_skus=2)
+
+
+
+def _full_lineage(tmp_path, monkeypatch, *, candidate_tone=50):
+    from scripts.real_sku_batch import run_batch
+    from scripts.prepare_m6_review import prepare_package
+
+    manifest, registry = _inputs(tmp_path)
+    trial = tmp_path / "trial"
+    _model(tmp_path, monkeypatch)
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "execution.sqlite3"))
+    tones = [candidate_tone, candidate_tone + 1]
+    attempts = []
+    def local_fake(image):
+        attempts.append(True)
+        return _png(alpha=True, tone=tones[len(attempts) - 1])
+    monkeypatch.setattr("scripts.local_cutout_cohort.local_preview", local_fake)
+    prepare_cohort(manifest, registry, trial, apply=True, min_skus=2)
+    m5g = tmp_path / "m5g"
+    run_batch(trial / "manifest_with_cutouts.csv", m5g, apply=True)
+    journal = m5g / "batch_import_results.json"
+    package = m5g / "m6_review_package"
+    prepare_package(journal, package, apply=True)
+    return manifest, registry, trial, journal, package
+
+
+def test_m14_m5g_m6_lineage_is_read_only_and_review_stays_pending(
+    tmp_path, monkeypatch,
+):
+    from scripts.verify_m14_lineage import verify_lineage
+    manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
+    before = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+              for folder in (trial, journal.parent, package)
+              for path in folder.glob("*.json")}
+    result = verify_lineage(trial, manifest, registry, journal, package, min_skus=2)
+    assert result["status"] == "LINEAGE_VERIFIED_REVIEW_PENDING"
+    assert result["source_cohort_sku_count"] == 2
+    assert result["linked_sku_count"] == 2
+    assert result["linked_versions"] == 2
+    assert result["model_runtime_attested"] is False
+    assert result["quality_accepted"] is False
+    assert result["independent_review_attested"] is False
+    assert len(result["items"]) == 2
+    assert all(item["source_matched"] and item["cutout_matched"]
+               and item["m6_review_images_matched"] for item in result["items"])
+    after = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+             for folder in (trial, journal.parent, package)
+             for path in folder.glob("*.json")}
+    assert before == after
+
+
+def test_m14_bridge_rejects_two_individually_valid_but_unrelated_trials(
+    tmp_path, monkeypatch,
+):
+    from scripts.verify_m14_lineage import LineageError, verify_lineage
+
+    manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
+    other_trial = tmp_path / "second-trial"
+    tones = [95, 96]
+    state = []
+    def other_fake(image):
+        state.append(True)
+        return _png(alpha=True, tone=tones[len(state)-1])
+    monkeypatch.setattr("scripts.local_cutout_cohort.local_preview", other_fake)
+    prepare_cohort(manifest, registry, other_trial, apply=True, min_skus=2)
+    assert verify_cohort(other_trial, manifest, registry, min_skus=2)[
+        "status"] == "RECORDED_UNATTESTED"
+    with pytest.raises(LineageError, match="清单|抠图|sha|SHA|来源"):
+        verify_lineage(other_trial, manifest, registry, journal, package, min_skus=2)
+    # Normal lineage still succeeds.
+    assert verify_lineage(trial, manifest, registry, journal, package, min_skus=2)[
+        "linked_sku_count"] == 2
+
+
+def test_m14_bridge_rejects_m6_review_image_tampering(tmp_path, monkeypatch):
+    from scripts.verify_m14_lineage import LineageError, verify_lineage
+
+    manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
+    image = package / "images" / "sku-00-square.png"
+    image.write_bytes(b"tampered")
+    with pytest.raises(LineageError, match="M6|图片|输出"):
+        verify_lineage(trial, manifest, registry, journal, package, min_skus=2)
+
+
+def test_m14_bridge_honors_default_twenty_distinct_sku_gate(tmp_path, monkeypatch):
+    from scripts.verify_m14_lineage import LineageError, verify_lineage
+
+    manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
+    with pytest.raises(LineageError, match="20"):
+        verify_lineage(trial, manifest, registry, journal, package)
