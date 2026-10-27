@@ -141,6 +141,10 @@ pre{max-width:100%}
 </details><form id="createForm"><input type="hidden" name="review_run_id" value="">
 <div class="row"><label for="create-product">商品图片（推荐透明 PNG）*</label><input type="file" id="create-product" name="product" accept="image/png,image/jpeg,image/webp" required></div>
 <p class="tip">PNG、JPG 或 WEBP，单张不超过 10 MB。</p><div id="productSelection" class="asset-selection" hidden><img id="productThumb" alt="已选择的商品图"><span id="productFileName"></span></div><p id="productFileError" class="tip bad" role="alert"></p>
+<div class="actions"><button id="cutoutPreviewButton" type="button" class="secondary">本地抠图预览（需预装模型）</button><button id="acceptCutout" type="button" class="secondary" disabled>使用抠图结果生成</button><button id="resetCutout" type="button" class="secondary" disabled>保留原图</button></div>
+<input type="hidden" name="product_source_mode" value="original">
+<div id="cutoutCompare" class="split" hidden><div class="row"><label>原始商品图</label><img id="cutoutOriginalPreview" class="preview" alt="抠图前的原始商品图"></div><div class="row"><label>待确认抠图结果</label><img id="cutoutResultPreview" class="preview" alt="本地模型处理后的透明商品图"></div></div>
+<p id="cutoutStatus" class="tip" role="status">抠图需要明确点击，不会自动执行。请对照检查边缘和主体完整性后决定是否采用。</p>
 <div class="row"><label for="create-logo">品牌 Logo（可选）</label><input type="file" id="create-logo" name="logo" accept="image/png,image/jpeg,image/webp"></div>
 <div class="row"><label for="create-title">主标题*</label><input id="create-title" name="title" required maxlength="35" value="双十一限时优惠"></div>
 <div class="row"><label for="create-subtitle">副标题</label><input id="create-subtitle" name="subtitle" maxlength="45" value="智能清洁 · 品质生活"></div>
@@ -223,6 +227,7 @@ pre{max-width:100%}
 <div class="split">
 <div class="row"><label for="editProductAlign">商品垂直位置</label>
 <select id="editProductAlign"><option value="top">靠上</option><option value="center">居中</option><option value="bottom">靠下</option></select></div>
+<div class="row"><label for="editProductSourceMode">商品素材</label><select id="editProductSourceMode"><option value="original">原图</option><option value="cutout">已保存抠图</option></select></div>
 <div class="row"><label for="editProductScale">商品大小</label>
 <select id="editProductScale"><option value="full">标准</option><option value="compact">紧凑</option></select></div></div>
 <p class="tip">变更后点击保存会立即渲染新的方图版本，旧版本、素材和已保存报告不被覆盖；新版本必须重新验收。</p>
@@ -488,6 +493,16 @@ pre{max-width:100%}
 <footer class="app-footer">文件与记录保存在本机。生成与自动检查完成后，仍需人工确认再使用。</footer>
 <script>
 let current = null;
+let cutoutCandidate=null, cutoutOriginalUrl=null, cutoutResultUrl=null, cutoutSourceFile=null;
+function resetCutoutPreview(){
+  cutoutCandidate=null;cutoutSourceFile=null;
+  if(cutoutOriginalUrl)URL.revokeObjectURL(cutoutOriginalUrl);
+  if(cutoutResultUrl)URL.revokeObjectURL(cutoutResultUrl);
+  cutoutOriginalUrl=null;cutoutResultUrl=null;
+  document.querySelector('[name="product_source_mode"]').value='original';
+  $('cutoutCompare').hidden=true;$('acceptCutout').disabled=true;$('resetCutout').disabled=true;
+  $('cutoutStatus').textContent='已保留原图；如需抠图，请重新预览。';
+}
 let activeReviewRunId = null;
 let activeReviewApproved = false;
 const $ = id => document.getElementById(id);
@@ -558,7 +573,7 @@ $('batchSearch').addEventListener('input',filterBatchRows);
 const form = $('createForm');
 const field = name => form.elements.namedItem(name);
 let productObjectUrl=null;
-field('product').addEventListener('change',()=>{
+field('product').addEventListener('change',()=>{resetCutoutPreview();
   if(productObjectUrl)URL.revokeObjectURL(productObjectUrl);
   productObjectUrl=null;
   const input=field('product'),file=input.files[0];
@@ -623,6 +638,7 @@ function specForLayoutInspection(prefix){
     layout_id:$('editLayout').value,
     product_align:$('editProductAlign').value,
     product_scale:$('editProductScale').value,
+    product_source_mode:$('editProductSourceMode').value,
     layer_layout:readLayerLayout('edit'),
   };
 }
@@ -782,6 +798,7 @@ function currentSpec() {
     layout_id:field('layout_id').value,
     product_align:field('product_align').value,
     product_scale:field('product_scale').value,
+    product_source_mode:field('product_source_mode').value,
     layer_layout:readLayerLayout('create')
   };
 }
@@ -969,6 +986,44 @@ $('executionHistoryNext').addEventListener('click',()=>{
 });
 refreshExecutionStatus();
 refreshExecutionHistory();
+
+$('cutoutPreviewButton').addEventListener('click',async()=>{
+  const input=field('product'),file=input.files[0],status=$('cutoutStatus');
+  if(!file){status.textContent='请先选择商品图。';status.className='tip bad';return;}
+  resetCutoutPreview();$('cutoutPreviewButton').disabled=true;
+  status.className='tip';status.textContent='正在运行本地 u2netp 预览，请人工检查结果…';
+  try{
+    const body=new FormData();body.append('product',file,file.name);
+    const response=await fetch('/api/product-cutouts/preview',{method:'POST',body});
+    if(!response.ok)throw Error(errorText(await response.json()));
+    const blob=await response.blob();
+    if(input.files[0]!==file)throw Error('商品已变更，请重新预览');
+    cutoutCandidate=new File([blob],'product-cutout.png',{type:'image/png'});
+    cutoutSourceFile=file;
+    cutoutOriginalUrl=URL.createObjectURL(file);cutoutResultUrl=URL.createObjectURL(blob);
+    $('cutoutOriginalPreview').src=cutoutOriginalUrl;
+    $('cutoutResultPreview').src=cutoutResultUrl;
+    $('cutoutCompare').hidden=false;
+    $('acceptCutout').disabled=false;$('resetCutout').disabled=false;
+    status.textContent='请对比原图与透明结果；只在轮廓完整时明确点击采用。';
+  }catch(err){status.textContent='抠图失败：'+err.message+'。原图仍可生成。';status.className='tip bad';}
+  finally{$('cutoutPreviewButton').disabled=false;}
+});
+$('acceptCutout').addEventListener('click',()=>{
+  if(!cutoutCandidate||field('product').files[0]!==cutoutSourceFile)return;
+  if(activeReviewRunId&&activeReviewApproved){
+    $('cutoutStatus').textContent='已有确认的 Brief，请先清除审批并重新确认素材规格。';
+    $('cutoutStatus').className='tip bad';return;
+  }
+  field('product_source_mode').value='cutout';
+  $('cutoutStatus').textContent='已采用抠图候选。将同时保存原图与抠图；后续版本可切换。';
+  $('cutoutStatus').className='tip good';
+});
+$('resetCutout').addEventListener('click',()=>{
+  field('product_source_mode').value='original';
+  $('cutoutStatus').textContent='已选择保留原图。本次不会上传抠图候选。';
+  $('cutoutStatus').className='tip';
+});
 async function fingerprintFormData(body){
   const entries=[];
   for(const [name,value] of body.entries()){
@@ -1007,6 +1062,8 @@ function display(data){
   $('editProductAlign').value=data.spec.product_align ?? 'center';
   $('editProductScale').value=data.spec.product_scale ?? 'full';
   writeLayerLayout('edit',data.spec.layer_layout);
+  $('editProductSourceMode').value=data.spec.product_source_mode ?? 'original';
+  $('editProductSourceMode').querySelector('[value="cutout"]').disabled=!data.product_cutout_available;
   populateSavedLayoutPicker(data);
   $('download').href=data.image_url;
   $('download').download='poster-v'+data.version+'.png';
@@ -1414,6 +1471,12 @@ $('createForm').addEventListener('submit',async e=>{e.preventDefault();
     return;
   }
   const body=new FormData(e.target);
+  if(field('product_source_mode').value==='cutout'){
+    if(!cutoutCandidate||field('product').files[0]!==cutoutSourceFile){
+      $('createStatus').textContent='抠图已失效，请重新预览并选择。';$('createStatus').className='tip bad';return;
+    }
+    body.append('product_cutout',cutoutCandidate,cutoutCandidate.name);
+  }
   try {
     body.set('layer_layout', JSON.stringify(readLayerLayout('create')));
   } catch(err) {
@@ -1481,6 +1544,7 @@ $('editForm').addEventListener('submit',async e=>{
     layout_id:$('editLayout').value,
     product_align:$('editProductAlign').value,
     product_scale:$('editProductScale').value,
+    product_source_mode:$('editProductSourceMode').value,
     layer_layout:readLayerLayout('edit'),
   };}catch(err){
     $('editStatus').textContent='图层参数无效：'+err.message;
