@@ -151,6 +151,71 @@ def main():
                     page.locator("#historyVersionStatus").filter(has_text="只读历史 v1").wait_for()
                     print("PASS: real Chromium create hero with title/logo layer offsets, "
                           "edit price/CTA layers, new image, retained v1 and history gallery")
+
+                    # Reuse the immutable v1 layout after the editor already
+                    # changed the source poster to a different v2 layout.
+                    page.locator("#nav-batch").click()
+                    page.locator("#batchUseSavedLayout").check()
+                    page.locator("#batchTemplateVersion").select_option("1")
+                    manifest_text = (
+                        "sku_id,product_image,title,price,original_price,subtitle,cta,style\n"
+                        "sku-one,one.png,牙刷新品,199,399,品质生活,查看商品,蓝色科技风\n"
+                        "sku-two,two.png,护肤单品,89,119,精选好物,立即查看,粉色浪漫\n"
+                    )
+                    page.locator("#batchManifest").set_input_files({
+                        "name": "batch.csv", "mimeType": "text/csv",
+                        "buffer": manifest_text.encode("utf-8"),
+                    })
+                    page.locator("#batchImages").set_input_files([
+                        {"name": "one.png", "mimeType": "image/png",
+                         "buffer": product.getvalue()},
+                        {"name": "two.png", "mimeType": "image/png",
+                         "buffer": product.getvalue()},
+                    ])
+                    page.locator("#preflightBatch").click()
+                    page.wait_for_function(
+                        "() => lastBatchStatus === 'READY' || "
+                        "document.querySelector('#batchStatus').classList.contains('bad')",
+                        timeout=30000,
+                    )
+                    _check(
+                        page.evaluate("() => lastBatchStatus === 'READY'"),
+                        "Batch preflight failed: " + page.locator("#batchStatus").inner_text()
+                        + " | server log=" + log_path.read_text(errors="replace")[-2400:],
+                    )
+                    batch_id = page.evaluate("() => currentBatchId")
+                    staged = page.request.get(origin + "/api/batches/" + batch_id).json()
+                    _check(staged["plan"]["layout_source"]["poster_id"]
+                           == first["poster_id"], "Wrong source poster")
+                    _check(staged["plan"]["layout_source"]["version"] == 1,
+                           "Historical source version was not frozen")
+                    page.locator("#applyBatch").click()
+                    page.wait_for_function(
+                        "() => lastBatchStatus === 'COMPLETED' || "
+                        "document.querySelector('#batchStatus').classList.contains('bad')",
+                        timeout=45000,
+                    )
+                    _check(
+                        page.evaluate("() => lastBatchStatus === 'COMPLETED'"),
+                        "Batch application failed: " +
+                        page.locator("#batchStatus").inner_text() +
+                        " | server log=" + log_path.read_text(errors="replace")[-2400:],
+                    )
+                    batch_state = page.request.get(
+                        origin + "/api/batches/" + batch_id
+                    ).json()
+                    _check(len(batch_state["rows"]) == 2, "Wrong batch size")
+                    for row in batch_state["rows"]:
+                        saved = page.request.get(
+                            origin + "/api/posters/" + row["poster_id"]
+                        ).json()["spec"]
+                        _check(saved["layout_id"] == "hero", "Lost historical hero template")
+                        _check(saved["layer_layout"]["title_dx"] == 10,
+                               "Lost frozen title offset")
+                        _check(saved["layer_layout"]["logo_dy"] == -8,
+                               "Lost frozen logo offset")
+                    print("PASS: browser reused historical source v1 layer template "
+                          "across 2 SKU, preflighted, generated and preserved frozen layout")
                 finally:
                     browser.close()
         finally:
