@@ -48,7 +48,9 @@ class NativeReviewSubmission(BaseModel):
     image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    asset_sha256: dict[Literal["product", "background", "logo"], str | None]
+    asset_sha256: dict[
+        Literal["product", "background", "logo", "product_cutout"], str | None
+    ]
     fields: dict[
         Literal["sku_integrity", "text_legibility", "composition",
                 "title", "price", "cta", "subtitle", "original_price"],
