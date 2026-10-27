@@ -134,6 +134,21 @@ uv run --locked python -m scripts.validate_m6_cohort \
 
 单快照旧调用保持原行为：`--ocr-source-reviews` 不提供时，严格 OCR JSON 必须与 `--reviews` 自身的 SHA-256 完全一致。**绑定通过仅表示本地可编辑文件的身份与哈希匹配，不证明人工身份、真实 OCR 推理、商品授权或发布质量**；M6 元数据报告 `PASS` 也不是投放许可。
 
+### 匿名人工质量汇总（不公开真实 SKU）
+
+完成本地 M6 全量证据校验（包含 `--require-ocr-evidence`）并得到 `status=PASS` 的证据**元数据报告**后，使用原先校验过的最终人工 CSV 生成单独汇总：
+
+```bash
+uv run --locked python -m scripts.summarize_m6_operator_quality \
+  --validation-report data/eval_runs/m6_validation_manual_001/report.json \
+  --reviews data/real_trial/reviewed_final.csv \
+  --output data/eval_runs/m6_validation_manual_001/operator_quality_summary.json
+```
+
+这个命令不会打开商品图片、执行模型推理或使用网络。它验证最终 CSV 的 SHA-256 与 M6 报告完全一致、两版式的 SKU 分母不缺失、OCR 声明与冻结源已匹配，再统计人工标注的四类结果（PASS、FAIL、UNVERIFIED、适用字段 N/A）。报告汇总方形与原生 4:5 各自的人工通过和已判定覆盖比例、每个字段的状态，以及同一 SKU 两版式都被标记 PASS 的数量和占比。字段分母排除 N/A，但保留 UNVERIFIED；整图和配对分母始终保留全部预期输出。
+
+输出文件不包含 SKU ID、路径、商品名称、审核员代号、人工备注或原始 OCR 内容，只包含汇总计数、比例与输入哈希。汇总 `status=OPERATOR_LABELS_ONLY_NOT_ATTESTED`，明确标记未独立验证的人工声明；即使 SKU 数达到 20，也不能自行断言素材确已授权、OCR 真正运行或海报质量合格，更不是投放许可。任一证据不一致或输出文件已存在时会拒绝生成或覆盖，原始数据不变。
+
 ### 网页逐 SKU OCR 对照检查
 
 当一个已完成的批次已准备 M6 审核包，并且保存了 `m6_paddle_ocr_evidence.json`，可在同一批次点击「查看逐 SKU OCR 核对」。服务器使用已有的 `verify_ocr_capture` 对整个冻结 cohort、评审 CSV 和 OCR 声明执行一致性检查，然后对所选 SKU 的方形/原生 4:5 两张原始 PNG 再做 SHA-256 核验。界面同步展示 CSV 人工标签（标题、价格、价格位置、总体状态）、OCR 文本、置信度和检测框坐标。可以在 SKU 下拉列表中切换；不会向服务发送任意文件路径。

@@ -871,3 +871,119 @@ def test_m6_csv_parser_and_sha_use_the_same_byte_snapshot(tmp_path, monkeypatch)
     _, rows, digest = _read_csv(file, ("sku_id",), "M6 CSV")
     assert rows == [{"sku_id": "original"}]
     assert digest == original_sha
+
+
+def _m6_operator_summary_fixture(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from scripts.summarize_m6_operator_quality import summarize_operator_quality
+
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    reviewed = deepcopy(bundle["review_rows"])
+    # One explicitly reviewed output fails price, another remains unverified.
+    reviewed[0]["price"] = "FAIL"
+    reviewed[0]["overall_accept"] = "FAIL"
+    reviewed[0]["overall_reason"] = "Incorrect price on the actual poster"
+    reviewed[1]["price"] = "UNVERIFIED"
+    reviewed[1]["overall_accept"] = "UNVERIFIED"
+    reviewed[1]["overall_reason"] = "Review pending"
+    final = tmp_path / "final_operator_reviews.csv"
+    _write_csv(final, REVIEW_FIELDS, reviewed)
+    report = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        final, bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, ocr_evidence=evidence, require_ocr_evidence=True,
+        ocr_source_reviews=bundle["reviews"],
+    )
+    assert report["status"] == "PASS", report["errors"]
+    return final, report, summarize_operator_quality
+
+
+def test_m6_operator_quality_summary_reports_denominators_and_two_variant_pairing(
+    tmp_path, monkeypatch,
+):
+    final, report, summarize = _m6_operator_summary_fixture(tmp_path, monkeypatch)
+    summary = summarize(report, final)
+    assert summary["status"] == "OPERATOR_LABELS_ONLY_NOT_ATTESTED"
+    assert summary["minimum_sku_count_met"] is False
+    assert summary["sku_count"] == 2
+    assert summary["variant_count"] == 4
+    assert summary["overall"]["PASS"] == 2
+    assert summary["overall"]["FAIL"] == 1
+    assert summary["overall"]["UNVERIFIED"] == 1
+    assert summary["both_variants_passed"]["count"] == 1
+    assert summary["both_variants_passed"]["denominator"] == 2
+    assert summary["both_variants_passed"]["fraction"] == 0.5
+    assert summary["by_variant"]["square"]["FAIL"] == 1
+    assert summary["by_variant"]["feed_4x5_native"]["UNVERIFIED"] == 1
+    assert summary["by_field"]["price"]["FAIL"] == 1
+    assert summary["by_field"]["price"]["UNVERIFIED"] == 1
+    assert summary["by_field"]["original_price"]["N/A"] == 4
+    assert summary["ocr_runtime_attested"] is False
+    assert summary["source_authorizations_verified"] is False
+    assert summary["approved_for_publication"] is False
+    as_text = json.dumps(summary, ensure_ascii=False)
+    for sensitive in ("sku-01", "sku-02", "Incorrect price on the actual poster",
+                      str(final), "test-reviewer"):
+        assert sensitive not in as_text
+
+
+def test_m6_operator_quality_summary_fails_closed_on_changed_csv_and_forged_report(
+    tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+    from scripts.summarize_m6_operator_quality import OperatorQualityError
+
+    final, report, summarize = _m6_operator_summary_fixture(tmp_path, monkeypatch)
+    forged = deepcopy(report)
+    forged["status"] = "BLOCKED"
+    with pytest.raises(OperatorQualityError):
+        summarize(forged, final)
+    forged = deepcopy(report)
+    forged["expected_output_count"] = 2
+    with pytest.raises(OperatorQualityError):
+        summarize(forged, final)
+    forged = deepcopy(report)
+    forged["ocr_capture_consistency"] = "NOT_ASSESSED"
+    with pytest.raises(OperatorQualityError):
+        summarize(forged, final)
+    final.write_bytes(final.read_bytes() + b"\n")
+    with pytest.raises(OperatorQualityError):
+        summarize(report, final)
+
+
+def test_m6_operator_quality_summary_does_not_use_metadata_only_pass(
+    tmp_path, monkeypatch,
+):
+    from scripts.summarize_m6_operator_quality import (
+        OperatorQualityError, summarize_operator_quality,
+    )
+
+    bundle = _bundle(tmp_path, monkeypatch)
+    metadata_report = _validate(bundle)
+    assert metadata_report["status"] == "PASS"
+    with pytest.raises(OperatorQualityError, match="OCR"):
+        summarize_operator_quality(metadata_report, bundle["reviews"])
+
+
+def test_m6_operator_quality_cli_refuses_to_overwrite_existing_report_or_source(
+    tmp_path, monkeypatch,
+):
+    from scripts.summarize_m6_operator_quality import main
+
+    reviews, report, _ = _m6_operator_summary_fixture(tmp_path, monkeypatch)
+    source_report = tmp_path / "m6_validation_report.json"
+    source_report.write_text(json.dumps(report), encoding="utf-8")
+    target = tmp_path / "m6_operator_summary.json"
+    assert main(["--validation-report", str(source_report),
+                 "--reviews", str(reviews), "--output", str(target)]) == 0
+    produced = json.loads(target.read_text(encoding="utf-8"))
+    assert produced["status"] == "OPERATOR_LABELS_ONLY_NOT_ATTESTED"
+    original = target.read_bytes()
+    with pytest.raises(SystemExit):
+        main(["--validation-report", str(source_report),
+              "--reviews", str(reviews), "--output", str(target)])
+    assert target.read_bytes() == original
+    with pytest.raises(SystemExit):
+        main(["--validation-report", str(source_report),
+              "--reviews", str(reviews), "--output", str(reviews)])
