@@ -63,9 +63,10 @@ def _sources(poster_id: str, version: int) -> tuple[PosterSpec, bytes, dict, byt
         "background": _sha((asset_dir / "background.png").read_bytes()),
         "logo": _sha((asset_dir / "logo.png").read_bytes()) if
             (asset_dir / "logo.png").is_file() else None,
-        "product_cutout": _sha((asset_dir / "product_cutout.png").read_bytes()) if
-            (asset_dir / "product_cutout.png").is_file() else None,
     }
+    cutout_path = asset_dir / "product_cutout.png"
+    if cutout_path.is_file():
+        asset_digest["product_cutout"] = _sha(cutout_path.read_bytes())
     return spec, spec_bytes, asset_digest, source_png
 
 
