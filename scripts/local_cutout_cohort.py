@@ -299,9 +299,12 @@ def prepare_cohort(
         }
         _atomic_json(journal, state)
 
-    if (out / "source").is_symlink() or (out / "cutouts").is_symlink()
-            or not (out / "source").is_dir()
-            or not (out / "cutouts").is_dir()):
+    if (
+        (out / "source").is_symlink()
+        or (out / "cutouts").is_symlink()
+        or not (out / "source").is_dir()
+        or not (out / "cutouts").is_dir()
+    ):
         raise CutoutCohortError("源图或抠图输出文件夹被更换")
     for item in source["prepared"]:
         sku = item["sku_id"]
