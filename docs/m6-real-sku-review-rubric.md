@@ -2,7 +2,7 @@
 
 关联 [Issue #31](https://github.com/musuntana/poster-agent/issues/31)。本文件是**待执行的评测协议**，不代表真实 SKU、真实 OCR 或产品质量已通过验证。
 
-## 1. 样本冻结
+## 抠图候选的补充人工证据（M13）\n\nM6 准备包现在会额外产生 `m6_cutout_evidence.json`、`m6_cutout_reviews.csv`，以及每个实际使用抠图候选的 `images/<sku>-cutout-comparison.png`。左侧始终是原商品图，右侧是透明主体在棋盘背景上的实际像素。自动指标包括主体覆盖率、边缘接触比例、连通组件数量、半透明比例和原图保留区域 RGB 差异，全部只用于人工优先级；可视化呈现不推断商品真实性或切图质量合格。\n\n完成审核表时必须独立核对 subject_integrity_review（主体完整性）、edge_artifact_review（边缘与残影）、brand_mark_review（品牌与包装细节）；使用 PASS/FAIL，标记 reviewer_alias 和 UTC reviewed_at_utc，填写 human_accept。完整证据验证命令：`python -m scripts.verify_m6_cutout_evidence --package data/.../m6_review_package --journal data/.../batch_import_results.json`。要求 20 个独立 SKU，且验证会重读执行凭据、原始 PNG、抠图、对照图并重新计算诊断指标。断言是操作员声明，模型运行的真实 ONNX 来源需另行记录和独立验收；不要把此证据作为审核通过或实际运行真实性。\n\n## 1. 样本冻结
 
 - 至少 20 个**不同 SKU**，每个 SKU 有合法使用的商品图片及可选 Logo；同 SKU 的多次生成不增加独立样本数。
 - 覆盖：透明/复杂背景、浅色/深色包装、长短中文标题、整数/小数价格、带/不带原价、不同 CTA 长度。
