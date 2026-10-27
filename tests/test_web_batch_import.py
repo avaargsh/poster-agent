@@ -667,6 +667,7 @@ def test_web_m6_review_package_zip_download_includes_only_expected_files(
         names = set(archive.namelist())
         assert names == {
             "m6_preparation.json", "m6_cohort_registry.csv", "m6_output_reviews.csv",
+            "m6_cutout_reviews.csv", "m6_cutout_evidence.json",
             "images/sku-one-square.png", "images/sku-one-native-4x5.png",
             "images/sku-two-square.png", "images/sku-two-native-4x5.png",
         }
@@ -1780,3 +1781,29 @@ def test_m6_sidecar_worksheet_neutralizes_spreadsheet_formulas(tmp_path, monkeyp
     assert row["overall_accept"] == "FAIL"
     assert row["overall_reason"].startswith("'=HYPERLINK(")
     assert row["reviewed_at_utc"] == ""
+
+
+
+def test_m6_zip_rejects_tampered_additive_cutout_evidence(tmp_path, monkeypatch):
+    import zipfile
+
+    uploaded = _upload_batch(monkeypatch, tmp_path)
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    base = tmp_path / "batch-root" / batch_id / "m6_review_package"
+    endpoint = f"/api/batches/{batch_id}/m6-package/download"
+    response = client.get(endpoint)
+    assert response.status_code == 200, response.text
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert "m6_cutout_reviews.csv" in archive.namelist()
+        assert "m6_cutout_evidence.json" in archive.namelist()
+        info = json.loads(archive.read("m6_cutout_evidence.json"))
+        assert info["candidate_count"] == 0
+        assert info["model_runtime_attested"] is False
+    path = base / "m6_cutout_evidence.json"
+    original = path.read_bytes()
+    path.write_bytes(original.replace(b'"candidate_count": 0', b'"candidate_count": 9'))
+    assert client.get(endpoint).status_code == 409
+    path.write_bytes(original)
+    assert client.get(endpoint).status_code == 200
