@@ -56,8 +56,12 @@ def verify_candidate(original: Image.Image, candidate: Image.Image) -> Image.Ima
     return candidate
 
 
-def local_preview(original: Image.Image) -> bytes:
-    """Return transparent PNG; no asset mutation, no cloud backend fallback."""
+def local_model_identity() -> dict[str, str]:
+    """Validate the exact operator-pinned ONNX and local CLI before any batch write.
+
+    This is a local configuration integrity check, not independent execution
+    attestation or a claim that real model output quality was human reviewed.
+    """
     home_raw = os.getenv("POSTER_CUTOUT_REMBG_HOME", "").strip()
     if not home_raw:
         raise CutoutUnavailable("请先设置 POSTER_CUTOUT_REMBG_HOME 并预装 u2netp 模型")
@@ -76,10 +80,21 @@ def local_preview(original: Image.Image) -> bytes:
     executable = shutil.which("rembg")
     if not executable:
         raise CutoutUnavailable("未安装可执行的 rembg CLI，请在独立环境中安装 rembg[cpu,cli]")
+    return {
+        "model_sha256": digest,
+        "model_id": "u2netp",
+        "executable": executable,
+    }
+
+
+def local_preview(original: Image.Image) -> bytes:
+    """Return transparent PNG; no asset mutation, no cloud backend fallback."""
+    identity = local_model_identity()
+    home = Path(os.environ["POSTER_CUTOUT_REMBG_HOME"]).expanduser().resolve()
     if not _CUTOUT_SLOT.acquire(blocking=False):
         raise CutoutUnavailable("已有本地抠图请求运行，请稍后重试")
     try:
-        return _execute_preview(original, home, executable)
+        return _execute_preview(original, home, identity["executable"])
     finally:
         _CUTOUT_SLOT.release()
 
@@ -89,8 +104,11 @@ def _execute_preview(original: Image.Image, home: Path, executable: str) -> byte
         source = Path(directory) / "original.png"
         target = Path(directory) / "cutout.png"
         original.save(source, format="PNG")
+        # rembg's deprecated U2NET_HOME takes precedence over REMBG_HOME.
+        # Clear it so the actual child cannot select an unpinned model.
         env = {
-            **os.environ, "REMBG_HOME": str(home),
+            **{k: v for k, v in os.environ.items() if k != "U2NET_HOME"},
+            "REMBG_HOME": str(home),
             # Integrity was already checked against a pinned, operator-set
             # SHA-256. Tell rembg to reuse the local ONNX without re-fetch.
             "MODEL_CHECKSUM_DISABLED": "1",
