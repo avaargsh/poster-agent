@@ -2387,6 +2387,16 @@ async function refreshM6OCRCaptureStatus(batchId){
     };
     label.textContent=states[result.state]||'OCR 状态：'+result.state;
     if(result.state==='RUNNING'){
+      const done=result.completed_variants,expected=result.expected_variants;
+      label.textContent=Number.isInteger(done)&&Number.isInteger(expected)&&
+        expected>0&&done>=0&&done<=expected
+        ? '本机 OCR 已完成 '+done+'/'+expected+' 个版式的识别；完成计数仅存在内存中，不是质量验收或持久化成功证明。'
+        : '本机 OCR 正在初始化模型；实际识别尚未公布完成计数。';
+    }
+    if(['FAILED','FAILED_NO_EVIDENCE'].includes(result.state)&&result.ready_to_capture){
+      label.textContent+=' 已允许显式重试；现有未完成结果不会作为成功证据。';
+    }
+    if(result.state==='RUNNING'){
       if(m6OCRCaptureTimer)clearTimeout(m6OCRCaptureTimer);
       m6OCRCaptureTimer=setTimeout(()=>refreshM6OCRCaptureStatus(batchId),2500);
     }else if(m6OCRCaptureTimer){

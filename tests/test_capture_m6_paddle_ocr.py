@@ -113,6 +113,35 @@ def test_detect_changed_png_and_no_partial_file(tmp_path):
     assert not (package / "m6_paddle_ocr_evidence.json").exists()
 
 
+
+@pytest.mark.parametrize("failure", ["digest", "dimensions"])
+def test_late_invalid_image_is_rejected_before_expensive_ocr_start(tmp_path, failure):
+    package, det, rec, rows = package_fixture(tmp_path)
+    last = package / rows[-1]["output_image_path"]
+    if failure == "digest":
+        last.write_bytes(b"corrupted")
+        expected_error = "PNG 已被修改"
+    else:
+        output = io.BytesIO()
+        Image.new("RGB", (10, 10)).save(output, "PNG")
+        invalid = output.getvalue()
+        last.write_bytes(invalid)
+        rows[-1]["output_image_sha256"] = hashlib.sha256(invalid).hexdigest()
+        save_rows(package, rows)
+        expected_error = "尺寸"
+
+    instantiated = []
+
+    def track_engine(**options):
+        instantiated.append(True)
+        return PredictStub(**options)
+
+    with pytest.raises(OCREvidenceError, match=expected_error):
+        capture(package, det, rec, engine_factory=track_engine)
+    # Invalid late-cohort input must not load a model or run OCR on earlier SKUs.
+    assert instantiated == []
+    assert not (package / "m6_paddle_ocr_evidence.json").exists()
+
 def test_reject_symlinked_png_even_if_hash_matches(tmp_path):
     package, det, rec, rows = package_fixture(tmp_path)
     source = package / rows[0]["output_image_path"]
@@ -255,3 +284,19 @@ def test_capture_without_boxes_counts_all_lines_as_unlocated(tmp_path):
     report = capture(package, det, rec, engine_factory=PredictStub)
     assert report["positioned_line_count"] == 0
     assert report["unlocated_line_count"] == 8
+
+
+def test_capture_reports_actual_completed_variant_progress_without_publishing_partial_file(
+    tmp_path,
+):
+    package, det, rec, _ = package_fixture(tmp_path)
+    progress = []
+
+    def on_progress(done: int, total: int):
+        progress.append((done, total))
+        assert not (package / "m6_paddle_ocr_evidence.json").exists()
+
+    report = capture(package, det, rec, engine_factory=PredictStub, progress=on_progress)
+    assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
+    assert report["captured_variant_count"] == 4
+    assert (package / "m6_paddle_ocr_evidence.json").is_file()

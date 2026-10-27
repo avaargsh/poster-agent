@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _active_batch: str | None = None
 _jobs: dict[str, str] = {}
+_progress: dict[str, tuple[int, int]] = {}
 
 _ENV_DET = "POSTER_M6_OCR_DET_MODEL_DIR"
 _ENV_REC = "POSTER_M6_OCR_REC_MODEL_DIR"
@@ -92,30 +93,46 @@ def _unsafe_state(batch_id: str, package: Path) -> dict:
         with _lock:
             active = _active_batch
             local = _jobs.get(batch_id)
+            completed, expected = _progress.get(batch_id, (0, 0))
         if active == batch_id:
             state, ready = "RUNNING", False
         elif active is not None:
             state, ready = "BUSY", False
         elif local in ("FAILED", "FAILED_NO_EVIDENCE"):
-            state, ready = local, False
+            # A failed attempt never published evidence. Permit an explicit,
+            # controlled retry when the operator fixes the local OCR environment.
+            state, ready = local, _configuration() is not None
         elif _configuration() is None:
             state, ready = "NOT_CONFIGURED", False
         else:
             state, ready = "READY", True
-    return {
+    response = {
         "state": state, "ready_to_capture": ready,
         "automatically_accepted": False,
         "quality_verified": False, "runtime_attested": False,
     }
+    if state == "RUNNING":
+        response["completed_variants"] = completed
+        response["expected_variants"] = expected
+    return response
 
 
 def _run_ocr(batch_id: str, package: Path, det: Path, rec: Path, device: str) -> None:
     global _active_batch
     from scripts.capture_m6_paddle_ocr import capture
 
+    def on_progress(completed: int, total: int) -> None:
+        # Bounded advisory state only. The immutable published JSON remains
+        # the sole durable artifact. Never expose OCR text or private paths.
+        if not 0 <= completed <= total <= 200:
+            return
+        with _lock:
+            if _active_batch == batch_id:
+                _progress[batch_id] = (completed, total)
+
     state = "FAILED"
     try:
-        capture(package, det, rec, device=device)
+        capture(package, det, rec, device=device, progress=on_progress)
         if (package / "m6_paddle_ocr_evidence.json").is_file():
             state = "FINISHED_CHECK_EVIDENCE"
         else:
@@ -157,6 +174,7 @@ def start_m6_ocr_capture(batch_id: str, background: BackgroundTasks):
             raise HTTPException(status_code=409, detail="已有本机 OCR 任务正在执行")
         _active_batch = batch_id
         _jobs[batch_id] = "RUNNING"
+        _progress[batch_id] = (0, 0)
     # Starlette runs synchronous background work in its thread pool.
     # A process restart interrupts the job: only the atomic evidence file is durable.
     background.add_task(_run_ocr, batch_id, package, *config)

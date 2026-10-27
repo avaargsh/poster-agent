@@ -1594,7 +1594,8 @@ def test_m6_ocr_launch_executes_existing_real_capture_only_after_user_post(
     assert started.status_code == 202, started.text
     assert len(calls) == 1
     assert calls[0][0] == (package, det, rec)
-    assert calls[0][1] == {"device": "cpu"}
+    assert calls[0][1]["device"] == "cpu"
+    assert callable(calls[0][1]["progress"])
     after = client.get(endpoint)
     assert after.status_code == 200
     assert after.json()["state"] == "EVIDENCE_PRESENT_UNATTESTED"
@@ -1635,8 +1636,20 @@ def test_m6_ocr_launch_fails_closed_on_missing_capture_and_wrong_model_paths(
     status = client.get(endpoint)
     assert status.status_code == 200
     assert status.json()["state"] == "FAILED"
+    assert status.json()["ready_to_capture"] is True
     assert status.json()["quality_verified"] is False
     assert "local failing OCR engine" not in status.text
+
+    attempts = []
+    def recovered_capture(*args, **kwargs):
+        attempts.append((args, kwargs))
+        _seed_m6_ocr_capture_for_web(tmp_path / "batch-root" / batch_id / "m6_review_package")
+        return {"captured_variant_count": 4}
+    monkeypatch.setattr(capture_m6_paddle_ocr, "capture", recovered_capture)
+    retried = client.post(endpoint)
+    assert retried.status_code == 202
+    assert len(attempts) == 1
+    assert client.get(endpoint).json()["state"] == "EVIDENCE_PRESENT_UNATTESTED"
 
 
 def test_m6_ocr_launch_button_and_preflight_status_are_available():
@@ -1647,3 +1660,35 @@ def test_m6_ocr_launch_button_and_preflight_status_are_available():
         '/m6-ocr-capture', "POSTER_M6_OCR_DET_MODEL_DIR",
     ):
         assert marker in html.text
+
+
+def test_m6_ocr_progress_reports_only_completed_variants_and_sanitized_status(
+    tmp_path, monkeypatch,
+):
+    import app.m6_ocr_capture_routes as routes
+
+    batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    endpoint = f"/api/batches/{batch_id}/m6-ocr-capture"
+    monkeypatch.setattr(routes, "_configuration", lambda: (tmp_path, tmp_path / "models", "cpu"))
+    with routes._lock:
+        old_active = routes._active_batch
+        old_progress = routes._progress.get(batch_id)
+        routes._active_batch = batch_id
+        routes._progress[batch_id] = (2, 4)
+    try:
+        res = client.get(endpoint)
+        assert res.status_code == 200
+        assert res.json()["state"] == "RUNNING"
+        assert res.json()["completed_variants"] == 2
+        assert res.json()["expected_variants"] == 4
+        assert res.json()["quality_verified"] is False
+        assert client.post(endpoint).status_code == 409
+    finally:
+        with routes._lock:
+            routes._active_batch = old_active
+            if old_progress is None:
+                routes._progress.pop(batch_id, None)
+            else:
+                routes._progress[batch_id] = old_progress

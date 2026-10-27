@@ -244,6 +244,27 @@ def _ocr_lines(
         ) from exc
     return lines
 
+def _preflight_frozen_images(package: Path, rows: list[dict[str, str]]) -> None:
+    """Fail fast across the entire frozen cohort before loading the OCR engine.
+
+    Inference re-reads and re-hashes every image to reject mutations between
+    preflight and prediction. This preflight publishes no evidence or labels.
+    """
+    for row in rows:
+        raw = _read_regular(package / row["output_image_path"], MAX_PNG_BYTES)
+        if _sha(raw) != row["output_image_sha256"]:
+            raise OCREvidenceError(
+                f"PNG 已被修改：{row['sku_id']}/{row['variant_id']}"
+            )
+        try:
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format != "PNG" or image.size != VARIANTS[row["variant_id"]][0]:
+                    raise OCREvidenceError("PNG 格式或版式尺寸不符合要求")
+                image.verify()
+        except (OSError, Image.DecompressionBombError) as exc:
+            raise OCREvidenceError("PNG 损坏或尺寸异常") from exc
+
+
 def capture(
     package_dir: Path,
     detection_model_dir: Path,
@@ -251,6 +272,7 @@ def capture(
     *,
     engine_factory: Callable[..., Any] | None = None,
     device: str = "cpu",
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Capture actual text, or isolated test-double output, never quality PASS."""
     package = Path(package_dir).expanduser()
@@ -265,6 +287,7 @@ def capture(
         raise OCREvidenceError("OCR 证据文件已存在，禁止覆盖")
     csv_sha, original_rows = _review_rows(package)
     cohort, rows, sku_count = _identities(original_rows)
+    _preflight_frozen_images(package, rows)
     det_dir, rec_dir = Path(detection_model_dir).expanduser(), Path(recognition_model_dir).expanduser()
     det_digest = _model_fingerprint(det_dir)
     rec_digest = _model_fingerprint(rec_dir)
@@ -312,6 +335,9 @@ def capture(
             "recognized_line_count": len(recognized),
             "status": "CAPTURED_REVIEW_REQUIRED",
         })
+        if progress is not None:
+            # Report only completed predictions. Never publish partial OCR JSON.
+            progress(len(observations), len(rows))
     summary = {
         "schema_version": "m6-paddle-ocr-evidence-1",
         "cohort_id": cohort,
