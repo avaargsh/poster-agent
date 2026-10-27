@@ -162,7 +162,8 @@ def main():
                     page.locator("#editSubtitle").fill("高效清洁 · 品质生活")
                     page.locator("#edit-layer-title_dy").fill("20")
                     page.locator("#edit-layer-price_dy").fill("-8")
-                    page.locator("#edit-layer-editor summary").click()
+                    if page.locator("#edit-layer-editor").get_attribute("open") is None:
+                        page.locator("#edit-layer-editor summary").click()
                     page.locator("#checkEditLayout").click()
                     page.locator("#editLayoutStatus").filter(
                         has_text="发现遮挡"
