@@ -146,6 +146,10 @@ pre{max-width:100%}
 <div class="row"><label for="create-subtitle">副标题</label><input id="create-subtitle" name="subtitle" maxlength="45" value="智能清洁 · 品质生活"></div>
 <div class="split"><div class="row"><label for="create-price">活动价*</label><input id="create-price" name="price" type="number" step="0.01" min="0.01" value="199" required></div><div class="row"><label for="create-original_price">原价</label><input id="create-original_price" name="original_price" type="number" step="0.01" value="399"></div></div>
 <div class="row"><label for="create-cta">按钮文案</label><input id="create-cta" name="cta" maxlength="12" value="立即抢购"></div>
+<div class="row"><label for="createCampaignPreset">活动文案预设（仅本地文案与配色）</label>
+<select id="createCampaignPreset" disabled><option value="">正在读取本地预设…</option></select></div>
+<div class="actions"><button id="applySingleCampaignPreset" type="button" class="secondary" disabled>套用副标题、CTA 与配色</button></div>
+<p id="createCampaignPresetStatus" class="tip" role="status">只修改当前表单的三个字段，不修改标题和价格，也不会自动调用生图模型。使用已保存的 Brief 前，请先清除审核任务。</p>
 <div class="row"><label id="stylePresetLabel">本地背景配色（快速选择，非完整布局模板）</label>
 <div class="style-presets" role="group" aria-labelledby="stylePresetLabel">
 <button class="style-preset" type="button" data-style-preset="蓝色科技风" aria-pressed="true" aria-label="选择蓝色科技风本地背景">
@@ -292,6 +296,10 @@ pre{max-width:100%}
 <li data-batch-step="0" aria-current="step"><span>1</span>准备素材</li><li data-batch-step="1"><span>2</span>检查清单</li><li data-batch-step="2"><span>3</span>生成海报</li><li data-batch-step="3"><span>4</span>审核与导出</li></ol>
 <div class="actions template-actions"><a id="downloadBatchTemplate" download="poster-products-template.csv" href="data:text/csv;charset=utf-8,sku_id%2Cproduct_image%2Ctitle%2Cprice%2Coriginal_price%2Csubtitle%2Ccta%2Cstyle%2Clogo_image%0A">下载 CSV 模板</a><span class="tip">填写商品编号、图片文件名、标题和价格。</span></div>
 <div class="row"><label for="batchManifest">SKU 清单 CSV（UTF-8）</label><input id="batchManifest" type="file" accept=".csv,text/csv"></div>
+<div class="row"><label for="campaignPreset">活动文案预设（批量补全空白字段）</label>
+<select id="campaignPreset" disabled><option value="">正在读取本地预设…</option></select></div>
+<div class="actions"><button id="applyCampaignPreset" type="button" class="secondary" disabled>下载补全后的 CSV</button></div>
+<p id="campaignPresetStatus" class="tip" role="status" aria-live="polite">预设只填补空白的副标题、CTA 和风格，不会覆盖价格、主标题或已有文案。下载后请重新选择新 CSV 并进行全批预检；不会自动生成海报。</p>
 <div class="row"><label for="batchImages">CSV 引用的所有图片（PNG / JPEG / WEBP；每张不超过 10 MiB）</label><input id="batchImages" type="file" accept="image/png,image/jpeg,image/webp" multiple></div>
 <details class="disclosure"><summary>清单怎么填写？</summary><p class="tip">必填列：sku_id、product_image、title、price。可选：original_price、subtitle、cta、style、logo_image。网页批量导入要求 product_image / logo_image 使用文件名，不带目录；每批 1–100 个 SKU。图片只保存在本机。</p></details><p id="batchFileSummary" class="tip">尚未选择文件。</p>
 <div class="actions batch-start-actions"><button id="preflightBatch" type="button">上传并预检</button><button id="applyBatch" type="button" disabled>生成海报（本地背景）</button></div>
@@ -1681,6 +1689,101 @@ function updateBatchFileSummary(){
 }
 $('batchManifest').addEventListener('change',resetBatchForNewFiles);
 $('batchImages').addEventListener('change',resetBatchForNewFiles);
+
+let campaignPresetsById=new Map();
+// Explicit, non-destructive campaign copy preset: fills only blank fields
+// and returns a fresh CSV. Source file, paid settings and batch state stay unchanged.
+async function loadCampaignPresets(){
+  const picker=$('campaignPreset');
+  const action=$('applyCampaignPreset');
+  try{
+    const response=await fetch('/api/campaign-presets',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok||!Array.isArray(data.items))throw Error(errorText(data));
+    campaignPresetsById=new Map(data.items.map(item=>[item.id,item]));
+    for(const id of ['campaignPreset','createCampaignPreset']){
+      const select=$(id);
+      select.replaceChildren();
+      const hint=document.createElement('option');hint.value='';hint.textContent='选择活动预设';select.appendChild(hint);
+      for(const preset of data.items){
+        const option=document.createElement('option');
+        option.value=preset.id;
+        option.textContent=preset.name+' · '+preset.style;
+        select.appendChild(option);
+      }
+      select.disabled=false;
+    }
+    action.disabled=true;
+  }catch(err){
+    picker.replaceChildren();
+    const failed=document.createElement('option');failed.textContent='预设无法载入';picker.appendChild(failed);
+    picker.disabled=true;action.disabled=true;
+    $('campaignPresetStatus').textContent='载入活动预设失败：'+err.message;
+    $('campaignPresetStatus').className='tip bad';
+  }
+}
+$('campaignPreset').addEventListener('change',()=>{
+  $('applyCampaignPreset').disabled=!$('campaignPreset').value;
+});
+$('applyCampaignPreset').addEventListener('click',async()=>{
+  const manifest=$('batchManifest').files[0],preset=$('campaignPreset').value;
+  const status=$('campaignPresetStatus'),button=$('applyCampaignPreset');
+  if(!manifest||!preset){
+    status.textContent='请先选择 SKU 清单和活动预设。';
+    status.className='tip bad';return;
+  }
+  button.disabled=true;button.setAttribute('aria-busy','true');
+  status.className='tip';status.textContent='正在本机检查并补全清单；不会创建海报。';
+  const form=new FormData();
+  form.append('manifest',manifest,manifest.name);
+  form.append('template_id',preset);
+  try{
+    const response=await fetch('/api/campaign-presets/apply-manifest',{method:'POST',body:form});
+    if(!response.ok){
+      const failure=await response.json();
+      throw Error(errorText(failure));
+    }
+    const blob=await response.blob();
+    const objectUrl=URL.createObjectURL(blob);
+    const download=document.createElement('a');
+    download.href=objectUrl;
+    download.download='campaign-manifest.csv';
+    document.body.appendChild(download);
+    download.click();
+    download.remove();
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    status.textContent='已下载补全清单（'+(response.headers.get('x-template-filled-rows')||'?')+
+      ' 行需要补全）。原 CSV 未修改。请重新选择下载的 CSV，上传图片并预检。';
+    status.className='tip';
+  }catch(err){
+    status.textContent='预设应用失败：'+err.message;
+    status.className='tip bad';
+  }finally{
+    button.disabled=!$('campaignPreset').value;
+    button.removeAttribute('aria-busy');
+  }
+});
+
+$('createCampaignPreset').addEventListener('change',()=>{
+  $('applySingleCampaignPreset').disabled=!$('createCampaignPreset').value;
+});
+$('applySingleCampaignPreset').addEventListener('click',()=>{
+  const status=$('createCampaignPresetStatus');
+  if(activeReviewRunId){
+    status.textContent='当前存在 Brief 审核任务。请先点击「清除任务 / 手动填写」，再套用活动预设。';
+    status.className='tip bad';return;
+  }
+  const preset=campaignPresetsById.get($('createCampaignPreset').value);
+  if(!preset)return;
+  field('subtitle').value=preset.subtitle;
+  field('cta').value=preset.cta;
+  field('style').value=preset.style;
+  syncStylePresetPicker();
+  status.className='tip';
+  status.textContent='已套用「'+preset.name+'」的副标题、CTA 和配色；价格与主标题未修改。请人工检查后再生成。';
+});
+loadCampaignPresets();
+
 $('preflightBatch').addEventListener('click',async()=>{
   const manifest=$('batchManifest').files[0];
   const images=Array.from($('batchImages').files||[]);

@@ -139,3 +139,6 @@ jobs:
       - name: Exercise OCR launch and retry in the real browser
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_m6_ocr_capture.py
+      - name: Exercise campaign preset CSV download and Brief lock in real Chromium
+        timeout-minutes: 5
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_campaign_presets.py
