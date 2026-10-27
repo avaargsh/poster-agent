@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -13,9 +14,10 @@ from typing import Literal
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
 
 from . import storage
+from .layout_templates import embed_template, read_template
 from .batch_artifact_integrity import (
     BatchArtifactIntegrityError,
     verify_batch_artifact,
@@ -241,8 +243,15 @@ def list_batches(
 async def create_batch(
     manifest: UploadFile = File(...),
     images: list[UploadFile] = File(...),
+    layout_poster_id: str = Form(default=""),
+    layout_version: int = Form(default=0),
 ):
-    """Stage and fully preflight a CSV cohort before any poster can be created."""
+    """Stage and fully preflight a CSV cohort before any poster can be created.
+
+    Optionally copy only square layout fields from one immutable saved version
+    into the staged CSV. Every retry consumes that frozen manifest, not the
+    potentially newer current source-poster version.
+    """
     manifest_name = _safe_filename(manifest.filename, manifest=True)
     del manifest_name  # The server stores it under a fixed safe name.
     if not 1 <= len(images) <= MAX_IMAGE_FILES:
@@ -259,6 +268,24 @@ async def create_batch(
         image_names.add(name.casefold())
 
     manifest_bytes = await _read_limited(manifest, MAX_MANIFEST_BYTES)
+    layout_source = None
+    if layout_poster_id or layout_version:
+        if not layout_poster_id or layout_version < 1:
+            raise HTTPException(
+                status_code=422, detail="复用版式必须同时指定已保存的海报 ID 和正整数版本"
+            )
+        try:
+            template, layout_source = read_template(layout_poster_id, layout_version)
+            layout_source["original_manifest_sha256"] = hashlib.sha256(
+                manifest_bytes
+            ).hexdigest()
+            manifest_bytes = embed_template(manifest_bytes, template)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="模板来源海报或版本不存在") from exc
+        except (ValueError, OSError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if len(manifest_bytes) > MAX_MANIFEST_BYTES:
+            raise HTTPException(status_code=413, detail="应用版式后的 CSV 超过 1 MiB 上限")
     total_bytes = len(manifest_bytes)
     image_payloads: list[tuple[str, bytes]] = []
     for image in images:
@@ -304,6 +331,8 @@ async def create_batch(
             "no_paid_model": True,
             "sku_ids": [item["sku_id"] for item in prepared],
         }
+        if layout_source is not None:
+            plan["layout_source"] = layout_source
         now = _now()
         state = {
             "batch_id": batch_id,
