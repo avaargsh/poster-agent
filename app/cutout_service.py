@@ -56,8 +56,12 @@ def verify_candidate(original: Image.Image, candidate: Image.Image) -> Image.Ima
     return candidate
 
 
-def local_preview(original: Image.Image) -> bytes:
-    """Return transparent PNG; no asset mutation, no cloud backend fallback."""
+def local_model_identity() -> dict[str, str]:
+    """Validate the exact operator-pinned ONNX and local CLI before any batch write.
+
+    This is a local configuration integrity check, not independent execution
+    attestation or a claim that real model output quality was human reviewed.
+    """
     home_raw = os.getenv("POSTER_CUTOUT_REMBG_HOME", "").strip()
     if not home_raw:
         raise CutoutUnavailable("请先设置 POSTER_CUTOUT_REMBG_HOME 并预装 u2netp 模型")
@@ -76,10 +80,21 @@ def local_preview(original: Image.Image) -> bytes:
     executable = shutil.which("rembg")
     if not executable:
         raise CutoutUnavailable("未安装可执行的 rembg CLI，请在独立环境中安装 rembg[cpu,cli]")
+    return {
+        "model_sha256": digest,
+        "model_id": "u2netp",
+        "executable": executable,
+    }
+
+
+def local_preview(original: Image.Image) -> bytes:
+    """Return transparent PNG; no asset mutation, no cloud backend fallback."""
+    identity = local_model_identity()
+    home = Path(os.environ["POSTER_CUTOUT_REMBG_HOME"]).expanduser().resolve()
     if not _CUTOUT_SLOT.acquire(blocking=False):
         raise CutoutUnavailable("已有本地抠图请求运行，请稍后重试")
     try:
-        return _execute_preview(original, home, executable)
+        return _execute_preview(original, home, identity["executable"])
     finally:
         _CUTOUT_SLOT.release()
 
