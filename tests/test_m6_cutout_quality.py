@@ -256,3 +256,23 @@ def test_zip_contains_actual_cutout_contact_sheet_and_is_hash_bound(tmp_path, mo
     with pytest.raises(Exception):
         with zipfile.ZipFile(io.BytesIO(), "w") as archive:
             _zip_contents(archive, folder, {"test-sku": record["poster_id"]})
+
+
+
+def test_original_only_cannot_forge_cutout_model_provenance(tmp_path, monkeypatch):
+    import pytest
+    from app.cutout_quality import REVIEW_FIELDS
+    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
+
+    journal = _batch(tmp_path, monkeypatch, with_cutout=False)
+    folder = tmp_path / "m6"
+    prepare_package(journal, folder, apply=True)
+    field = folder / "m6_cutout_reviews.csv"
+    rows = _rows(field)
+    rows[0]["model_sha256"] = "f" * 64
+    with field.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(CutoutEvidenceError, match="原图模式"):
+        verify_cutout_evidence(folder, journal, min_skus=1)
