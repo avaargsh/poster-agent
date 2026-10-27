@@ -104,6 +104,7 @@ def create(
     *,
     idempotency_key: str | None = None,
     request_hash: str | None = None,
+    product_cutout: Image.Image | None = None,
 ) -> dict:
     if (idempotency_key is None) != (request_hash is None):
         raise ValueError("execution receipt requires both key and request hash")
@@ -120,6 +121,8 @@ def create(
             assets = staging_path / "assets"
             assets.mkdir(parents=True, exist_ok=False)
             save_png(product, assets / "product.png")
+            if product_cutout is not None:
+                save_png(product_cutout, assets / "product_cutout.png")
             if logo is not None:
                 save_png(logo, assets / "logo.png")
             save_png(background, assets / "background.png")
@@ -140,6 +143,8 @@ def create(
                 }
                 if logo is not None:
                     files["logo"] = assets / "logo.png"
+                if product_cutout is not None:
+                    files["product_cutout"] = assets / "product_cutout.png"
                 meta["execution_receipt"] = {
                     "key": idempotency_key,
                     "request_hash": request_hash,
@@ -171,7 +176,17 @@ def view(poster_id: str) -> dict:
         "image_url": f"/api/posters/{poster_id}/versions/{latest}/image",
         "versions": list(range(1, latest + 1)),
         "background_mode": meta["background_mode"],
+        "product_cutout_available": (path / "assets" / "product_cutout.png").is_file(),
     }
+
+
+def read_product_cutout(poster_id: str) -> Image.Image:
+    path = poster_dir(poster_id) / "assets" / "product_cutout.png"
+    if not path.is_file() or path.is_symlink():
+        raise FileNotFoundError("该海报未保存可用的抠图结果")
+    with Image.open(path) as image:
+        image.load()
+        return image.convert("RGBA")
 
 
 def read_assets(poster_id: str) -> tuple[Image.Image, Image.Image | None, Image.Image]:
