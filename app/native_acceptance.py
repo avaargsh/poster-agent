@@ -63,6 +63,8 @@ def _sources(poster_id: str, version: int) -> tuple[PosterSpec, bytes, dict, byt
         "background": _sha((asset_dir / "background.png").read_bytes()),
         "logo": _sha((asset_dir / "logo.png").read_bytes()) if
             (asset_dir / "logo.png").is_file() else None,
+        "product_cutout": _sha((asset_dir / "product_cutout.png").read_bytes()) if
+            (asset_dir / "product_cutout.png").is_file() else None,
     }
     return spec, spec_bytes, asset_digest, source_png
 
@@ -105,7 +107,15 @@ def _rule_checks(spec: PosterSpec, image: Image.Image, asset_hashes: dict) -> li
         Check(
             name="sku_asset_present", status="PASS",
             detail="已读取保存的 SKU 资产；未独立验证画面保真度",
-            evidence={"source_sha256": asset_hashes["product"]},
+            evidence={
+                "source_sha256": asset_hashes["product"],
+                "product_source_mode": spec.product_source_mode,
+                "render_source_sha256": (
+                    asset_hashes["product_cutout"] if
+                    spec.product_source_mode == "cutout"
+                    else asset_hashes["product"]
+                ),
+            },
         ),
         Check(
             name="logo_asset_present", status="PASS" if asset_hashes["logo"] else "UNVERIFIED",
