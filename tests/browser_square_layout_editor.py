@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from urllib.request import urlopen
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
 
 
@@ -65,6 +65,12 @@ def main():
             Image.new("RGBA", (160, 240), (110, 186, 226, 255)).save(
                 product, format="PNG"
             )
+            processed = Image.new("RGBA", (160, 240), (0, 0, 0, 0))
+            ImageDraw.Draw(processed).rectangle(
+                (38, 22, 133, 215), fill=(110, 186, 226, 255)
+            )
+            processed_buffer = io.BytesIO()
+            processed.save(processed_buffer, format="PNG")
             with sync_playwright() as pw:
                 executable = shutil.which("google-chrome") or shutil.which(
                     "google-chrome-stable"
@@ -82,6 +88,13 @@ def main():
                         (response.status, response.url)
                     ) if "/api/posters" in response.url else None)
                     page.goto(origin + "/", wait_until="domcontentloaded")
+                    # The model boundary is isolated; the actual browser and
+                    # FastAPI poster creation/storage calls remain real.
+                    page.route("**/api/product-cutouts/preview",
+                        lambda route: route.fulfill(
+                            status=200, content_type="image/png",
+                            body=processed_buffer.getvalue(),
+                        ))
                     page.locator("#create-product").set_input_files({
                         "name": "synthetic-sku.png", "mimeType": "image/png",
                         "buffer": product.getvalue(),
@@ -89,6 +102,12 @@ def main():
                     page.locator("#create-layout_id").select_option("hero")
                     page.locator("#create-product_align").select_option("bottom")
                     page.locator("#create-product_scale").select_option("compact")
+                    page.locator("#cutoutPreviewButton").click()
+                    page.locator("#acceptCutout").click(timeout=15000)
+                    _check(
+                        page.locator("#cutoutResultPreview").is_visible(),
+                        "Local cutout preview comparison missing",
+                    )
                     page.locator("#create-layer-editor summary").click()
                     page.locator("#create-layer-title_dx").fill("10")
                     page.locator("#create-layer-logo_dy").fill("-8")
@@ -118,12 +137,16 @@ def main():
                     _check(first["spec"]["layout_id"] == "hero", "hero create failed")
                     _check(first["spec"]["product_align"] == "bottom", "product align lost")
                     _check(first["spec"]["product_scale"] == "compact", "scale lost")
+                    _check(first["spec"]["product_source_mode"] == "cutout",
+                           "Explicit cutout selection lost on create")
+                    _check(first["product_cutout_available"], "Cutout source was not retained")
                     _check(first["spec"]["layer_layout"]["title_dx"] == 10, "title layer lost on create")
                     _check(first["spec"]["layer_layout"]["logo_dy"] == -8, "logo layer lost on create")
                     old_image = page.request.get(origin + first["image_url"]).body()
                     page.locator("#editLayout").select_option("classic")
                     page.locator("#editProductAlign").select_option("top")
                     page.locator("#editProductScale").select_option("full")
+                    page.locator("#editProductSourceMode").select_option("original")
                     page.locator("#edit-layer-editor summary").click()
                     page.locator("#edit-layer-price_dx").fill("8")
                     page.locator("#edit-layer-price_dy").fill("-6")
@@ -136,6 +159,9 @@ def main():
                     _check(latest["spec"]["layout_id"] == "classic", "edit lost template")
                     _check(latest["spec"]["product_align"] == "top", "edit lost alignment")
                     _check(latest["spec"]["product_scale"] == "full", "edit lost scale")
+                    _check(latest["spec"]["product_source_mode"] == "original",
+                           "Switch back to original source was not versioned")
+                    _check(latest["product_cutout_available"], "Revision discarded prior cutout")
                     _check(latest["spec"]["layer_layout"]["price_dx"] == 8, "price layer edit lost")
                     _check(latest["spec"]["layer_layout"]["price_dy"] == -6, "price layer vertical edit lost")
                     _check(latest["spec"]["layer_layout"]["cta_dx"] == -10, "CTA layer edit lost")
