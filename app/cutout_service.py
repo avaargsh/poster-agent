@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
+import threading
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,6 +29,10 @@ class CutoutRejected(ValueError):
 
 class CutoutExecutionError(RuntimeError):
     """The local CLI process failed, timed out, or returned corrupt output."""
+
+
+# One local CPU model preview at a time; a second request is rejected.
+_CUTOUT_SLOT = threading.BoundedSemaphore(1)
 
 
 def verify_candidate(original: Image.Image, candidate: Image.Image) -> Image.Image:
@@ -58,14 +64,44 @@ def local_preview(original: Image.Image) -> bytes:
     if (not model.is_file() or model.is_symlink()
             or model.stat().st_size == 0):
         raise CutoutUnavailable("找不到预装的 u2netp.onnx 本地模型，已停止抠图")
+    expected_sha = os.getenv("POSTER_CUTOUT_MODEL_SHA256", "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+        raise CutoutUnavailable("请先配置预装模型的 POSTER_CUTOUT_MODEL_SHA256")
+    with model.open("rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    if digest != expected_sha:
+        raise CutoutUnavailable("模型 SHA-256 与固定值不一致，拒绝启动本地推理")
     executable = shutil.which("rembg")
     if not executable:
         raise CutoutUnavailable("未安装可执行的 rembg CLI，请在独立环境中安装 rembg[cpu,cli]")
+    if not _CUTOUT_SLOT.acquire(blocking=False):
+        raise CutoutUnavailable("已有本地抠图请求运行，请稍后重试")
+    try:
+        return _execute_preview(original, home, executable)
+    finally:
+        _CUTOUT_SLOT.release()
+
+
+def _execute_preview(original: Image.Image, home: Path, executable: str) -> bytes:
     with tempfile.TemporaryDirectory(prefix="poster-cutout-") as directory:
         source = Path(directory) / "original.png"
         target = Path(directory) / "cutout.png"
         original.save(source, format="PNG")
-        env = {**os.environ, "REMBG_HOME": str(home)}
+        env = {
+            **os.environ, "REMBG_HOME": str(home),
+            # Integrity was already checked against a pinned, operator-set
+            # SHA-256. Tell rembg to reuse the local ONNX without re-fetch.
+            "MODEL_CHECKSUM_DISABLED": "1",
+            # Route standard HTTP clients to an unreachable local endpoint
+            # rather than allow accidental first-run model downloads.
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "http_proxy": "http://127.0.0.1:9",
+            "https_proxy": "http://127.0.0.1:9",
+            "all_proxy": "http://127.0.0.1:9",
+            "NO_PROXY": "", "no_proxy": "",
+        }
         command = [executable, "i", "-m", "u2netp", str(source), str(target)]
         try:
             result = subprocess.run(command, env=env, timeout=60,
