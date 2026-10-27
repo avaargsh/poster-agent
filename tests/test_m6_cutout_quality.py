@@ -140,7 +140,7 @@ def test_cutout_asset_tampering_refuses_comparison_and_preserves_review_denomina
 ):
     journal = _batch(tmp_path, monkeypatch)
     ledger = json.loads(journal.read_text())
-    poster_id = ledger["poster_ids"]["test-sku"]
+    poster_id = ledger["rows"]["test-sku"]["poster_id"]
     asset = storage.poster_dir(poster_id) / "assets" / "product_cutout.png"
     asset.write_bytes(_png(False))
     output = tmp_path / "review"
