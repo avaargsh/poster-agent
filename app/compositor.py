@@ -252,17 +252,28 @@ def _compose_hero(
     return output.getvalue()
 
 
-def validate_square_layout(spec: PosterSpec) -> None:
-    """Reject both square templates' text overflow before paid provider claims."""
-    probe = Image.new("RGB", (1, 1))
-    draw = ImageDraw.Draw(probe)
-    if spec.layout_id == "hero":
-        _measure_hero_layout(draw, spec)
-    else:
-        _measure_text_layout(draw, spec)
+def validate_square_layout(
+    spec: PosterSpec, logo: Image.Image | None = None,
+) -> None:
+    """Reject pixel-accurate cross-layer collisions before an AI claim.
+
+    Existing text-overflow safeguards are also run by the shared detector.
+    Import inside the function to keep geometry inspection reusable.
+    """
+    from .layout_collision import inspect_square_layout
+
+    report = inspect_square_layout(spec, logo)
+    if report["status"] != "PASS":
+        issues = report["issues"]
+        raise ValueError("方形海报图层碰撞或越界：" +
+                         "；".join(item["message"] for item in issues[:3]) +
+                         "。可用图层检测与一键修正工具调整。")
 
 
 def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, background: Image.Image) -> bytes:
+    # The create and edit APIs share this final guard. A failed edit does not
+    # mutate the published PNG/version, and the original source stays intact.
+    validate_square_layout(spec, logo)
     if spec.layout_id == "hero":
         return _compose_hero(spec, product, logo, background)
     offset = spec.layer_layout
