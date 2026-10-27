@@ -135,10 +135,23 @@ def verify_cutout_evidence(
         except (OSError, ValueError) as exc:
             raise CutoutEvidenceError(f"{sku}: 原始产物执行凭据失败") from exc
         if sku not in candidates:
+            empty_evidence = (
+                "source_product_sha256", "cutout_sha256",
+                "comparison_image_path", "comparison_image_sha256",
+                "foreground_fraction", "soft_alpha_fraction",
+                "edge_touch_fraction", "component_count",
+                "retained_rgb_mae", "machine_risks", "model_sha256",
+                "reviewer_alias", "reviewer_notes", "reviewed_at_utc",
+            )
             if (row["quality_state"] != "NOT_APPLICABLE"
                     or row["human_accept"] != "N/A"
-                    or row["comparison_image_path"] != ""
-                    or row["comparison_image_sha256"] != ""):
+                    or row["candidate_origin"] != "N/A"
+                    or row["model_runtime_attested"] != "NO"
+                    or any(row[key] for key in empty_evidence)
+                    or any(row[key] != "N/A" for key in (
+                        "subject_integrity_review", "edge_artifact_review",
+                        "brand_mark_review",
+                    ))):
                 raise CutoutEvidenceError(f"{sku}: 原图模式存在伪造抠图结论")
             continue
         item = items[sku]
