@@ -104,8 +104,11 @@ def _execute_preview(original: Image.Image, home: Path, executable: str) -> byte
         source = Path(directory) / "original.png"
         target = Path(directory) / "cutout.png"
         original.save(source, format="PNG")
+        # rembg's deprecated U2NET_HOME takes precedence over REMBG_HOME.
+        # Clear it so the actual child cannot select an unpinned model.
         env = {
-            **os.environ, "REMBG_HOME": str(home),
+            **{k: v for k, v in os.environ.items() if k != "U2NET_HOME"},
+            "REMBG_HOME": str(home),
             # Integrity was already checked against a pinned, operator-set
             # SHA-256. Tell rembg to reuse the local ONNX without re-fetch.
             "MODEL_CHECKSUM_DISABLED": "1",
