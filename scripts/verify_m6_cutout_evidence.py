@@ -37,9 +37,10 @@ def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _csv_rows(path: Path) -> list[dict]:
+def _csv_rows(path: Path) -> tuple[list[dict], bytes]:
     try:
-        content = _bounded(path).decode("utf-8-sig")
+        raw = _bounded(path)
+        content = raw.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(content, newline=""), strict=True)
         header = reader.fieldnames
         if (not header or len(header) != len(set(header))
@@ -51,7 +52,7 @@ def _csv_rows(path: Path) -> list[dict]:
             for row in rows
         ):
             raise CutoutEvidenceError("M6 抠图审核表存在缺行或非法 CSV 字段")
-        return rows
+        return rows, raw
     except (UnicodeError, csv.Error) as exc:
         raise CutoutEvidenceError("M6 抠图审核表 CSV 格式错误") from exc
 
@@ -83,8 +84,9 @@ def verify_cutout_evidence(
         ledger = json.loads(journal_raw)
         scope = load_batch_scope(journal)
         cohort = "m6-" + _sha(journal_raw)[:12]
-        rows = _csv_rows(package / "m6_cutout_reviews.csv")
-        data = json.loads(_bounded(package / "m6_cutout_evidence.json"))
+        rows, reviews_raw = _csv_rows(package / "m6_cutout_reviews.csv")
+        metadata_raw = _bounded(package / "m6_cutout_evidence.json")
+        data = json.loads(metadata_raw)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         if isinstance(exc, CutoutEvidenceError):
             raise
@@ -210,6 +212,8 @@ def verify_cutout_evidence(
         "model_runtime_attested": False,
         "independent_human_review_attested": False,
         "status": status,
+        "reviews_csv_sha256": _sha(reviews_raw),
+        "evidence_json_sha256": _sha(metadata_raw),
     }
 
 
