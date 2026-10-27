@@ -18,6 +18,11 @@ from PIL import Image
 
 from app import storage
 from app.batch_artifact_integrity import verify_batch_artifact
+from app.cutout_quality import (
+    REVIEW_FIELDS as CUTOUT_REVIEW_FIELDS,
+    SCHEMA as CUTOUT_SCHEMA,
+    evidence_from_pngs,
+)
 from app.channel_export_routes import download_channel_export
 from evals.native_batch_scope import load_batch_scope
 from scripts.validate_m6_cohort import REGISTRY_FIELDS, REVIEW_FIELDS
@@ -80,6 +85,11 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
         "human_review_performed": False,
         "ocr_inference_performed": False,
         "paid_model_calls": 0,
+        "cutout_candidate_count": sum(
+            bool(batch[sku].get("product_cutout_sha256")) for sku, _ in items
+        ),
+        "cutout_model_inference_performed": False,
+        "cutout_human_accepted": 0,
     }
     if not apply:
         return plan
@@ -92,11 +102,31 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
 
     registry_rows: list[dict] = []
     review_rows: list[dict] = []
+    cutout_rows: list[dict] = []
+    cutout_items: list[dict] = []
+    invalid_cutout_count = 0
     missing_images = 0
     export_failures: list[dict] = []
 
     for sku, pid in items:
         record = batch[sku]
+        has_cutout = bool(record.get("product_cutout_sha256"))
+        cutout_row = {field: "" for field in CUTOUT_REVIEW_FIELDS}
+        cutout_row.update({
+            "cohort_id": cohort_id,
+            "sku_id": sku,
+            "poster_id": pid,
+            "source_version": str(record["version"]),
+            "quality_state": "SOURCE_INVALID" if has_cutout else "NOT_APPLICABLE",
+            "candidate_origin": (
+                "USER_SUPPLIED_OR_PREVIEW_NOT_ATTESTED" if has_cutout else "N/A"
+            ),
+            "model_runtime_attested": "NO",
+            "subject_integrity_review": "UNVERIFIED" if has_cutout else "N/A",
+            "edge_artifact_review": "UNVERIFIED" if has_cutout else "N/A",
+            "brand_mark_review": "UNVERIFIED" if has_cutout else "N/A",
+            "human_accept": "UNVERIFIED" if has_cutout else "N/A",
+        })
         registry_rows.append({
             "cohort_id": cohort_id,
             "sku_id": sku,
@@ -179,7 +209,47 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
             missing_images += 2
             export_failures.append({"sku_id": sku, "reason": problem})
             review_rows.extend((square_row, native_row))
+            cutout_rows.append(cutout_row)
+            if has_cutout:
+                invalid_cutout_count += 1
             continue
+
+        if has_cutout:
+            try:
+                assets = storage.poster_dir(pid) / "assets"
+                original_png = (assets / "product.png").read_bytes()
+                cutout_png = (assets / "product_cutout.png").read_bytes()
+                metrics, paired_png = evidence_from_pngs(original_png, cutout_png)
+                name = f"images/{sku}-cutout-comparison.png"
+                (output_dir / name).write_bytes(paired_png)
+                cutout_row.update({
+                    "source_product_sha256": metrics["source_png_sha256"],
+                    "cutout_sha256": metrics["cutout_png_sha256"],
+                    "comparison_image_path": name,
+                    "comparison_image_sha256": metrics["comparison_png_sha256"],
+                    "foreground_fraction": str(metrics["foreground_fraction"]),
+                    "soft_alpha_fraction": str(metrics["soft_alpha_fraction"]),
+                    "edge_touch_fraction": str(metrics["edge_touch_fraction"]),
+                    "component_count": str(metrics["component_count"]),
+                    "retained_rgb_mae": str(metrics["retained_rgb_mae"]),
+                    "machine_risks": ";".join(metrics["machine_risks"]),
+                    "quality_state": "REVIEW_REQUIRED",
+                })
+                cutout_items.append({
+                    "sku_id": sku, "poster_id": pid,
+                    "source_version": int(version), "metrics": metrics,
+                    "comparison_image_path": name,
+                })
+            except (OSError, ValueError) as exc:
+                invalid_cutout_count += 1
+                cutout_row["quality_state"] = "SOURCE_INVALID"
+                cutout_row["machine_risks"] = "CUTOUT_EVIDENCE_INVALID"
+                cutout_items.append({
+                    "sku_id": sku, "poster_id": pid,
+                    "source_version": int(version),
+                    "error": f"INVALID_CUTOUT_EVIDENCE:{type(exc).__name__}",
+                })
+        cutout_rows.append(cutout_row)
 
         square_name = f"images/{sku}-square.png"
         (output_dir / square_name).write_bytes(square_data)
@@ -226,6 +296,28 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
         output_dir / "m6_cohort_registry.csv", REGISTRY_FIELDS, registry_rows
     )
     _write_csv(
+        output_dir / "m6_cutout_reviews.csv", CUTOUT_REVIEW_FIELDS, cutout_rows
+    )
+    cutout_manifest = {
+        "schema_version": CUTOUT_SCHEMA,
+        "cohort_id": cohort_id,
+        "source_batch_journal_sha256": scope["source_batch_journal_sha256"],
+        "candidate_count": plan["cutout_candidate_count"],
+        "evidence_count": sum(
+            row["quality_state"] == "REVIEW_REQUIRED" for row in cutout_rows
+        ),
+        "invalid_evidence_count": invalid_cutout_count,
+        "model_inference_performed": False,
+        "model_runtime_attested": False,
+        "human_acceptance_performed": False,
+        "comparison_panels": "LEFT_ORIGINAL_RIGHT_TRANSPARENT_CHECKERBOARD",
+        "items": cutout_items,
+    }
+    (output_dir / "m6_cutout_evidence.json").write_text(
+        json.dumps(cutout_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _write_csv(
         output_dir / "m6_output_reviews.csv", REVIEW_FIELDS, review_rows
     )
     summary = {
@@ -233,11 +325,17 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
         "review_rows_created": len(review_rows),
         "missing_output_count": missing_images,
         "export_failures": export_failures,
+        "cutout_evidence_count": cutout_manifest["evidence_count"],
+        "cutout_invalid_count": invalid_cutout_count,
+        "cutout_reviews_file": "m6_cutout_reviews.csv",
+        "cutout_evidence_file": "m6_cutout_evidence.json",
         "registry_file": "m6_cohort_registry.csv",
         "reviews_file": "m6_output_reviews.csv",
         "workflow": (
             "MANUAL_REQUIRED: confirm licenses and independent SKUs, "
-            "review both PNGs, run real OCR separately, then validate evidence"
+            "review paired original/cutout images if present, verify masks and "
+            "brand marks, review both exported PNGs, run real OCR separately, "
+            "then validate evidence"
         ),
     }
     (output_dir / "m6_preparation.json").write_text(
