@@ -357,3 +357,25 @@ def test_m14_bridge_honors_default_twenty_distinct_sku_gate(tmp_path, monkeypatc
     manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
     with pytest.raises(LineageError, match="20"):
         verify_lineage(trial, manifest, registry, journal, package)
+
+
+
+def test_m14_bridge_rejects_review_row_spec_or_square_source_rebinding(
+    tmp_path, monkeypatch,
+):
+    from scripts.verify_m14_lineage import LineageError, verify_lineage
+
+    manifest, registry, trial, journal, package = _full_lineage(tmp_path, monkeypatch)
+    path = package / "m6_output_reviews.csv"
+    original = path.read_bytes()
+    for field in ("spec_sha256", "source_square_image_sha256"):
+        with path.open("r", newline="", encoding="utf-8") as source:
+            rows = list(csv.DictReader(source))
+        rows[0][field] = "f" * 64
+        with path.open("w", newline="", encoding="utf-8") as target:
+            writer = csv.DictWriter(target, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        with pytest.raises(LineageError, match="M6|规格|来源"):
+            verify_lineage(trial, manifest, registry, journal, package, min_skus=2)
+        path.write_bytes(original)
