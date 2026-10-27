@@ -178,6 +178,15 @@ def _check_done(out: Path, item: dict, row: dict) -> None:
     original = item["product"].read_bytes()
     if _sha(original) != expected_sha:
         raise CutoutCohortError(f"{sku}: 原始输入文件摘要发生变化")
+    saved_source = out / "source" / f"{sku}{item['product'].suffix.lower()}"
+    if (saved_source.is_symlink() or not saved_source.is_file()
+            or _sha(saved_source.read_bytes()) != expected_sha):
+        raise CutoutCohortError(f"{sku}: 已复制的商品源图文件摘要发生变化")
+    if item["logo"] is not None:
+        saved_logo = out / "source" / f"{sku}-logo{item['logo'].suffix.lower()}"
+        if (saved_logo.is_symlink() or not saved_logo.is_file()
+                or _sha(saved_logo.read_bytes()) != item["logo_sha256"]):
+            raise CutoutCohortError(f"{sku}: 已复制的 Logo 文件摘要发生变化")
     _, normalized = _source_png(original, item["product"].name)
     try:
         computed, _ = evidence_from_pngs(normalized, cutout.read_bytes())
