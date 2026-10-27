@@ -112,6 +112,28 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 **此 CSV 不可直接当作 M6 验收合格的报告。** 操作员需手工核对标签、授权、原图和准确的 UTC 审核时间。编辑本地 CSV 会改变原先 OCR 绑定的审核表 SHA-256，因此不能把旧 OCR JSON 强行当作修改后 CSV 的匹配证据；进入最终严格门禁前必须有与正式审核表一致的重新采集或独立认可的重新绑定证据。导出端点只产生本地 HTTP 响应，不写入审核包，也不认证审核员身份、证明 OCR 实际运行或发放发布许可。工作表 CSV 对操作员原因字段做了防电子表格公式执行转义；输入源和产物仍需按本地私有资料处理。
 
+### 人工终稿与 OCR 原始冻结表分离验收
+
+正式人工填写的 `reviewed_at_utc`（真实 UTC 审核时间）及标签可能改变 CSV 字节。不要编辑已绑定 OCR 证据的原始 `m6_output_reviews.csv` 或修改 OCR JSON 里的 `reviews_csv_sha256` 来伪造一致性。使用 `--reviews` 指向完成复核的工作表，使用 **`--ocr-source-reviews`** 指向 OCR 采集时的原始冻结表，并同时提供对应 `--ocr-evidence` 与 `--require-ocr-evidence`。例如：
+
+```bash
+uv run --locked python -m scripts.validate_m6_cohort \
+  --manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
+  --journal data/eval_runs/web_batches/<BATCH_ID>/batch_import_results.json \
+  --reviews data/real_trial/reviewed_final.csv \
+  --ocr-source-reviews data/eval_runs/web_batches/<BATCH_ID>/m6_review_package/m6_output_reviews.csv \
+  --ocr-evidence data/eval_runs/web_batches/<BATCH_ID>/m6_review_package/m6_paddle_ocr_evidence.json \
+  --require-ocr-evidence \
+  --native-manifest data/eval_runs/m6_native_trial_001/native_trial_manifest.csv \
+  --readiness data/eval_runs/m6_native_trial_001/native_trial_readiness.json \
+  --output data/eval_runs/m6_validation_manual_001/report.json
+```
+
+双快照门禁逐项比较 cohort、SKU、版式、poster ID、源版本、商品/请求/规格哈希和图片文件路径与 SHA-256，仅允许审核员代号、十项检查、总体判断与原因、UTC 审核时间变化。人工 CSV 即使下载到其他目录，其中的相对图片路径也必须以**原始 OCR 冻结表的目录**解析；不能将输出重新指向新图片。分母不因漏审而减少。报告分别记录 `input_sha256.output_reviews` 与 `input_sha256.ocr_source_reviews`，并显示 `ocr_source_binding=MATCHED_IMMUTABLE_FIELDS`（或 `BLOCKED`）。
+
+单快照旧调用保持原行为：`--ocr-source-reviews` 不提供时，严格 OCR JSON 必须与 `--reviews` 自身的 SHA-256 完全一致。**绑定通过仅表示本地可编辑文件的身份与哈希匹配，不证明人工身份、真实 OCR 推理、商品授权或发布质量**；M6 元数据报告 `PASS` 也不是投放许可。
+
 ### 网页逐 SKU OCR 对照检查
 
 当一个已完成的批次已准备 M6 审核包，并且保存了 `m6_paddle_ocr_evidence.json`，可在同一批次点击「查看逐 SKU OCR 核对」。服务器使用已有的 `verify_ocr_capture` 对整个冻结 cohort、评审 CSV 和 OCR 声明执行一致性检查，然后对所选 SKU 的方形/原生 4:5 两张原始 PNG 再做 SHA-256 核验。界面同步展示 CSV 人工标签（标题、价格、价格位置、总体状态）、OCR 文本、置信度和检测框坐标。可以在 SKU 下拉列表中切换；不会向服务发送任意文件路径。

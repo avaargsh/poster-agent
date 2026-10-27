@@ -714,3 +714,160 @@ def test_strict_m6_report_exposes_missing_spatial_ocr_coverage(
     assert report["ocr_capture_unlocated_line_count"] == 2
     assert report["real_ocr_quality_verified"] is False
     assert any("缺少可信检测框" in warning for warning in report["warnings"])
+
+
+def _separate_human_reviews(bundle, tmp_path):
+    """Copy final manual worksheet away from OCR-bound original, with human edits."""
+    from copy import deepcopy
+    final = deepcopy(bundle["review_rows"])
+    final[0]["reviewer_alias"] = "human-reviewer"
+    final[0]["reviewed_at_utc"] = "2026-10-27T04:00:00Z"
+    final[0]["overall_reason"] = "Independently reviewed image"
+    folder = tmp_path / "operator_downloads"
+    folder.mkdir()
+    path = folder / "reviewed_final.csv"
+    _write_csv(path, REVIEW_FIELDS, final)
+    return path, final
+
+
+def _separate_gate(bundle, evidence, final_reviews):
+    return validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        final_reviews, bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+        ocr_source_reviews=bundle["reviews"],
+    )
+
+
+def test_strict_m6_gate_accepts_distinct_human_worksheet_without_rebinding_old_ocr(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    original_sha = _sha(bundle["reviews"])
+    final_path, _ = _separate_human_reviews(bundle, tmp_path)
+    final_sha = _sha(final_path)
+    assert original_sha != final_sha
+    assert validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        final_path, bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, require_ocr_evidence=True, ocr_evidence=evidence,
+    )["status"] == "BLOCKED"  # Legacy strict mode stays strict.
+    report = _separate_gate(bundle, evidence, final_path)
+    assert report["status"] == "PASS"
+    assert report["ocr_capture_consistency"] == "MATCHED_DECLARED_REAL"
+    assert report["ocr_source_binding"] == "MATCHED_IMMUTABLE_FIELDS"
+    assert report["input_sha256"]["ocr_source_reviews"] == original_sha
+    assert report["input_sha256"]["output_reviews"] == final_sha
+    assert report["ocr_runtime_attested"] is False
+    assert report["real_ocr_quality_verified"] is False
+
+
+@pytest.mark.parametrize("changed_field,value", [
+    ("poster_id", "f" * 32),
+    ("output_image_sha256", "e" * 64),
+    ("source_version", "2"),
+    ("source_product_sha256", "d" * 64),
+    ("spec_sha256", "c" * 64),
+    ("output_image_path", "images/other.png"),
+    ("variant_id", "bogus"),
+    ("sku_id", "other-sku"),
+])
+def test_split_ocr_gate_rejects_changed_frozen_identity(
+    tmp_path, monkeypatch, changed_field, value,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    final_path, final = _separate_human_reviews(bundle, tmp_path)
+    final[0][changed_field] = value
+    _write_csv(final_path, REVIEW_FIELDS, final)
+    report = _separate_gate(bundle, evidence, final_path)
+    assert report["status"] == "BLOCKED"
+    assert report["ocr_source_binding"] == "BLOCKED"
+    assert report["ocr_runtime_attested"] is False
+    assert any("OCR" in msg or "快照" in msg for msg in report["errors"])
+
+
+def test_split_ocr_gate_rejects_missing_output_or_wrong_source_snapshot(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    final_path, final = _separate_human_reviews(bundle, tmp_path)
+    _write_csv(final_path, REVIEW_FIELDS, final[:-1])
+    missing = _separate_gate(bundle, evidence, final_path)
+    assert missing["status"] == "BLOCKED"
+    assert missing["expected_output_count"] == 4
+    assert missing["ocr_source_binding"] == "BLOCKED"
+    _write_csv(final_path, REVIEW_FIELDS, final)
+    frozen_rows = [dict(row) for row in bundle["review_rows"]]
+    frozen_rows[0]["overall_reason"] = "Changed after capture"
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, frozen_rows)
+    stale = _separate_gate(bundle, evidence, final_path)
+    assert stale["status"] == "BLOCKED"
+    assert stale["ocr_capture_consistency"] == "BLOCKED"
+
+
+def test_split_ocr_gate_requires_ocr_evidence_and_rejects_symlinked_source(
+    tmp_path, monkeypatch,
+):
+    bundle = _bundle(tmp_path, monkeypatch)
+    final_path, _ = _separate_human_reviews(bundle, tmp_path)
+    absent = validate_bundle(
+        bundle["manifest"], bundle["registry"], bundle["journal"],
+        final_path, bundle["native_manifest"], bundle["readiness"],
+        min_skus=2, ocr_source_reviews=bundle["reviews"],
+    )
+    assert absent["status"] == "BLOCKED"
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    linked = tmp_path / "ocr_source_link.csv"
+    linked.symlink_to(bundle["reviews"])
+    with pytest.raises(M6ValidationError):
+        validate_bundle(
+            bundle["manifest"], bundle["registry"], bundle["journal"],
+            final_path, bundle["native_manifest"], bundle["readiness"],
+            min_skus=2, ocr_evidence=evidence, ocr_source_reviews=linked,
+        )
+
+
+def test_split_ocr_gate_resolves_relative_artifacts_against_frozen_source_directory(
+    tmp_path, monkeypatch,
+):
+    import os
+    bundle = _bundle(tmp_path, monkeypatch)
+    original = []
+    for row in bundle["review_rows"]:
+        copy = dict(row)
+        copy["output_image_path"] = os.path.relpath(
+            row["output_image_path"], bundle["reviews"].parent,
+        )
+        original.append(copy)
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, original)
+    bundle["review_rows"] = original
+    evidence, _ = _mock_ocr_evidence(bundle, tmp_path)
+    final_path, _ = _separate_human_reviews(bundle, tmp_path)
+    report = _separate_gate(bundle, evidence, final_path)
+    assert report["status"] == "PASS"
+    assert report["present_output_count"] == 4
+
+
+def test_m6_csv_parser_and_sha_use_the_same_byte_snapshot(tmp_path, monkeypatch):
+    """A changed file between two opens cannot be parsed under the old hash."""
+    import io
+
+    from scripts.validate_m6_cohort import _read_csv
+
+    file = tmp_path / "m6_review.csv"
+    file.write_text("sku_id\noriginal\n", encoding="utf-8")
+    original_sha = _sha(file)
+    real_open = Path.open
+
+    def swapped_text_open(path, mode="r", *args, **kwargs):
+        if path == file and mode == "r":
+            return io.StringIO("sku_id\nforged\n")
+        return real_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", swapped_text_open)
+    _, rows, digest = _read_csv(file, ("sku_id",), "M6 CSV")
+    assert rows == [{"sku_id": "original"}]
+    assert digest == original_sha

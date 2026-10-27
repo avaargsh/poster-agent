@@ -81,19 +81,20 @@ def _read_csv(path: Path, fields: tuple[str, ...], label: str):
     if not raw or len(raw) > 2_000_000:
         raise M6ValidationError(f"{label} CSV 为空或超过 2 MB")
     try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
-            header = reader.fieldnames
-            if not header or len(header) != len(set(header)) or set(header) != set(fields):
-                raise M6ValidationError(
-                    f"{label} CSV 表头不匹配；缺失列={sorted(set(fields) - set(header or []))}，"
-                    f"额外列={sorted(set(header or []) - set(fields))}"
-                )
-            rows = []
-            for line, row in enumerate(reader, start=2):
-                if None in row or any(value is None for value in row.values()):
-                    raise M6ValidationError(f"{label} CSV 第 {line} 行列数与表头不一致")
-                rows.append({key: (value or "").strip() for key, value in row.items()})
+        # One bounded byte snapshot serves both the digest and the parser.
+        # Reopening path here could parse a different CSV than the hashed one.
+        reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
+        header = reader.fieldnames
+        if not header or len(header) != len(set(header)) or set(header) != set(fields):
+            raise M6ValidationError(
+                f"{label} CSV 表头不匹配；缺失列={sorted(set(fields) - set(header or []))}，"
+                f"额外列={sorted(set(header or []) - set(fields))}"
+            )
+        rows = []
+        for line, row in enumerate(reader, start=2):
+            if None in row or any(value is None for value in row.values()):
+                raise M6ValidationError(f"{label} CSV 第 {line} 行列数与表头不一致")
+            rows.append({key: (value or "").strip() for key, value in row.items()})
     except (UnicodeDecodeError, csv.Error) as exc:
         raise M6ValidationError(f"{label} CSV 不是合法 UTF-8 CSV") from exc
     if not rows:
@@ -136,6 +137,42 @@ def _output_path(value: str, reviews_path: Path) -> Path:
     return path.resolve(strict=True)
 
 
+
+_MANUAL_REVIEW_COLUMNS = frozenset(FIELD_LABELS) | frozenset((
+    "reviewer_alias", "overall_accept", "overall_reason", "reviewed_at_utc",
+))
+_IMMUTABLE_REVIEW_COLUMNS = tuple(
+    col for col in REVIEW_FIELDS if col not in _MANUAL_REVIEW_COLUMNS
+)
+
+
+def _bind_human_reviews_to_ocr_source(source_rows, human_rows) -> list[str]:
+    """Only human annotations may change; frozen SKU, variant and artifacts may not."""
+    errors: list[str] = []
+    source = {}
+    for item in source_rows:
+        key = (item["cohort_id"], item["sku_id"], item["variant_id"])
+        if key in source:
+            errors.append("OCR 冻结源存在重复 SKU×版式")
+        source[key] = item
+    human = {}
+    for item in human_rows:
+        key = (item["cohort_id"], item["sku_id"], item["variant_id"])
+        if key in human:
+            errors.append("最终人工评审表存在重复 SKU×版式")
+        human[key] = item
+    if len(source_rows) != len(human_rows) or set(source) != set(human):
+        errors.append("OCR 源快照与最终人工工作表的 SKU×版式集合不一致")
+    for key in sorted(set(source) & set(human)):
+        for col in _IMMUTABLE_REVIEW_COLUMNS:
+            if source[key][col] != human[key][col]:
+                errors.append(
+                    f"{key[1]}/{key[2]}: OCR 冻结源快照与最终人工表的"
+                    f"不可变字段 {col} 不一致"
+                )
+    return errors
+
+
 def validate_bundle(
     manifest: Path,
     registry: Path,
@@ -147,6 +184,7 @@ def validate_bundle(
     min_skus: int = MIN_SKUS,
     ocr_evidence: Path | None = None,
     require_ocr_evidence: bool = False,
+    ocr_source_reviews: Path | None = None,
 ) -> dict:
     """Validate the full M6 local evidence bundle without mutating its inputs."""
     manifest_path = Path(manifest)
@@ -156,6 +194,24 @@ def validate_bundle(
     reviews_path, review_rows, reviews_sha = _read_csv(
         Path(reviews), REVIEW_FIELDS, "M6 output review"
     )
+    source_review_rows = review_rows
+    source_reviews_sha = reviews_sha
+    source_review_path = reviews_path
+    source_binding = "SAME_REVIEW_SNAPSHOT"
+    split_binding_errors: list[str] = []
+    if ocr_source_reviews is not None:
+        source = Path(ocr_source_reviews).expanduser()
+        if source.is_symlink() or not source.is_file():
+            raise M6ValidationError("OCR 源评审快照缺失或是符号链接")
+        source_review_path, source_review_rows, source_reviews_sha = _read_csv(
+            source, REVIEW_FIELDS, "OCR 冻结源评审表"
+        )
+        split_binding_errors = _bind_human_reviews_to_ocr_source(
+            source_review_rows, review_rows,
+        )
+        source_binding = (
+            "BLOCKED" if split_binding_errors else "MATCHED_IMMUTABLE_FIELDS"
+        )
     _native_manifest_path, native_rows, native_manifest_sha = _read_csv(
         Path(native_manifest), NATIVE_MANIFEST_FIELDS, "M5j native trial manifest"
     )
@@ -171,7 +227,10 @@ def validate_bundle(
         raise M6ValidationError(f"M5g manifest 预检失败：{exc}") from exc
     prepared_by_sku = {item["sku_id"]: item for item in prepared}
     expected_skus = set(prepared_by_sku)
-    errors: list[str] = []
+    errors: list[str] = list(split_binding_errors)
+    if ocr_source_reviews is not None and ocr_evidence is None:
+        errors.append("分离人工工作表必须提供匹配原始快照的 --ocr-evidence")
+        source_binding = "BLOCKED"
     warnings: list[str] = []
     present_output_count = 0
     missing_output_count = 0
@@ -453,7 +512,9 @@ def validate_bundle(
         if not _is_sha(hash_value):
             errors.append(f"{sku}/{variant}: output_image_sha256 格式无效")
         try:
-            actual_path = _output_path(path_value, reviews_path)
+            # Downloaded human worksheet paths are relative to the original
+            # OCR source, not the operator's download directory.
+            actual_path = _output_path(path_value, source_review_path)
             # Hash and decode the exact same bounded snapshot. Opening the path
             # twice could validate a different PNG than the one whose digest
             # was checked, while read_bytes() had no memory upper bound.
@@ -513,11 +574,14 @@ def validate_bundle(
             errors.append("M6 OCR 严格门禁缺少 --ocr-evidence 输入")
         else:
             warnings.append("M6 OCR 采集证据未核验；本次仅评估传统元数据/文件门禁")
+    elif split_binding_errors:
+        capture_status = "BLOCKED"
+        errors.append("OCR 冻结源与人工工作表身份不符，禁止绑定")
     else:
         try:
             checked = verify_ocr_capture(
-                Path(ocr_evidence), review_rows,
-                cohort_id=cohort_id, reviews_sha256=reviews_sha,
+                Path(ocr_evidence), source_review_rows,
+                cohort_id=cohort_id, reviews_sha256=source_reviews_sha,
             )
             capture_status = checked["status"]
             capture_observation_count = checked["observation_count"]
@@ -544,6 +608,7 @@ def validate_bundle(
         "product_quality_score_computed": False,
         "ocr_inference_performed": False,
         "ocr_capture_consistency": capture_status,
+        "ocr_source_binding": source_binding,
         "ocr_capture_observation_count": capture_observation_count,
         "ocr_capture_positioned_line_count": capture_positioned_lines,
         "ocr_capture_unlocated_line_count": capture_unlocated_lines,
@@ -567,6 +632,8 @@ def validate_bundle(
             "batch_journal": journal_sha,
             "cohort_registry": registry_sha,
             "output_reviews": reviews_sha,
+            **({"ocr_source_reviews": source_reviews_sha}
+               if ocr_source_reviews is not None else {}),
             "m5j_native_manifest": native_manifest_sha,
             "m5j_readiness": readiness_sha,
             **({"ocr_capture": capture_sha} if capture_sha is not None else {}),
@@ -577,6 +644,7 @@ def validate_bundle(
             "Registry authorization and distinct-SKU fields are operator-supplied assertions, not signed proof.",
             "M5j readiness and optional M6 OCR capture metadata are not cryptographic attestation that a real OCR engine ran.",
             "OCR capture consistency validates local declarations and hashes only; it neither runs PaddleOCR nor checks text accuracy.",
+            "Split human/OCR binding matches immutable identities, not reviewer signatures or image quality.",
             "PASS means evidence metadata and files passed these checks; it is not a product-quality or production-readiness claim.",
         ],
     }
@@ -639,6 +707,8 @@ def main() -> int:
                         help="Optional M6 PaddleOCR capture JSON, validated against frozen reviews")
     parser.add_argument("--require-ocr-evidence", action="store_true",
                         help="BLOCKED unless a complete matching declared-real OCR capture is supplied")
+    parser.add_argument("--ocr-source-reviews", type=Path, default=None,
+                        help="Original frozen OCR-bound CSV, when --reviews is edited")
     parser.add_argument("--output", type=Path, required=True, help="Local JSON report destination")
     args = parser.parse_args()
     try:
@@ -646,7 +716,8 @@ def main() -> int:
             args.output,
             (args.manifest, args.registry, args.journal, args.reviews,
              args.native_manifest, args.readiness)
-            + ((args.ocr_evidence,) if args.ocr_evidence else ()),
+            + ((args.ocr_evidence,) if args.ocr_evidence else ())
+            + ((args.ocr_source_reviews,) if args.ocr_source_reviews else ()),
         )
     except M6ValidationError as exc:
         parser.error(str(exc))
@@ -656,6 +727,7 @@ def main() -> int:
             args.native_manifest, args.readiness,
             ocr_evidence=args.ocr_evidence,
             require_ocr_evidence=args.require_ocr_evidence,
+            ocr_source_reviews=args.ocr_source_reviews,
         )
     except (M6ValidationError, BatchError, OSError, ValueError, json.JSONDecodeError) as exc:
         report = {
