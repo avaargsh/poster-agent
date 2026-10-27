@@ -72,6 +72,13 @@ def verify_batch_artifact(poster_id: str, journal_row: dict) -> None:
             files["logo"] = logo_path
         elif logo_path.exists() or logo_path.is_symlink():
             raise ValueError("unexpected local logo asset")
+        cutout_path = assets / "product_cutout.png"
+        if "product_cutout" in expected:
+            files["product_cutout"] = cutout_path
+        elif cutout_path.exists() or cutout_path.is_symlink():
+            raise ValueError("unexpected saved cutout asset")
+        if (spec.product_source_mode == "cutout") != ("product_cutout" in files):
+            raise ValueError("product source mode disagrees with saved assets")
         if set(expected) != set(files):
             raise ValueError("incomplete local receipt hashes")
         for name, file in files.items():
