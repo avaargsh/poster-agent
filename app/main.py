@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 from . import storage, execution_store, worker_lock
 from .compositor import compose, local_background, validate_square_layout
+from .layout_collision import repair_square_layout
 from .color_management import InvalidColorProfile, normalize_upload_color
 from .image_provider import generate_ai_background, ImageProviderError
 from .schemas import PosterSpec, PosterEdit
@@ -280,6 +281,20 @@ def reconcile_execution(key: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/layout/inspect")
+def inspect_layout(spec: PosterSpec):
+    """Preview square-layer safety and proposed offsets without any writes.
+
+    Returns the actual Pillow glyph geometry for the template, along with a
+    deterministic Y-axis repair candidate. Operator explicitly applies it.
+    """
+    try:
+        repair = repair_square_layout(spec)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**repair["before"], "repair": repair}
+
+
 @app.post("/api/posters", status_code=201)
 async def create_poster(
     product: Annotated[UploadFile, File(description="SKU 商品图片")],
@@ -355,7 +370,7 @@ async def create_poster(
     # Layout errors are deterministic input failures. Reject them before the
     # idempotency claim and before any paid image-provider call.
     try:
-        validate_square_layout(spec)
+        validate_square_layout(spec, brand_logo)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
