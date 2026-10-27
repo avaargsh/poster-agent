@@ -348,6 +348,13 @@ async def create_poster(
     review_run_id: Annotated[str, Form()] = "",
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    # Direct Python callers of the route (used in cancellation/recovery
+    # tests) receive FastAPI Form/File sentinel defaults. Normalize only
+    # these two new optional parameters; HTTP clients are parsed normally.
+    if not isinstance(product_source_mode, str):
+        product_source_mode = "original"
+    if not isinstance(product_cutout, UploadFile):
+        product_cutout = None
     # Never accept executable layer definitions or an unbounded JSON payload.
     # The nested Pydantic schema also rejects unknown properties and overflows.
     if len(layer_layout.encode("utf-8")) > 2048:
