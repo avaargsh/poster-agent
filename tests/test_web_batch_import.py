@@ -1692,3 +1692,91 @@ def test_m6_ocr_progress_reports_only_completed_variants_and_sanitized_status(
                 routes._progress.pop(batch_id, None)
             else:
                 routes._progress[batch_id] = old_progress
+
+
+def test_m6_sidecar_worksheet_exports_operator_draft_without_modifying_frozen_inputs(
+    tmp_path, monkeypatch,
+):
+    import csv
+    import hashlib
+    import io
+
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    before = {
+        name: (package / name).read_bytes()
+        for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json")
+    }
+    result = client.post(
+        f"/api/batches/{batch_id}/m6-review-sidecar/worksheet",
+        json=sidecar,
+    )
+    assert result.status_code == 200, result.text
+    assert result.headers["content-type"].startswith("text/csv")
+    assert result.headers["cache-control"] == "private, no-store"
+    assert result.headers["x-worksheet-status"] == "OPERATOR_ASSERTED_NOT_ATTESTED"
+    assert result.headers["x-source-reviews-sha256"] == sidecar["reviews_csv_sha256"]
+    assert result.headers["x-content-sha256"] == hashlib.sha256(result.content).hexdigest()
+    assert "attachment;" in result.headers["content-disposition"]
+    rows = list(csv.DictReader(io.StringIO(result.content.decode("utf-8-sig"))))
+    frozen = list(csv.DictReader(io.StringIO(before["m6_output_reviews.csv"].decode())))
+    assert len(rows) == len(frozen) == 4
+    from scripts.validate_m6_cohort import REVIEW_FIELDS, FIELD_LABELS
+    assert set(rows[0]) == set(REVIEW_FIELDS)
+    prior = {(row["sku_id"], row["variant_id"]): row for row in frozen}
+    for row in rows:
+        key = (row["sku_id"], row["variant_id"])
+        source = prior[key]
+        for column in REVIEW_FIELDS:
+            if column not in (*FIELD_LABELS, "reviewer_alias", "overall_accept",
+                              "overall_reason", "reviewed_at_utc"):
+                assert row[column] == source[column]
+        assert row["reviewed_at_utc"] == ""  # Do not fabricate inspection time
+        if row["sku_id"] == "sku-one":
+            assert row["reviewer_alias"] == "reviewer-1"
+            assert all(row[field] == "PASS" for field in FIELD_LABELS)
+            assert row["overall_accept"] == "PASS"
+        else:
+            assert all(row[field] == "UNVERIFIED" for field in FIELD_LABELS)
+            assert row["overall_accept"] == "UNVERIFIED"
+            assert row["reviewer_alias"] == ""
+    assert all((package / name).read_bytes() == raw for name, raw in before.items())
+    assert not (package / "m6_operator_review_draft.csv").exists()
+
+
+def test_m6_sidecar_worksheet_rejects_forgery_and_stale_source(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/worksheet"
+    forged = deepcopy(sidecar)
+    forged["quality_verified"] = True
+    # Strict Literal[False] schema rejects forged approval before source lookup.
+    assert client.post(endpoint, json=forged).status_code == 422
+    assert client.post(endpoint, json={"decisions": []}).status_code == 422
+    frozen = package / "m6_output_reviews.csv"
+    original = frozen.read_bytes()
+    frozen.write_bytes(original + b"\\n")
+    assert client.post(endpoint, json=sidecar).status_code == 409
+    frozen.write_bytes(original)
+    assert client.post(endpoint, json=sidecar).status_code == 200
+
+
+def test_m6_sidecar_worksheet_neutralizes_spreadsheet_formulas(tmp_path, monkeypatch):
+    import csv
+    import io
+
+    batch_id, package, _ = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
+    request = _m6_review_sidecar_request(package)
+    request["decisions"][0]["overall_accept"] = "FAIL"
+    request["decisions"][0]["overall_reason"] = "=HYPERLINK(\"https://unsafe.invalid\")"
+    exported = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=request)
+    assert exported.status_code == 200
+    result = client.post(
+        f"/api/batches/{batch_id}/m6-review-sidecar/worksheet", json=exported.json(),
+    )
+    assert result.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(result.content.decode("utf-8-sig"))))
+    row = next(r for r in rows if r["sku_id"] == "sku-one" and r["variant_id"] == "square")
+    assert row["overall_accept"] == "FAIL"
+    assert row["overall_reason"].startswith("'=HYPERLINK(")
+    assert row["reviewed_at_utc"] == ""

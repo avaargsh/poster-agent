@@ -105,6 +105,13 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
 
+
+### 网页人工审核草稿转换为 CSV（操作员交接）
+
+逐 SKU 核对并暂存两种版式的人工标签后，可点击「下载人工评审 CSV 草稿」。浏览器先复用 `POST /api/batches/{batch_id}/m6-review-sidecar` 校验当前草稿，再使用 `POST /api/batches/{batch_id}/m6-review-sidecar/worksheet` 将**已保存、可重检的 JSON 侧车**转换为独立下载文件 `m6-operator-worksheet-draft.csv`。服务再次检查冻结审核 CSV、OCR 声明和图片哈希，只复制匹配 SKU×版式的原始版本/图片指纹；未填写的版式继续保留 `UNVERIFIED`，不删除分母，也不会覆盖原始 `m6_output_reviews.csv`。导出文件中的审核时间有意保持空白，不冒充实际检查时间。
+
+**此 CSV 不可直接当作 M6 验收合格的报告。** 操作员需手工核对标签、授权、原图和准确的 UTC 审核时间。编辑本地 CSV 会改变原先 OCR 绑定的审核表 SHA-256，因此不能把旧 OCR JSON 强行当作修改后 CSV 的匹配证据；进入最终严格门禁前必须有与正式审核表一致的重新采集或独立认可的重新绑定证据。导出端点只产生本地 HTTP 响应，不写入审核包，也不认证审核员身份、证明 OCR 实际运行或发放发布许可。工作表 CSV 对操作员原因字段做了防电子表格公式执行转义；输入源和产物仍需按本地私有资料处理。
+
 ### 网页逐 SKU OCR 对照检查
 
 当一个已完成的批次已准备 M6 审核包，并且保存了 `m6_paddle_ocr_evidence.json`，可在同一批次点击「查看逐 SKU OCR 核对」。服务器使用已有的 `verify_ocr_capture` 对整个冻结 cohort、评审 CSV 和 OCR 声明执行一致性检查，然后对所选 SKU 的方形/原生 4:5 两张原始 PNG 再做 SHA-256 核验。界面同步展示 CSV 人工标签（标题、价格、价格位置、总体状态）、OCR 文本、置信度和检测框坐标。可以在 SKU 下拉列表中切换；不会向服务发送任意文件路径。

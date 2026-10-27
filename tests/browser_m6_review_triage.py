@@ -130,6 +130,36 @@ def main() -> None:
                 body=json.dumps(_fixture(batch, sku)),
             )
 
+        def fake_sidecar_export(route):
+            payload = route.request.post_data_json
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({
+                    "status": "OPERATOR_ASSERTED_NOT_ATTESTED",
+                    "reviews_csv_sha256": payload["reviews_csv_sha256"],
+                    "ocr_capture_sha256": payload["ocr_capture_sha256"],
+                    "decisions": payload["decisions"],
+                }),
+            )
+
+        def fake_worksheet(route):
+            payload = route.request.post_data_json
+            csv = (
+                "sku_id,variant_id,overall_accept,reviewed_at_utc\\n"
+                "sku-one,square,PASS,\\n"
+                "sku-two,square,UNVERIFIED,\\n"
+            )
+            route.fulfill(
+                status=200, body=csv,
+                headers={
+                    "Content-Type": "text/csv; charset=utf-8",
+                    "Content-Disposition":
+                        'attachment; filename="m6-operator-worksheet-draft.csv"',
+                    "X-Worksheet-Status": "OPERATOR_ASSERTED_NOT_ATTESTED",
+                    "X-Source-Reviews-SHA256": payload["reviews_csv_sha256"],
+                },
+            )
+
         with sync_playwright() as pw:
             system_chrome = shutil.which("google-chrome") or shutil.which(
                 "google-chrome-stable"
@@ -141,6 +171,8 @@ def main() -> None:
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
                 page.route("**/api/batches/*/m6-ocr-review**", stub_review)
+                page.route("**/api/batches/*/m6-review-sidecar", fake_sidecar_export)
+                page.route("**/api/batches/*/m6-review-sidecar/worksheet", fake_worksheet)
                 page.goto(origin + "/", wait_until="domcontentloaded")
                 page.locator("#nav-batch").click()
                 page.evaluate(
@@ -154,6 +186,17 @@ def main() -> None:
                 _check(queue.count() == 3, "all SKUs need review initially")
                 _fill_and_save(page)
                 _check(queue.count() == 2, "completed SKU should leave actionable queue")
+                _check(page.locator("#m6ReviewDownloadWorksheet").is_enabled(),
+                       "verified human draft should enable worksheet download")
+                with page.expect_download() as downloaded:
+                    page.locator("#m6ReviewDownloadWorksheet").click()
+                artifact = downloaded.value
+                _check(artifact.suggested_filename == "m6-operator-worksheet-draft.csv",
+                       "unexpected worksheet filename")
+                _check("已导出独立人工评审 CSV 草稿" in page.locator(
+                    "#m6ReviewSidecarStatus").inner_text(),
+                    "download must warn that operator worksheet is not approval")
+
 
                 page.locator("#m6ReviewQueueFilter").select_option("missing")
                 _check(queue.count() == 2, "missing filter should list two SKUs")
@@ -185,6 +228,8 @@ def main() -> None:
                        "review save must be blocked when evidence is invalid")
                 _check(page.locator("#m6ReviewImportSidecar").is_disabled(),
                        "sidecar restore must be blocked when evidence is invalid")
+                _check(page.locator("#m6ReviewDownloadWorksheet").is_disabled(),
+                       "worksheet download must be blocked after failed evidence refresh")
 
                 response_state["invalid"] = False
                 page.evaluate(
@@ -209,6 +254,8 @@ def main() -> None:
                 ).inner_text(), "batch switch did not reset draft counters")
                 _check(page.locator("#m6ReviewExportSidecar").is_disabled(),
                        "old batch export must remain disabled")
+                _check(page.locator("#m6ReviewDownloadWorksheet").is_disabled(),
+                       "cross-batch draft worksheet must stay disabled")
                 print("PASS: Chromium FastAPI page, queue filters, SKU navigation, "
                       "operator FAIL, stale evidence lockout, recovery, cross-batch reset")
             finally:

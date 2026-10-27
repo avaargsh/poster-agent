@@ -315,11 +315,13 @@ pre{max-width:100%}
   <div class="actions">
     <button id="m6ReviewSaveSku" type="button" class="secondary" disabled>暂存当前 SKU 的人工审核</button>
     <button id="m6ReviewExportSidecar" type="button" class="secondary" disabled>下载审核侧车 JSON</button>
+    <button id="m6ReviewDownloadWorksheet" type="button" class="secondary" disabled>下载人工评审 CSV 草稿</button>
     <label for="m6ReviewImportFile">恢复审核草稿（本地 JSON）</label>
     <input id="m6ReviewImportFile" type="file" accept=".json,application/json">
     <button id="m6ReviewImportSidecar" type="button" class="secondary" disabled>校验并恢复审核草稿</button>
   </div>
   <p id="m6ReviewDraftProgress" class="tip" aria-live="polite">尚无已保存的人工审核草稿。</p>
+  <p class="tip">CSV 只是已验证来源身份的操作员草稿，不覆盖冻结 OCR 原表；审核时间为空，需人工补充、复核授权，并重新建立匹配的 OCR 证据后才能进入独立 M6 验收。</p>
   <section class="mt" aria-label="M6 SKU 待办清单">
     <h4>SKU 审核待办</h4>
     <p class="tip">根据本页面人工审核草稿和已核对摘要的 OCR 记录生成，仅用于查找漏审与操作员标记的 FAIL；不证明 OCR 真正执行，也不代表质量验收。</p>
@@ -1905,6 +1907,7 @@ function updateM6ReviewProgress(){
     ' 个版式审核 · 尚缺 '+pending+' 条。这里只表示草稿数量，尚未经独立验收。';
   $('m6ReviewAssess').disabled=!m6ReviewEvidenceReady||!m6ReviewSource||recorded===0;
   $('m6ReviewNextMissing').disabled=!m6ReviewEvidenceReady||!m6ReviewSource||pending===0;
+  $('m6ReviewDownloadWorksheet').disabled=!m6ReviewEvidenceReady||!m6ReviewSource||recorded===0;
   renderM6ReviewQueue();
 }
 function resetM6OCRReview(){
@@ -1917,6 +1920,7 @@ function resetM6OCRReview(){
   $('m6ReviewAssess').disabled=true;
   $('m6ReviewNextMissing').disabled=true;
   $('m6ReviewDownloadAssessment').disabled=true;
+  $('m6ReviewDownloadWorksheet').disabled=true;
   $('m6ReviewDraftProgress').textContent='尚无已保存的人工审核草稿。';
   $('m6ReviewQueueFilter').value='actionable';
   $('m6ReviewQueueSummary').textContent='加载 OCR 证据后可查看 SKU 待办。';
@@ -2100,6 +2104,7 @@ async function loadM6OCRReview(batchId,skuId=null){
   renderM6ReviewQueue();
   $('m6ReviewNextMissing').disabled=true;
   $('m6ReviewAssess').disabled=true;
+  $('m6ReviewDownloadWorksheet').disabled=true;
   $('m6ReviewExportSidecar').disabled=true;
   $('m6ReviewImportSidecar').disabled=true;
   $('m6ReviewSaveSku').disabled=true;
@@ -2123,6 +2128,7 @@ async function loadM6OCRReview(batchId,skuId=null){
       $('m6ReviewSaveSku').disabled=true;
       $('m6ReviewNextMissing').disabled=true;
       $('m6ReviewAssess').disabled=true;
+      $('m6ReviewDownloadWorksheet').disabled=true;
       $('m6ReviewExportSidecar').disabled=true;
       $('m6ReviewImportSidecar').disabled=true;
       $('m6ReviewDownloadAssessment').disabled=true;
@@ -2352,6 +2358,64 @@ $('m6ReviewExportSidecar').addEventListener('click',async()=>{
   }finally{
     if(currentBatchId===batchId&&source===m6ReviewSource)
       button.disabled=m6ReviewDrafts.size===0;
+  }
+});
+
+$('m6ReviewDownloadWorksheet').addEventListener('click',async()=>{
+  const source=m6ReviewSource,batchId=currentBatchId;
+  if(!m6ReviewEvidenceReady||!source||source.batchId!==batchId||
+     m6OcrReviewBatch!==batchId||m6ReviewDrafts.size===0)return;
+  const button=$('m6ReviewDownloadWorksheet');
+  const snapshot=JSON.stringify([...m6ReviewDrafts.values()]);
+  const stillCurrent=()=>m6ReviewEvidenceReady&&currentBatchId===batchId&&
+    m6OcrReviewBatch===batchId&&source===m6ReviewSource&&
+    JSON.stringify([...m6ReviewDrafts.values()])===snapshot;
+  button.disabled=true;
+  $('m6ReviewSidecarStatus').textContent='正在将已复核的审核声明转换为独立 CSV 草稿…';
+  try{
+    const base='/api/batches/'+encodeURIComponent(batchId)+'/m6-review-sidecar';
+    const response=await fetch(base,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        reviews_csv_sha256:source.reviews_csv_sha256,
+        ocr_capture_sha256:source.ocr_capture_sha256,
+        decisions:JSON.parse(snapshot)
+      })
+    });
+    const exported=await response.json();
+    if(!stillCurrent())return;
+    if(!response.ok)throw Error(errorText(exported));
+    if(exported.status!=='OPERATOR_ASSERTED_NOT_ATTESTED'||
+       exported.reviews_csv_sha256!==source.reviews_csv_sha256||
+       exported.ocr_capture_sha256!==source.ocr_capture_sha256)
+      throw Error('侧车身份与冻结证据不一致');
+    const worksheet=await fetch(base+'/worksheet',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(exported)
+    });
+    if(!stillCurrent())return;
+    if(!worksheet.ok){
+      const error=await worksheet.json();throw Error(errorText(error));
+    }
+    if(worksheet.headers.get('x-worksheet-status')!=='OPERATOR_ASSERTED_NOT_ATTESTED'||
+       worksheet.headers.get('x-source-reviews-sha256')!==source.reviews_csv_sha256)
+      throw Error('工作表不是可追溯的操作员草稿');
+    const blob=await worksheet.blob();
+    if(!stillCurrent())return;
+    if(blob.size===0||blob.size>2000000)throw Error('工作表大小无效');
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');
+    anchor.href=url;anchor.download='m6-operator-worksheet-draft.csv';
+    document.body.appendChild(anchor);anchor.click();anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    $('m6ReviewSidecarStatus').textContent='已导出独立人工评审 CSV 草稿。审核时间仍为空；'+
+      '文件尚未取得独立审核/授权证明，修改 CSV 后需重新建立匹配的 OCR 证据。';
+  }catch(err){
+    if(currentBatchId===batchId&&source===m6ReviewSource)
+      $('m6ReviewSidecarStatus').textContent='评审 CSV 草稿导出失败：'+err.message;
+  }finally{
+    if(currentBatchId===batchId&&source===m6ReviewSource)
+      button.disabled=!m6ReviewEvidenceReady||m6ReviewDrafts.size===0;
   }
 });
 

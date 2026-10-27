@@ -6,11 +6,14 @@ attestation, an OCR runtime attestation, or quality / publishing approval.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import re
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .m6_overlay_routes import _package
@@ -252,3 +255,76 @@ async def assess_m6_review_sidecar(batch_id: str, request: Request):
         return assess_sidecar(package, raw)
     except SidecarAssessmentError as exc:
         raise _unavailable(f"离线审核证据评估失败：{exc}") from exc
+
+
+@router.post("/{batch_id}/m6-review-sidecar/worksheet")
+async def export_m6_review_worksheet(batch_id: str, request: Request):
+    """Download a separate, editable operator worksheet; never rewrite OCR evidence.
+
+    All source identities and image checks are revalidated through the canonical
+    sidecar restore. This remains a DRAFT: inspection time cannot be attested by
+    an HTTP click, and changing review CSV changes the OCR-bound source SHA.
+    """
+    from scripts.capture_m6_paddle_ocr import OCREvidenceError, _identities, _review_rows
+    from scripts.validate_m6_cohort import FIELD_LABELS, REVIEW_FIELDS
+
+    package = _package(batch_id)
+    canonical = validate_saved_sidecar(package, await _read_bounded_json(request))
+    try:
+        source_sha, rows = _review_rows(package)
+        _, frozen, _ = _identities(rows)
+    except (OSError, ValueError, OCREvidenceError) as exc:
+        raise _unavailable(f"冻结工作表无法重新读取：{exc}") from exc
+    if source_sha != canonical["reviews_csv_sha256"]:
+        raise _unavailable("生成 CSV 期间冻结审核表已变更")
+
+    decisions = {
+        (d["sku_id"], d["variant_id"]): d for d in canonical["decisions"]
+    }
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=REVIEW_FIELDS, lineterminator="\n")
+    writer.writeheader()
+    for original in frozen:
+        key = (original["sku_id"], original["variant_id"])
+        row = {field: original[field] for field in REVIEW_FIELDS}
+        decision = decisions.get(key)
+        # The frozen file may contain older labels. Only freshly validated
+        # sidecar decisions carry forward; every other judgment resets.
+        row.update({field: "UNVERIFIED" for field in FIELD_LABELS})
+        row.update({
+            "reviewer_alias": "",
+            "overall_accept": "UNVERIFIED",
+            "overall_reason": "NOT_REVIEWED",
+            "reviewed_at_utc": "",
+        })
+        if decision:
+            row.update(decision["checks"])
+            reason = decision["overall_reason"]
+            # CSV quoting alone does not prevent spreadsheet formula execution.
+            # Escape freeform human comments without changing evidence columns.
+            if reason.lstrip().startswith(("=", "+", "-", "@")) or reason.startswith(
+                ("\t", "\r", "\n")
+            ):
+                reason = "'" + reason
+            row.update({
+                "reviewer_alias": decision["reviewer_alias"],
+                "overall_accept": decision["manual_overall_label"],
+                "overall_reason": reason,
+            })
+        writer.writerow(row)
+    payload = ("\ufeff" + stream.getvalue()).encode("utf-8")
+    if len(payload) > 2_000_000:
+        raise _unavailable("生成的工作表超过 2 MB")
+    return Response(
+        content=payload,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="m6-operator-worksheet-draft.csv"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Worksheet-Status": "OPERATOR_ASSERTED_NOT_ATTESTED",
+            "X-Source-Reviews-SHA256": source_sha,
+            "X-OCR-Evidence-SHA256": canonical["ocr_capture_sha256"],
+            "X-Content-SHA256": hashlib.sha256(payload).hexdigest(),
+        },
+    )
