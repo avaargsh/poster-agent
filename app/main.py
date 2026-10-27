@@ -16,6 +16,7 @@ from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from . import storage, execution_store, worker_lock
 from .compositor import compose, local_background, validate_square_layout
 from .cutout_service import (
@@ -353,7 +354,9 @@ async def create_poster(
     # these two new optional parameters; HTTP clients are parsed normally.
     if not isinstance(product_source_mode, str):
         product_source_mode = "original"
-    if not isinstance(product_cutout, UploadFile):
+    if not isinstance(product_cutout, StarletteUploadFile):
+        # Direct route calls receive a FastAPI File sentinel, while a real
+        # multipart request is parsed to StarletteUploadFile.
         product_cutout = None
     # Never accept executable layer definitions or an unbounded JSON payload.
     # The nested Pydantic schema also rejects unknown properties and overflows.
