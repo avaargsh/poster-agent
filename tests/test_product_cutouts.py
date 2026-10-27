@@ -264,3 +264,22 @@ def test_invalid_local_model_digest_never_invokes_rembg(tmp_path, monkeypatch):
         files={"product": ("source.png", png(), "image/png")})
     assert result.status_code == 503
     assert "SHA-256" in result.text
+
+
+
+def test_original_mode_idempotency_fingerprint_matches_pre_cutout_contract():
+    from app.main import _fingerprint
+    from app.schemas import PosterSpec
+    spec = PosterSpec(title="旧海报", price="99")
+    product = Image.new("RGBA", (120, 150), (60, 100, 180, 255))
+    legacy_spec = spec.model_dump(mode="json")
+    legacy_spec.pop("product_source_mode")
+    digest = hashlib.sha256()
+    digest.update(json.dumps(legacy_spec, sort_keys=True).encode("utf-8"))
+    digest.update(f"{product.mode}:{product.width}x{product.height}".encode())
+    digest.update(product.tobytes())
+    digest.update(b"none")
+    assert _fingerprint(spec, product, None) == digest.hexdigest()
+    with_candidate = spec.model_copy(update={"product_source_mode": "cutout"})
+    candidate = Image.new("RGBA", (120, 150), (0, 0, 0, 0))
+    assert _fingerprint(with_candidate, product, None, candidate) != digest.hexdigest()
