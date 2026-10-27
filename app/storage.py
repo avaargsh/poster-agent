@@ -204,6 +204,16 @@ def read_assets(poster_id: str) -> tuple[Image.Image, Image.Image | None, Image.
     )
 
 
+def read_assets_for_spec(
+    poster_id: str, spec: PosterSpec,
+) -> tuple[Image.Image, Image.Image | None, Image.Image]:
+    """Select the foreground bound to this exact immutable version's spec."""
+    product, logo, background = read_assets(poster_id)
+    if spec.product_source_mode == "cutout":
+        product = read_product_cutout(poster_id)
+    return product, logo, background
+
+
 def new_version(poster_id: str, spec: PosterSpec, render_bytes: bytes) -> dict:
     with LOCK:
         path = poster_dir(poster_id)
