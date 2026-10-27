@@ -161,6 +161,7 @@ def _public_state(batch_dir: Path, state: dict) -> dict:
             "unique_source_files": plan.get("unique_source_files", 0),
             "no_paid_model": True,
             "sku_ids": sku_ids,
+            "layout_source": plan.get("layout_source"),
         },
         "rows": rows,
     }
