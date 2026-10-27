@@ -69,7 +69,7 @@ def test_metrics_and_contact_sheet_use_saved_png_pixels_without_models():
     assert preview == cutout_quality.evidence_from_pngs(src, cut)[1]
     with Image.open(io.BytesIO(preview)) as image:
         assert image.size == (1024, 512)
-        assert image.getpixel((20, 20)) != image.getpixel((532, 20))
+        assert image.getpixel((70, 40)) != image.getpixel((582, 40))
     assert metrics["source_png_sha256"] == hashlib.sha256(src).hexdigest()
 
 
@@ -153,3 +153,78 @@ def test_cutout_asset_tampering_refuses_comparison_and_preserves_review_denomina
     assert row["human_accept"] == "UNVERIFIED"
     assert row["comparison_image_path"] == ""
     assert len(_rows(output / "m6_output_reviews.csv")) == 2
+
+
+
+def test_cutout_verifier_is_read_only_and_returns_pending_human_review(tmp_path, monkeypatch):
+    from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
+
+    journal = _batch(tmp_path, monkeypatch)
+    output = tmp_path / "review"
+    prepare_package(journal, output, apply=True)
+    before = (output / "m6_cutout_reviews.csv").read_bytes()
+    result = verify_cutout_evidence(output, journal, min_skus=1)
+    assert result["status"] == "HUMAN_REVIEW_REQUIRED"
+    assert result["candidate_count"] == 1
+    assert result["operator_accepted_count"] == 0
+    assert result["model_runtime_attested"] is False
+    assert (output / "m6_cutout_reviews.csv").read_bytes() == before
+
+
+def test_cutout_verifier_rejects_corrupted_comparison_without_exposing_approval(
+    tmp_path, monkeypatch,
+):
+    import pytest
+    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
+
+    journal = _batch(tmp_path, monkeypatch)
+    output = tmp_path / "review"
+    prepare_package(journal, output, apply=True)
+    row = _rows(output / "m6_cutout_reviews.csv")[0]
+    (output / row["comparison_image_path"]).write_bytes(b"tampered-png")
+    with pytest.raises(CutoutEvidenceError):
+        verify_cutout_evidence(output, journal, min_skus=1)
+
+
+def test_cutout_verifier_requires_human_details_for_operator_pass(tmp_path, monkeypatch):
+    import pytest
+    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
+    from app.cutout_quality import REVIEW_FIELDS
+
+    journal = _batch(tmp_path, monkeypatch)
+    output = tmp_path / "review"
+    prepare_package(journal, output, apply=True)
+    path = output / "m6_cutout_reviews.csv"
+    row = _rows(path)[0]
+    row["human_accept"] = "PASS"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerow(row)
+    with pytest.raises(CutoutEvidenceError, match="人工"):
+        verify_cutout_evidence(output, journal, min_skus=1)
+    for key in ("subject_integrity_review", "edge_artifact_review", "brand_mark_review"):
+        row[key] = "PASS"
+    row["reviewer_alias"] = "operator-1"
+    row["reviewed_at_utc"] = "2026-10-27T12:00:00+00:00"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerow(row)
+    verified = verify_cutout_evidence(output, journal, min_skus=1)
+    assert verified["status"] == "OPERATOR_ASSERTED_NOT_ATTESTED"
+    assert verified["operator_accepted_count"] == 1
+    assert verified["model_runtime_attested"] is False
+
+
+def test_cutout_verifier_enforces_twenty_distinct_skus_for_real_acceptance(
+    tmp_path, monkeypatch,
+):
+    import pytest
+    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
+
+    journal = _batch(tmp_path, monkeypatch)
+    output = tmp_path / "review"
+    prepare_package(journal, output, apply=True)
+    with pytest.raises(CutoutEvidenceError, match="20"):
+        verify_cutout_evidence(output, journal)
