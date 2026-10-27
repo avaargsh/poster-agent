@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from app import storage
 from app.main import MAX_UPLOAD, app, read_upload
+from app.compositor import validate_square_layout
 from app.schemas import PosterSpec
 
 REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
@@ -136,6 +137,9 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
             checked = PosterSpec.model_validate({
                 **data, "original_price": data["original_price"] or None, **extra,
             })
+            # Catch renderer-identical foreground collisions across the
+            # entire SKU cohort before staging or creating the first poster.
+            validate_square_layout(checked)
             for name in ("layout_id", "product_align", "product_scale"):
                 if name in extra:
                     data[name] = getattr(checked, name)
