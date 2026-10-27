@@ -188,7 +188,7 @@ def _check_done(out: Path, item: dict, row: dict) -> None:
         raise CutoutCohortError(f"{sku}: 当前输出与记录的像素指标不一致")
 
 
-def _export_manifest(base: Path, source: dict):
+def _manifest_bytes(source: dict) -> bytes:
     output_header = list(source["header"])
     if "product_cutout_image" not in output_header:
         output_header.append("product_cutout_image")
@@ -206,8 +206,12 @@ def _export_manifest(base: Path, source: dict):
             row["logo_image"] = f"source/{sku}-logo{item['logo'].suffix.lower()}"
         row["product_cutout_image"] = f"cutouts/{sku}.png"
         writer.writerow(row)
+    return data.getvalue().encode("utf-8")
+
+
+def _export_manifest(base: Path, source: dict):
     path = base / "manifest_with_cutouts.csv"
-    _store_once(path, data.getvalue().encode("utf-8"))
+    _store_once(path, _manifest_bytes(source))
     _, prepared = preflight(path)
     if len(prepared) != len(source["prepared"]):
         raise CutoutCohortError("导出的 M5g SKU 清单自检失败")
@@ -394,10 +398,18 @@ def verify_cohort(
                 raise CutoutCohortError(f"{sku}: 导出的 Logo 素材摘要不一致")
     if (out / "manifest_with_cutouts.csv").is_symlink():
         raise CutoutCohortError("导出的清单为符号链接")
-    # Check manifest bytes against the pinned inputs and all saved candidates.
-    expected_export = _export_manifest(out, source)
-    if state.get("export_manifest_sha256") != expected_export:
-        raise CutoutCohortError("输出清单哈希与批次账本不一致")
+    # Verify is strictly read-only; missing exports stay missing and fail.
+    exported = out / "manifest_with_cutouts.csv"
+    if (exported.is_symlink() or not exported.is_file()
+            or exported.read_bytes() != _manifest_bytes(source)
+            or state.get("export_manifest_sha256") != _sha(exported.read_bytes())):
+        raise CutoutCohortError("输出清单缺失、被替换或与批次账本不一致")
+    try:
+        _, exported_rows = preflight(exported)
+    except (OSError, ValueError) as exc:
+        raise CutoutCohortError("输出清单未通过下游 SKU 导入预检") from exc
+    if len(exported_rows) != len(source["prepared"]):
+        raise CutoutCohortError("输出清单的 SKU 集合已更改")
     result = _result(state, "verify")
     result["status"] = "RECORDED_UNATTESTED"
     return result
