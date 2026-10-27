@@ -247,3 +247,22 @@ def test_local_cli_overrides_legacy_u2net_home(tmp_path, monkeypatch):
     assert result.startswith(bytes([137, 80, 78, 71]))
     assert "U2NET_HOME" not in observed[0]
     assert observed[0]["REMBG_HOME"] == str(tmp_path / "models")
+
+
+
+def test_reapply_rejects_altered_copied_source_without_model_call(tmp_path, monkeypatch):
+    manifest, registry = _inputs(tmp_path)
+    out = tmp_path / "trial"
+    _model(tmp_path, monkeypatch)
+    monkeypatch.setattr("scripts.local_cutout_cohort.local_preview",
+                        lambda original: _png(alpha=True))
+    prepare_cohort(manifest, registry, out, apply=True, min_skus=2)
+    copied = out / "source" / "sku-00.png"
+    copied.write_bytes(_png(tone=215))
+    monkeypatch.setattr(
+        "scripts.local_cutout_cohort.local_preview",
+        lambda original: (_ for _ in ()).throw(
+            AssertionError("Already completed SKU was re-inferred")),
+    )
+    with pytest.raises(CutoutCohortError, match="源图|源素材|文件"):
+        prepare_cohort(manifest, registry, out, apply=True, min_skus=2)
