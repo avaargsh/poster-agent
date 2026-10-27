@@ -343,8 +343,13 @@ pre{max-width:100%}
 <select id="campaignPreset" disabled><option value="">正在读取本地预设…</option></select></div>
 <div class="actions"><button id="applyCampaignPreset" type="button" class="secondary" disabled>下载补全后的 CSV</button></div>
 <p id="campaignPresetStatus" class="tip" role="status" aria-live="polite">预设只填补空白的副标题、CTA 和风格，不会覆盖价格、主标题或已有文案。下载后请重新选择新 CSV 并进行全批预检；不会自动生成海报。</p>
+<div class="row"><label for="batchUseSavedLayout">复用当前已保存海报的方形版式</label>
+<input id="batchUseSavedLayout" type="checkbox"></div>
+<div class="row"><label for="batchTemplateVersion">模板来源的历史版本</label>
+<select id="batchTemplateVersion" disabled><option value="">先生成或打开一张已保存海报</option></select></div>
+<p id="batchTemplateStatus" class="tip" role="status">启用后，预检会复制所选历史版本的版式、商品位置、图层偏移到全部 SKU；不会复制商品图、标题、价格、背景、审核结论。预检完成后会冻结成新的批次清单。</p>
 <div class="row"><label for="batchImages">CSV 引用的所有图片（PNG / JPEG / WEBP；每张不超过 10 MiB）</label><input id="batchImages" type="file" accept="image/png,image/jpeg,image/webp" multiple></div>
-<details class="disclosure"><summary>清单怎么填写？</summary><p class="tip">必填列：sku_id、product_image、title、price。可选：original_price、subtitle、cta、style、logo_image。网页批量导入要求 product_image / logo_image 使用文件名，不带目录；每批 1–100 个 SKU。图片只保存在本机。</p></details><p id="batchFileSummary" class="tip">尚未选择文件。</p>
+<details class="disclosure"><summary>清单怎么填写？</summary><p class="tip">必填列：sku_id、product_image、title、price。可选：original_price、subtitle、cta、style、logo_image、layout_id、product_align、product_scale、layer_layout（受控 JSON）。网页批量导入要求 product_image / logo_image 使用文件名，不带目录；每批 1–100 个 SKU。勾选复用模板时会用当前选中海报版本的版式字段替换 CSV 中的对应字段，标题、价格与图片路径不变。图片只保存在本机。</p></details><p id="batchFileSummary" class="tip">尚未选择文件。</p>
 <div class="actions batch-start-actions"><button id="preflightBatch" type="button">上传并预检</button><button id="applyBatch" type="button" disabled>生成海报（本地背景）</button></div>
 <p id="batchNextAction" class="next-action" role="status">先选择 CSV 和图片，再点击「上传并预检」。</p>
 <section id="batchResults" class="batch-results" hidden><h3>生成完成，接下来检查海报</h3>
@@ -917,6 +922,7 @@ function display(data){
   $('editProductAlign').value=data.spec.product_align ?? 'center';
   $('editProductScale').value=data.spec.product_scale ?? 'full';
   writeLayerLayout('edit',data.spec.layer_layout);
+  populateSavedLayoutPicker(data);
   $('download').href=data.image_url;
   $('download').download='poster-v'+data.version+'.png';
   $('history').textContent='历史版本：'+data.versions.map(v=>'v'+v).join('、');
@@ -1703,7 +1709,9 @@ function renderBatchState(state){
   $('batchStatus').className='tip '+(state.status==='COMPLETED'?'good':state.status==='FAILED'?'bad':'');
   $('batchPlanSummary').textContent=state.plan
     ? '共 '+state.plan.total_skus+' 个商品 · '+state.plan.unique_source_files+
-      ' 张不同素材 · '+(state.plan.no_paid_model?'使用免费本地背景':'请核对背景模式')
+      ' 张不同素材 · '+(state.plan.no_paid_model?'使用免费本地背景':'请核对背景模式')+
+      (state.plan.layout_source?' · 方形版式源 v'+state.plan.layout_source.version+
+        '（'+state.plan.layout_source.poster_id.slice(0,8)+'）':'')
     : '';
   $('applyBatch').disabled=!['READY','FAILED','INTERRUPTED'].includes(state.status);
   $('reviewCurrentBatch').disabled=state.status!=='COMPLETED';
@@ -1772,6 +1780,32 @@ async function refreshBatchState(batchId){
     }
   }
 }
+function populateSavedLayoutPicker(data){
+  const picker=$('batchTemplateVersion');
+  const previous=picker.value;
+  picker.replaceChildren();
+  for(const version of [...data.versions].reverse()){
+    const item=document.createElement('option');
+    item.value=String(version);
+    item.textContent='v'+version+(version===data.version?'（最新）':'（历史）');
+    picker.appendChild(item);
+  }
+  picker.value=data.versions.includes(Number(previous)) ? previous : String(data.version);
+  picker.disabled=!$('batchUseSavedLayout').checked;
+}
+$('batchUseSavedLayout').addEventListener('change',()=>{
+  if($('batchUseSavedLayout').checked && !current){
+    $('batchUseSavedLayout').checked=false;
+    $('batchTemplateStatus').textContent='没有已保存海报。请先创建或打开一张模板来源海报。';
+    return;
+  }
+  $('batchTemplateVersion').disabled=!$('batchUseSavedLayout').checked;
+  $('batchTemplateStatus').textContent=$('batchUseSavedLayout').checked
+    ? '将复用海报 '+current.poster_id.slice(0,8)+' 的所选历史版本，预检时冻结版式，不修改 SKU 业务字段。'
+    : '当前不复用已有海报版式，按 CSV 中的版式字段或默认经典版式导入。';
+  resetBatchForNewFiles();
+});
+$('batchTemplateVersion').addEventListener('change',resetBatchForNewFiles);
 function updateBatchFileSummary(){
   const manifest=$('batchManifest').files[0];
   const images=Array.from($('batchImages').files||[]);
@@ -1890,6 +1924,16 @@ $('preflightBatch').addEventListener('click',async()=>{
   const body=new FormData();
   body.append('manifest',manifest,manifest.name);
   for(const file of images)body.append('images',file,file.name);
+  if($('batchUseSavedLayout').checked){
+    const version=Number($('batchTemplateVersion').value);
+    if(!current || !current.versions.includes(version)){
+      $('batchStatus').textContent='模板来源或历史版本已失效，请重新打开来源海报。';
+      $('batchStatus').className='tip bad';
+      return;
+    }
+    body.append('layout_poster_id',current.poster_id);
+    body.append('layout_version',String(version));
+  }
   $('preflightBatch').disabled=true;
   $('applyBatch').disabled=true;
   $('batchManifest').disabled=true;
