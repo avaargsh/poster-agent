@@ -160,6 +160,18 @@ pre{max-width:100%}
 <select id="create-product_scale" name="product_scale"><option value="full">标准</option><option value="compact">紧凑（保留留白）</option></select></div>
 </div>
 <p class="tip">版式仅改变方形 1024×1024 海报；商品像素等比缩放不裁切。其他比例仍用已有独立导出规则。</p>
+<details class="disclosure" id="create-layer-editor">
+<summary>高级：独立图层位置（受控像素偏移）</summary>
+<p class="tip">分别调整标题组、价格组、CTA 和 Logo 的位置；0 是默认值。为防止越界仅允许有限偏移，商品位置使用上方的独立控件。修改后请重新做 OCR 和人工审核。</p>
+<div class="row"><label for="create-layer-title_dx">标题水平（-20～20 px）</label><input id="create-layer-title_dx" type="number" min="-20" max="20" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-title_dy">标题垂直（-20～20 px）</label><input id="create-layer-title_dy" type="number" min="-20" max="20" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-price_dx">价格水平（-12～12 px）</label><input id="create-layer-price_dx" type="number" min="-12" max="12" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-price_dy">价格垂直（-8～8 px）</label><input id="create-layer-price_dy" type="number" min="-8" max="8" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-cta_dx">CTA 水平（-16～16 px）</label><input id="create-layer-cta_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-cta_dy">CTA 垂直（-12～12 px）</label><input id="create-layer-cta_dy" type="number" min="-12" max="12" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-logo_dx">Logo 水平（-16～16 px）</label><input id="create-layer-logo_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="row"><label for="create-layer-logo_dy">Logo 垂直（-16～16 px）</label><input id="create-layer-logo_dy" type="number" min="-16" max="16" step="1" value="0" required></div>
+</details>
 <div class="row"><label id="stylePresetLabel">本地背景配色（快速选择，非完整布局模板）</label>
 <div class="style-presets" role="group" aria-labelledby="stylePresetLabel">
 <button class="style-preset" type="button" data-style-preset="蓝色科技风" aria-pressed="true" aria-label="选择蓝色科技风本地背景">
@@ -212,6 +224,18 @@ pre{max-width:100%}
 <div class="row"><label for="editProductScale">商品大小</label>
 <select id="editProductScale"><option value="full">标准</option><option value="compact">紧凑</option></select></div></div>
 <p class="tip">变更后点击保存会立即渲染新的方图版本，旧版本、素材和已保存报告不被覆盖；新版本必须重新验收。</p>
+<details class="disclosure" id="edit-layer-editor">
+<summary>高级：独立图层位置（受控像素偏移）</summary>
+<p class="tip">分别调整标题组、价格组、CTA 和 Logo 的位置；0 是默认值。为防止越界仅允许有限偏移，商品位置使用上方的独立控件。修改后请重新做 OCR 和人工审核。</p>
+<div class="row"><label for="edit-layer-title_dx">标题水平（-20～20 px）</label><input id="edit-layer-title_dx" type="number" min="-20" max="20" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-title_dy">标题垂直（-20～20 px）</label><input id="edit-layer-title_dy" type="number" min="-20" max="20" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-price_dx">价格水平（-12～12 px）</label><input id="edit-layer-price_dx" type="number" min="-12" max="12" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-price_dy">价格垂直（-8～8 px）</label><input id="edit-layer-price_dy" type="number" min="-8" max="8" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-cta_dx">CTA 水平（-16～16 px）</label><input id="edit-layer-cta_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-cta_dy">CTA 垂直（-12～12 px）</label><input id="edit-layer-cta_dy" type="number" min="-12" max="12" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-logo_dx">Logo 水平（-16～16 px）</label><input id="edit-layer-logo_dx" type="number" min="-16" max="16" step="1" value="0" required></div>
+<div class="row"><label for="edit-layer-logo_dy">Logo 垂直（-16～16 px）</label><input id="edit-layer-logo_dy" type="number" min="-16" max="16" step="1" value="0" required></div>
+</details>
 <div class="actions"><button id="saveEdit" type="submit">保存新版本</button><button id="reloadPoster" class="secondary" type="button">加载最新版本</button><a id="download" href="#" download="poster.png">导出 PNG</a></div>
 </form>
 <div class="tip" id="editStatus"></div><div class="tip" id="history"></div>
@@ -553,6 +577,27 @@ field('product').addEventListener('change',()=>{
   image.onerror=()=>{if(productObjectUrl===objectUrl)invalid('无法读取图片，请重新选择有效的 PNG、JPG 或 WEBP 文件。');};
   image.src=objectUrl;
 });
+// Versioned template-layer controls: local pixel offsets, not arbitrary HTML.
+const LAYER_BOUNDS={"title_dx":[-20,20],"title_dy":[-20,20],"price_dx":[-12,12],"price_dy":[-8,8],"cta_dx":[-16,16],"cta_dy":[-12,12],"logo_dx":[-16,16],"logo_dy":[-16,16]};
+function readLayerLayout(prefix){
+  const layout={schema_version:1};
+  for(const [name,[min,max]] of Object.entries(LAYER_BOUNDS)){
+    const input=$(prefix+'-layer-'+name);
+    const raw=input.value.trim();
+    const num=Number(raw);
+    if(raw==='' || !Number.isInteger(num) || num<min || num>max){
+      throw Error(name+' 超出允许的图层偏移范围（'+min+'～'+max+' px）');
+    }
+    layout[name]=num;
+  }
+  return layout;
+}
+function writeLayerLayout(prefix,raw){
+  const data=raw||{};
+  for(const key of Object.keys(LAYER_BOUNDS)){
+    $(prefix+'-layer-'+key).value=String(data[key] ?? 0);
+  }
+}
 const reviewFields = ['title','subtitle','price','original_price','style','cta','background_mode','layout_id','product_align','product_scale'];
 const stylePresetButtons=[...document.querySelectorAll('[data-style-preset]')];
 function syncStylePresetPicker(){
@@ -587,6 +632,7 @@ function applyFields(fields) {
   if(!field('layout_id').value) field('layout_id').value = 'classic';
   if(!field('product_align').value) field('product_align').value = 'center';
   if(!field('product_scale').value) field('product_scale').value = 'full';
+  writeLayerLayout('create', fields.layer_layout);
   syncStylePresetPicker();
 }
 function showRun(run, restore=false) {
@@ -645,7 +691,8 @@ function currentSpec() {
     background_mode:field('background_mode').value,
     layout_id:field('layout_id').value,
     product_align:field('product_align').value,
-    product_scale:field('product_scale').value
+    product_scale:field('product_scale').value,
+    layer_layout:readLayerLayout('create')
   };
 }
 async function decide(approved){
@@ -869,6 +916,7 @@ function display(data){
   $('editLayout').value=data.spec.layout_id ?? 'classic';
   $('editProductAlign').value=data.spec.product_align ?? 'center';
   $('editProductScale').value=data.spec.product_scale ?? 'full';
+  writeLayerLayout('edit',data.spec.layer_layout);
   $('download').href=data.image_url;
   $('download').download='poster-v'+data.version+'.png';
   $('history').textContent='历史版本：'+data.versions.map(v=>'v'+v).join('、');
@@ -1275,6 +1323,13 @@ $('createForm').addEventListener('submit',async e=>{e.preventDefault();
     return;
   }
   const body=new FormData(e.target);
+  try {
+    body.set('layer_layout', JSON.stringify(readLayerLayout('create')));
+  } catch(err) {
+    $('createStatus').textContent='图层参数无效：'+err.message;
+    $('createStatus').className='tip bad';
+    return;
+  }
   let fp;
   try{
     fp=await fingerprintFormData(body);
@@ -1324,7 +1379,8 @@ $('editForm').addEventListener('submit',async e=>{
   if(!current)return;
   const posterId=current.poster_id;
   const version=current.version;
-  const payload={
+  let payload;
+  try {payload={
     expected_version:version,
     title:$('editTitle').value,
     subtitle:$('editSubtitle').value,
@@ -1334,7 +1390,12 @@ $('editForm').addEventListener('submit',async e=>{
     layout_id:$('editLayout').value,
     product_align:$('editProductAlign').value,
     product_scale:$('editProductScale').value,
-  };
+    layer_layout:readLayerLayout('edit'),
+  };}catch(err){
+    $('editStatus').textContent='图层参数无效：'+err.message;
+    $('editStatus').className='tip bad';
+    return;
+  }
   $('saveEdit').disabled=true;
   $('editStatus').textContent='正在重新排版…';
   $('editStatus').className='tip';
@@ -1350,7 +1411,7 @@ $('editForm').addEventListener('submit',async e=>{
     if(!res.ok)throw Error(errorText(json));
     if(!current || current.poster_id!==posterId)return;
     display(json);
-    $('editStatus').textContent='新版本已保存：文字、价格、方形版式和商品位置已更新；未调用图像模型。请重新验收。';
+    $('editStatus').textContent='新版本已保存：图层位置、文字和版式已更新；未调用图像模型。请重新验收。';
     $('editStatus').className='tip good';
   } catch(err) {
     $('editStatus').textContent='保存失败：'+err.message;
