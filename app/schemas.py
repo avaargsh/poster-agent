@@ -1,7 +1,26 @@
 """核心领域模型：输入规格与修改接口。"""
 from decimal import Decimal
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class LayerLayoutV1(BaseModel):
+    """Versioned, safe square layer offsets in pixels, not arbitrary canvas code.
+
+    A strict, bounded schema protects prices, CTA and logo from accidental
+    clipping/overlap. Existing specs without this object have zero offsets.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    title_dx: int = Field(default=0, ge=-20, le=20, strict=True)
+    title_dy: int = Field(default=0, ge=-20, le=20, strict=True)
+    price_dx: int = Field(default=0, ge=-12, le=12, strict=True)
+    price_dy: int = Field(default=0, ge=-8, le=8, strict=True)
+    cta_dx: int = Field(default=0, ge=-16, le=16, strict=True)
+    cta_dy: int = Field(default=0, ge=-12, le=12, strict=True)
+    logo_dx: int = Field(default=0, ge=-16, le=16, strict=True)
+    logo_dy: int = Field(default=0, ge=-16, le=16, strict=True)
 
 
 class PosterSpec(BaseModel):
@@ -17,6 +36,7 @@ class PosterSpec(BaseModel):
     layout_id: Literal["classic", "hero"] = "classic"
     product_align: Literal["top", "center", "bottom"] = "center"
     product_scale: Literal["full", "compact"] = "full"
+    layer_layout: LayerLayoutV1 = Field(default_factory=LayerLayoutV1)
 
     @field_validator("title", "subtitle", "style", "cta")
     @classmethod
@@ -44,6 +64,7 @@ class PosterEdit(BaseModel):
     layout_id: Literal["classic", "hero"] | None = None
     product_align: Literal["top", "center", "bottom"] | None = None
     product_scale: Literal["full", "compact"] | None = None
+    layer_layout: LayerLayoutV1 | None = None
 
     @field_validator("title", "subtitle", "cta")
     @classmethod

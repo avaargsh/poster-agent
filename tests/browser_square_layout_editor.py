@@ -89,6 +89,9 @@ def main():
                     page.locator("#create-layout_id").select_option("hero")
                     page.locator("#create-product_align").select_option("bottom")
                     page.locator("#create-product_scale").select_option("compact")
+                    page.locator("#create-layer-editor summary").click()
+                    page.locator("#create-layer-title_dx").fill("10")
+                    page.locator("#create-layer-logo_dy").fill("-8")
                     page.locator("#generate").click()
                     try:
                         page.wait_for_function(
@@ -115,10 +118,16 @@ def main():
                     _check(first["spec"]["layout_id"] == "hero", "hero create failed")
                     _check(first["spec"]["product_align"] == "bottom", "product align lost")
                     _check(first["spec"]["product_scale"] == "compact", "scale lost")
+                    _check(first["spec"]["layer_layout"]["title_dx"] == 10, "title layer lost on create")
+                    _check(first["spec"]["layer_layout"]["logo_dy"] == -8, "logo layer lost on create")
                     old_image = page.request.get(origin + first["image_url"]).body()
                     page.locator("#editLayout").select_option("classic")
                     page.locator("#editProductAlign").select_option("top")
                     page.locator("#editProductScale").select_option("full")
+                    page.locator("#edit-layer-editor summary").click()
+                    page.locator("#edit-layer-price_dx").fill("8")
+                    page.locator("#edit-layer-price_dy").fill("-6")
+                    page.locator("#edit-layer-cta_dx").fill("-10")
                     page.locator("#saveEdit").click()
                     page.wait_for_function(
                         "() => !!current && current.version === 2"
@@ -127,6 +136,9 @@ def main():
                     _check(latest["spec"]["layout_id"] == "classic", "edit lost template")
                     _check(latest["spec"]["product_align"] == "top", "edit lost alignment")
                     _check(latest["spec"]["product_scale"] == "full", "edit lost scale")
+                    _check(latest["spec"]["layer_layout"]["price_dx"] == 8, "price layer edit lost")
+                    _check(latest["spec"]["layer_layout"]["price_dy"] == -6, "price layer vertical edit lost")
+                    _check(latest["spec"]["layer_layout"]["cta_dx"] == -10, "CTA layer edit lost")
                     new_image = page.request.get(origin + latest["image_url"]).body()
                     _check(new_image != old_image, "layout produced identical PNG")
                     _check(
@@ -137,8 +149,8 @@ def main():
                     page.locator("#historyVersionSelect").select_option("1")
                     page.locator("#viewHistoryVersion").click()
                     page.locator("#historyVersionStatus").filter(has_text="只读历史 v1").wait_for()
-                    print("PASS: real Chromium create hero, layout/placement edit, "
-                          "new image, retained v1 and history gallery")
+                    print("PASS: real Chromium create hero with title/logo layer offsets, "
+                          "edit price/CTA layers, new image, retained v1 and history gallery")
                 finally:
                     browser.close()
         finally:

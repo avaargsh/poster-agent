@@ -28,6 +28,17 @@ HERO_PRICE_ZONES = {
     "original_price": (60, 932, 610, 985),
 }
 SQUARE_PRICE_ZONES = {"classic": PRICE_ZONES, "hero": HERO_PRICE_ZONES}
+
+
+def square_price_zones(spec: PosterSpec) -> dict[str, tuple[int, int, int, int]]:
+    """Bound OCR geometry to the immutable saved square layout and price layer."""
+    dx = spec.layer_layout.price_dx
+    dy = spec.layer_layout.price_dy
+    base = SQUARE_PRICE_ZONES[spec.layout_id]
+    return {
+        name: (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
+        for name, (x1, y1, x2, y2) in base.items()
+    }
 PRICE_TOKEN = re.compile(r"[¥￥]\s*([0-9][0-9.,．]*)")
 MIN_SCORE = 0.40
 
@@ -96,7 +107,7 @@ def assess_price_zones(
     # Native 4:5 callers explicitly supply their own zones; only square
     # callers follow the saved layout ID. Never reuse classic square zones for
     # the hero footer, or old OCR results could be incorrectly classified.
-    zones = SQUARE_PRICE_ZONES[spec.layout_id] if zones is None else zones
+    zones = square_price_zones(spec) if zones is None else zones
     checks = []
     observations, uncertain = _tokens(lines, layout_size) if ocr_status == "OK" else ([], 0)
     for field in ("price", "original_price"):
