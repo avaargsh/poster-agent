@@ -245,13 +245,22 @@ def _fingerprint(spec: PosterSpec, product: Image.Image, logo: Image.Image | Non
                  cutout: Image.Image | None = None) -> str:
     """Hash normalized input pixels and fields, not arbitrary file paths."""
     digest = hashlib.sha256()
-    digest.update(json.dumps(spec.model_dump(mode="json"), sort_keys=True).encode("utf-8"))
-    for asset in (product, logo, cutout):
+    fields = spec.model_dump(mode="json")
+    if spec.product_source_mode == "original":
+        # Preserve existing default-mode idempotency hashes across upgrades.
+        # Old persisted receipts were computed before this optional field.
+        fields.pop("product_source_mode", None)
+    digest.update(json.dumps(fields, sort_keys=True).encode("utf-8"))
+    for asset in (product, logo):
         if asset is None:
             digest.update(b"none")
         else:
             digest.update(f"{asset.mode}:{asset.width}x{asset.height}".encode())
             digest.update(asset.tobytes())
+    if cutout is not None:
+        digest.update(b"product-cutout:")
+        digest.update(f"{cutout.mode}:{cutout.width}x{cutout.height}".encode())
+        digest.update(cutout.tobytes())
     return digest.hexdigest()
 
 
