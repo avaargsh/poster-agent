@@ -28,6 +28,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 打开 <http://127.0.0.1:8000>；API 文档在 <http://127.0.0.1:8000/docs>。首次示例会在 `data/examples/` 生成测试素材及预览图。若中文缺字，在 `.env` 中设置本机存在的 `POSTER_FONT_PATH`。
 
+前端采用 **React 19 + TypeScript + Vite 7 + Tailwind CSS 4**，提供浅色侧栏工作台、独立滚动创作表单、预览缩放及手机布局。构建产物已随仓库保存，运行 Python 服务即可使用；开发与迁移边界见 [React 工作台说明](docs/react-workbench.md)。
+
 工作台按任务分为四个入口，单张创作与批量处理同级：
 
 - **创作海报**：上传商品图后立即查看所选素材，填写文案并生成；右侧分别提供内容编辑、尺寸导出、检查与标注。自然语言需求为可选入口，历史版本可展开查看。

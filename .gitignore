@@ -46,3 +46,7 @@ data/**/*.pdf
 .workbuddy/
 .playwright-mcp/
 .qoder/
+
+# Frontend tooling (built local application assets are tracked)
+frontend/node_modules/
+frontend/.vite/

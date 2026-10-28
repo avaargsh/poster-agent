@@ -36,3 +36,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## React workbench browser distribution
+
+The locally served frontend bundles React, React DOM, Scheduler, Lucide icons
+and Tailwind CSS. Their upstream license texts are copied from the locked npm
+packages to `app/static/workbench/THIRD_PARTY_LICENSES.txt` during each build.
+The frontend source and reproducible package lock are in `frontend/`.

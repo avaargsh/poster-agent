@@ -1,5 +1,6 @@
 """M5n local style picker: free presets reuse the existing form/API contract."""
 
+import re
 from io import BytesIO
 
 from fastapi.testclient import TestClient
@@ -19,7 +20,7 @@ def test_style_picker_is_accessible_and_keeps_manual_style_input():
     assert html.count('data-style-preset="') == 5
     assert 'role="group" aria-labelledby="stylePresetLabel"' in html
     assert 'aria-pressed="true"' in html
-    assert 'name="style" maxlength="80"' in html
+    assert re.search(r'<input\b(?=[^>]*\bname="style")(?=[^>]*\bmaxlength="80")[^>]*>', html, re.I)
     assert "syncStylePresetPicker();" in html
     assert "activeReviewRunId && activeReviewApproved" in html
 
