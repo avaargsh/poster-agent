@@ -86,6 +86,7 @@ def _state(batch_id: str) -> dict:
             "poster_id": row["poster_id"],
             "source_version": row["source_version"],
             "quality_state": row["quality_state"],
+            "model_runtime_attested": row["model_runtime_attested"],
             "human_accept": row["human_accept"],
             "subject_integrity_review": row["subject_integrity_review"],
             "edge_artifact_review": row["edge_artifact_review"],
