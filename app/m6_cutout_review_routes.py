@@ -98,6 +98,7 @@ def _state(batch_id: str) -> dict:
             "foreground_fraction": row["foreground_fraction"],
             "soft_alpha_fraction": row["soft_alpha_fraction"],
             "edge_touch_fraction": row["edge_touch_fraction"],
+            "comparison_image_path": row["comparison_image_path"],
             "comparison_image_sha256": row["comparison_image_sha256"],
             "comparison_url": (
                 f"/api/batches/{batch_id}/m6-cutout-review/"
