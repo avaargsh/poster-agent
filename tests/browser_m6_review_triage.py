@@ -221,7 +221,8 @@ def main() -> None:
                     " lastBatchStatus='COMPLETED'; }"
                 )
                 page.evaluate(
-                    "() => {document.getElementById('openM6CutoutReview').disabled=false;}"
+                    "() => {document.getElementById('batchResults').hidden=false;"
+                    " document.getElementById('openM6CutoutReview').disabled=false;}"
                 )
                 page.locator("#openM6CutoutReview").click()
                 page.locator("#m6CutoutReviewPanel").wait_for(state="visible")

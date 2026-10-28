@@ -86,6 +86,7 @@ def _state(batch_id: str) -> dict:
             "poster_id": row["poster_id"],
             "source_version": row["source_version"],
             "quality_state": row["quality_state"],
+            "model_runtime_attested": row["model_runtime_attested"],
             "human_accept": row["human_accept"],
             "subject_integrity_review": row["subject_integrity_review"],
             "edge_artifact_review": row["edge_artifact_review"],
@@ -97,6 +98,7 @@ def _state(batch_id: str) -> dict:
             "foreground_fraction": row["foreground_fraction"],
             "soft_alpha_fraction": row["soft_alpha_fraction"],
             "edge_touch_fraction": row["edge_touch_fraction"],
+            "comparison_image_path": row["comparison_image_path"],
             "comparison_image_sha256": row["comparison_image_sha256"],
             "comparison_url": (
                 f"/api/batches/{batch_id}/m6-cutout-review/"
