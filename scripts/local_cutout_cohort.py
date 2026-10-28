@@ -1,10 +1,11 @@
-"""Operator-invoked, offline-only, resumable u2netp trial for authorized SKU cohorts.
+"""Operator-invoked, offline-only, resumable u2netp technical and quality trials.
 
 The default is read-only. --apply runs the existing SHA-pinned rembg CLI once
 per unfinished SKU, writing a new private output tree. Every completed output
 is hashed and verified before resume. No automatic human/model attestation:
-this journal is an operator-owned local observation and requires independent
-M6 checks on at least 20 real, authorized SKUs.
+this journal is an operator-owned local observation. Technical runs accept
+unverified asset metadata; formal M6 acceptance separately requires authorized,
+independent SKUs and human reviews.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import platform
 import re
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import UploadFile
 from PIL import Image
@@ -118,7 +120,60 @@ def _sources(manifest: Path, registry: Path, *, min_skus: int):
         "rows": source_rows,
         "header": manifest_header,
         "prepared": prepared,
+        "authorized_sku_count": len(prepared),
+        "authorization_status": "OPERATOR_DECLARED_AUTHORIZED",
     }
+
+
+def _registry_bytes(rows: list[dict]) -> bytes:
+    data = io.StringIO(newline="")
+    writer = csv.DictWriter(data, fieldnames=REGISTRY_FIELDS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return data.getvalue().encode("utf-8")
+
+
+def _technical_sources(manifest: Path, registry: Path | None, *, min_skus: int):
+    """Keep source integrity checks; authorization is separate operator metadata."""
+    if min_skus < 1:
+        raise CutoutCohortError("min_skus 需要正整数")
+    source_sha, prepared = preflight(manifest)
+    if len(prepared) < min_skus:
+        raise CutoutCohortError(f"至少需要 {min_skus} 张图片（当前 {len(prepared)}）")
+    header, rows, checked_sha = _read_csv(manifest)
+    if source_sha != checked_sha or any(r.get("product_cutout_image", "").strip() for r in rows):
+        raise CutoutCohortError("本地推理必须使用未更改的原始图片清单")
+    cohort = "technical-" + source_sha[:12]
+    if registry is None:
+        registry_rows = []
+        for item in prepared:
+            row = dict.fromkeys(REGISTRY_FIELDS, "")
+            row.update(cohort_id=cohort, sku_id=item["sku_id"],
+                       source_image_sha256=item["product_sha256"],
+                       source_asset_authorization_status="UNVERIFIED",
+                       logo_authorization_status="UNVERIFIED" if item["logo"] else "NOT_APPLICABLE",
+                       distinct_sku_verified="UNVERIFIED",
+                       duplicate_source_image_reviewed="UNVERIFIED")
+            registry_rows.append(row)
+        registry_sha = _sha(_registry_bytes(registry_rows))
+    else:
+        _, registry_rows, registry_sha = _read_csv(registry, REGISTRY_FIELDS)
+        by_sku = {r["sku_id"]: r for r in registry_rows}
+        cohorts = {r["cohort_id"] for r in registry_rows}
+        if (len(by_sku) != len(registry_rows) or len(cohorts) != 1 or not next(iter(cohorts))
+                or set(by_sku) != {p["sku_id"] for p in prepared}):
+            raise CutoutCohortError("素材登记表与图片清单的 SKU 集合不一致")
+        cohort = next(iter(cohorts))
+        for item in prepared:
+            if by_sku[item["sku_id"]]["source_image_sha256"] != item["product_sha256"]:
+                raise CutoutCohortError("素材登记源图 SHA-256 与输入不一致")
+    authorized = sum(r["source_asset_authorization_status"] == "AUTHORIZED"
+                     and bool(r["authorization_evidence_ref"]) for r in registry_rows)
+    return {"manifest_sha256": source_sha, "registry_sha256": registry_sha,
+            "cohort_id": cohort, "rows": rows, "header": header, "prepared": prepared,
+            "registry_rows": registry_rows, "authorized_sku_count": authorized,
+            "authorization_status": "OPERATOR_DECLARED_AUTHORIZED"
+            if authorized == len(prepared) else "UNVERIFIED"}
 
 
 def _safe_dir(directory: Path):
@@ -241,24 +296,37 @@ def _result(state: dict, mode: str):
         "real_model_quality_verified": False,
         "source_manifest_sha256": state["source_manifest_sha256"],
         "authorization_registry_sha256": state["authorization_registry_sha256"],
+        "purpose": state.get("purpose", "quality_acceptance"),
+        "authorization_status": state.get("authorization_status", "OPERATOR_DECLARED_AUTHORIZED"),
+        "human_visual_review": "UNVERIFIED",
+        "quality_accepted": False,
     }
 
 
 def prepare_cohort(
-    manifest: Path, registry: Path, output_dir: Path, *, apply: bool = False,
+    manifest: Path, registry: Path | None, output_dir: Path, *, apply: bool = False,
     min_skus: int = 20, retry_failed: bool = False,
+    purpose: Literal["technical_evaluation", "quality_acceptance"] = "quality_acceptance",
 ) -> dict:
     """Read-only plan or an explicitly started, safe-to-resume local CLI run."""
     manifest = Path(manifest).expanduser()
-    registry = Path(registry).expanduser()
+    registry = Path(registry).expanduser() if registry is not None else None
     out = Path(output_dir).expanduser()
-    source = _sources(manifest, registry, min_skus=min_skus)
+    if purpose not in {"technical_evaluation", "quality_acceptance"}:
+        raise CutoutCohortError("未知的运行用途")
+    if purpose == "quality_acceptance" and registry is None:
+        raise CutoutCohortError("正式验收需要独立的授权登记表")
+    source = (_technical_sources(manifest, registry, min_skus=min_skus)
+              if purpose == "technical_evaluation" else _sources(manifest, registry, min_skus=min_skus))
     _safe_dir(out)
     if not apply:
         return {
-            "schema_version": SCHEMA, "mode": "check", "status": "AUTHORIZED_READY",
+            "schema_version": SCHEMA, "mode": "check", "status":
+                "TECHNICAL_READY" if purpose == "technical_evaluation" else "AUTHORIZED_READY",
+            "purpose": purpose, "authorization_status": source["authorization_status"],
+            "human_visual_review": "UNVERIFIED", "quality_accepted": False,
             "cohort_sku_count": len(source["prepared"]),
-            "authorized_sku_count": len(source["prepared"]),
+            "authorized_sku_count": source["authorized_sku_count"],
             "model_runtime_attested": False,
             "source_manifest_sha256": source["manifest_sha256"],
             "authorization_registry_sha256": source["registry_sha256"],
@@ -278,6 +346,7 @@ def prepare_cohort(
         except (OSError, ValueError) as exc:
             raise CutoutCohortError("已有运行账本损坏") from exc
         if (state.get("schema_version") != SCHEMA
+                or state.get("purpose", "quality_acceptance") != purpose
                 or state.get("source_manifest_sha256") != source["manifest_sha256"]
                 or state.get("authorization_registry_sha256") != source["registry_sha256"]
                 or state.get("model_sha256") != identity["model_sha256"]
@@ -294,6 +363,8 @@ def prepare_cohort(
         state = {
             "schema_version": SCHEMA,
             "runner": RUNNER,
+            "purpose": purpose,
+            "authorization_status": source["authorization_status"],
             "cohort_id": source["cohort_id"],
             "source_manifest_sha256": source["manifest_sha256"],
             "authorization_registry_sha256": source["registry_sha256"],
@@ -307,6 +378,9 @@ def prepare_cohort(
             "real_model_quality_verified": False,
         }
         _atomic_json(journal, state)
+
+    if purpose == "technical_evaluation":
+        _store_once(out / "sku_registry.csv", _registry_bytes(source["registry_rows"]))
 
     if (
         (out / "source").is_symlink()
@@ -369,12 +443,18 @@ def prepare_cohort(
 
 
 def verify_cohort(
-    output_dir: Path, manifest: Path, registry: Path, *, min_skus: int = 20,
+    output_dir: Path, manifest: Path, registry: Path | None, *, min_skus: int = 20,
+    purpose: Literal["technical_evaluation", "quality_acceptance"] = "quality_acceptance",
 ) -> dict:
     """Re-read all source and output pixels without loading ONNX or contacting network."""
     out = Path(output_dir)
     _safe_dir(out)
-    source = _sources(Path(manifest), Path(registry), min_skus=min_skus)
+    if purpose not in {"technical_evaluation", "quality_acceptance"}:
+        raise CutoutCohortError("未知的运行用途")
+    if purpose == "quality_acceptance" and registry is None:
+        raise CutoutCohortError("正式验收需要独立的授权登记表")
+    source = (_technical_sources(Path(manifest), Path(registry) if registry else None, min_skus=min_skus)
+              if purpose == "technical_evaluation" else _sources(Path(manifest), Path(registry), min_skus=min_skus))
     journal = out / "cutout_trial.json"
     if journal.is_symlink() or not journal.is_file():
         raise CutoutCohortError("本地模型运行账本缺失")
@@ -384,7 +464,8 @@ def verify_cohort(
         raise CutoutCohortError("模型运行账本无效") from exc
     if (state.get("schema_version") != SCHEMA or state.get("runner") != RUNNER
             or state.get("source_manifest_sha256") != source["manifest_sha256"]
-            or state.get("authorization_registry_sha256") != source["registry_sha256"]
+            or (state.get("authorization_registry_sha256") != source["registry_sha256"]
+                and not (purpose == "quality_acceptance" and state.get("purpose") == "technical_evaluation"))
             or state.get("cohort_id") != source["cohort_id"]
             or state.get("expected_sku_ids") != [x["sku_id"] for x in source["prepared"]]
             or not SHA.fullmatch(str(state.get("model_sha256", "")))
@@ -424,14 +505,19 @@ def verify_cohort(
         raise CutoutCohortError("输出清单的 SKU 集合已更改")
     result = _result(state, "verify")
     result["status"] = "RECORDED_UNATTESTED"
+    result["verified_registry_sha256"] = source["registry_sha256"]
+    result["authorization_status"] = source["authorization_status"]
+    result["verification_purpose"] = purpose
     return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Private, offline, operator-authorized rembg/u2netp SKU trial")
+        description="Local u2netp technical run; authorization is separate acceptance metadata")
     parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--registry", required=True, type=Path)
+    parser.add_argument("--registry", type=Path)
+    parser.add_argument("--purpose", choices=("technical_evaluation", "quality_acceptance"),
+                        default="technical_evaluation")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
@@ -439,11 +525,12 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.verify:
-            result = verify_cohort(args.output_dir, args.manifest, args.registry)
+            result = verify_cohort(args.output_dir, args.manifest, args.registry, purpose=args.purpose)
         else:
             result = prepare_cohort(
                 args.manifest, args.registry, args.output_dir,
                 apply=args.apply, retry_failed=args.retry_failed,
+                purpose=args.purpose,
             )
     except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(2, f"本地 u2netp 批次未完成：{exc}\n")

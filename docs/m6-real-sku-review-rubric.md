@@ -19,6 +19,8 @@ uv run --locked python -m scripts.verify_m14_lineage \\
 
 ## Mac M1 本地 u2netp 真实 20 SKU 抠图试验（M14）
 
+本地生成和技术评测可以省略授权登记与审核人。M14 CLI 默认使用 `--purpose technical_evaluation`，未提供登记表时自动记录 `UNVERIFIED`；原图与模型 SHA 校验仍执行。本文以下授权 cohort 示例属于正式验收准备，应显式加 `--purpose quality_acceptance`。仅有图片目录时可使用 [图片目录技术评测入口](technical-evaluation.md)，自动创建最小登记表、生成海报并单独保存技术检查结果。
+
 使用隔离的 CPU rembg CLI 环境（推荐 Python 3.12），预装 `u2netp.onnx` 到 `$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx`。参照 [rembg 官方文档](https://github.com/danielgatis/rembg) 核对 CLI `rembg i -m u2netp` 与模型缓存位置。操作者须自行验证权重的可信来源和供应链摘要，固定 `POSTER_CUTOUT_MODEL_SHA256`，并确保项目进程能在 PATH 中找到独立环境的 `rembg`。运行器阻断旧环境变量 `U2NET_HOME` 劫持选择，且只走本地模型和本地图片。
 
 ```bash

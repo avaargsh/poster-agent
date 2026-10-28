@@ -133,14 +133,14 @@ def prepare_package(journal: Path, output_dir: Path, *, apply: bool = False) -> 
             "product_category": "",
             "product_family_id": "",
             "variant_or_packaging_condition": "",
-            "source_asset_authorization_status": "PENDING",
+            "source_asset_authorization_status": "UNVERIFIED",
             "authorization_evidence_ref": "",
             "logo_authorization_status": (
-                "PENDING" if record.get("logo_sha256") else "NOT_APPLICABLE"
+                "UNVERIFIED" if record.get("logo_sha256") else "NOT_APPLICABLE"
             ),
             "source_image_sha256": record["product_sha256"],
-            "distinct_sku_verified": "NO",
-            "duplicate_source_image_reviewed": "NO",
+            "distinct_sku_verified": "UNVERIFIED",
+            "duplicate_source_image_reviewed": "UNVERIFIED",
             "reviewer_alias": "",
             "notes": "",
         })

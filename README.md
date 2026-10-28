@@ -8,6 +8,8 @@
 
 ## 快速启动
 
+**目录技术评测：** 本地生成无需授权登记表或审核人。可用 `python -m scripts.technical_evaluation --images <图片目录> --price <测试价格> --output-dir <新输出目录> --apply` 自动建档并批量生成，授权与人工审核保留 `UNVERIFIED`；可选 `--cutout`、`--ocr` 执行已配置的本地模型。见 [图片目录技术评测](docs/technical-evaluation.md)。正式 M6 验收仍独立核验授权及人工审核。
+
 要求 **Python 3.12**（由 uv 根据 `.python-version` 管理）与中文字体；Mac 使用 PingFang，Linux 使用 Noto Sans CJK。先按 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，不需要手动创建/激活 venv。
 
 ```bash

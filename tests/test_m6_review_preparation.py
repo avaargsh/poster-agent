@@ -72,8 +72,8 @@ def test_apply_exports_both_formats_as_unverified(tmp_path, monkeypatch):
     assert registry[0]["cohort_id"] == report["cohort_id"]
     assert {row["cohort_id"] for row in reviews} == {report["cohort_id"]}
     assert report["missing_output_count"] == 0
-    assert registry[0]["source_asset_authorization_status"] == "PENDING"
-    assert registry[0]["distinct_sku_verified"] == "NO"
+    assert registry[0]["source_asset_authorization_status"] == "UNVERIFIED"
+    assert registry[0]["distinct_sku_verified"] == "UNVERIFIED"
     assert registry[0]["authorization_evidence_ref"] == ""
     assert {row["variant_id"] for row in reviews} == {
         "square", "feed_4x5_native",
