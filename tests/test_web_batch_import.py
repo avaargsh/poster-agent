@@ -1898,7 +1898,7 @@ def test_web_cutout_review_rejects_inconsistent_labels_and_preserves_csv(
         "expected_csv_sha256":client.get(endpoint).json()["csv_sha256"],
         "sku_id":"sku-cutout","subject_integrity_review":"FAIL",
         "edge_artifact_review":"PASS","brand_mark_review":"PASS",
-        "human_accept":"PASS","reviewer_alias":"r","reviewer_notes":"问题",
+        "human_accept":"PASS","reviewer_alias":"reviewer-b","reviewer_notes":"问题",
     }
     assert client.post(endpoint,json=base).status_code==422
     assert client.post(endpoint,json={**base,"human_accept":"FAIL",
@@ -1925,7 +1925,7 @@ def test_web_cutout_review_blocks_tampered_evidence_without_mutation(
         "expected_csv_sha256":snapshot["csv_sha256"],"sku_id":"sku-cutout",
         "subject_integrity_review":"PASS","edge_artifact_review":"PASS",
         "brand_mark_review":"PASS","human_accept":"PASS",
-        "reviewer_alias":"r","reviewer_notes":"confirmed",
+        "reviewer_alias":"reviewer-c","reviewer_notes":"confirmed",
     }
     saved=(package/"m6_cutout_reviews.csv").read_bytes()
     assert client.get(endpoint).status_code==409
