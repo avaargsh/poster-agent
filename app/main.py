@@ -42,6 +42,7 @@ from .cli_batch_status_routes import router as cli_batch_status_router
 from .m6_review_progress_routes import router as m6_review_progress_router
 from .m6_batch_package_routes import router as m6_batch_package_router
 from .m6_package_download_routes import router as m6_package_download_router
+from .m6_cutout_review_routes import router as m6_cutout_review_router
 from .m6_overlay_routes import router as m6_overlay_router
 from .m6_review_sidecar_routes import router as m6_review_sidecar_router
 from .m6_ocr_capture_routes import router as m6_ocr_capture_router
@@ -183,6 +184,7 @@ app.include_router(cli_batch_status_router)
 app.include_router(m6_review_progress_router)
 app.include_router(m6_batch_package_router)
 app.include_router(m6_package_download_router)
+app.include_router(m6_cutout_review_router)
 app.include_router(m6_overlay_router)
 app.include_router(m6_review_sidecar_router)
 app.include_router(m6_ocr_capture_router)

@@ -160,6 +160,46 @@ def main() -> None:
                 },
             )
 
+        cutout_state={"sha":"a"*64,"decision":"UNVERIFIED","save_calls":0}
+        def cutout_stub(route):
+            url=urlsplit(route.request.url)
+            if url.path.endswith("/comparison"):
+                route.fulfill(status=200,body=PNG,content_type="image/png")
+                return
+            if route.request.method=="POST":
+                payload=route.request.post_data_json
+                _check(payload["expected_csv_sha256"]==cutout_state["sha"],
+                       "stale cutout CSV digest accepted")
+                _check(payload["sku_id"]=="sku-one", "wrong cutout SKU saved")
+                _check(payload["subject_integrity_review"]=="PASS" and
+                       payload["edge_artifact_review"]=="PASS" and
+                       payload["brand_mark_review"]=="PASS",
+                       "cutout review lost mandatory human fields")
+                cutout_state["sha"]="e"*64
+                cutout_state["decision"]="PASS"
+                cutout_state["save_calls"]+=1
+            route.fulfill(status=200,content_type="application/json",
+                body=json.dumps({
+                    "batch_id":"m6-browser-fixture-A","cohort_id":"m6-test",
+                    "csv_sha256":cutout_state["sha"],"status":
+                       "OPERATOR_ASSERTED_NOT_ATTESTED" if
+                       cutout_state["decision"]=="PASS" else "HUMAN_REVIEW_REQUIRED",
+                    "candidate_count":1,"operator_accepted_count":
+                       cutout_state["save_calls"],
+                    "operator_rejected_count":0,"model_runtime_attested":False,
+                    "rows":[{
+                        "sku_id":"sku-one","quality_state":"REVIEW_REQUIRED",
+                        "human_accept":cutout_state["decision"],
+                        "subject_integrity_review":cutout_state["decision"],
+                        "edge_artifact_review":cutout_state["decision"],
+                        "brand_mark_review":cutout_state["decision"],
+                        "comparison_url":"/api/batches/m6-browser-fixture-A/"
+                           "m6-cutout-review/sku-one/comparison",
+                        "machine_risks":"SUBJECT_TOUCHES_FRAME",
+                        "foreground_fraction":"0.4","soft_alpha_fraction":"0.02",
+                        "reviewer_alias":"","reviewer_notes":""
+                    }]
+                }))
         with sync_playwright() as pw:
             system_chrome = shutil.which("google-chrome") or shutil.which(
                 "google-chrome-stable"
@@ -170,6 +210,7 @@ def main() -> None:
             )
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.route("**/api/batches/*/m6-cutout-review**", cutout_stub)
                 page.route("**/api/batches/*/m6-ocr-review**", stub_review)
                 page.route("**/api/batches/*/m6-review-sidecar", fake_sidecar_export)
                 page.route("**/api/batches/*/m6-review-sidecar/worksheet", fake_worksheet)
@@ -179,6 +220,28 @@ def main() -> None:
                     "() => { currentBatchId='m6-browser-fixture-A';"
                     " lastBatchStatus='COMPLETED'; }"
                 )
+                page.evaluate(
+                    "() => {document.getElementById('openM6CutoutReview').disabled=false;}"
+                )
+                page.locator("#openM6CutoutReview").click()
+                page.locator("#m6CutoutReviewPanel").wait_for(state="visible")
+                page.locator("#m6CutoutSubject").select_option("PASS")
+                page.locator("#m6CutoutEdge").select_option("PASS")
+                page.locator("#m6CutoutBrand").select_option("PASS")
+                page.locator("#m6CutoutDecision").select_option("PASS")
+                page.locator("#m6CutoutReviewer").fill("human-reviewer")
+                page.locator("#m6CutoutSave").click()
+                page.wait_for_function(
+                    "() => document.querySelector('#m6CutoutStatus').textContent"
+                    ".includes('人工审核已原子保存')"
+                )
+                _check(cutout_state["save_calls"]==1,
+                       "explicit cutout review save was not invoked")
+                _check(page.locator("#m6CutoutComparison").get_attribute("src")
+                       .endswith("/comparison"),
+                       "cutout side-by-side comparison URL is missing")
+                print("PASS: Chromium cutout side-by-side human review, explicit"
+                      " CAS-save and model-unattested status")
                 page.evaluate(
                     "() => loadM6OCRReview('m6-browser-fixture-A', 'sku-one')"
                 )
