@@ -51,6 +51,12 @@ uv run --locked python -m scripts.local_cutout_cohort \\
 
 请把 `cutout_trial.json` 理解为本地程序记录：其中的 SHA、命令类型和系统信息便于核对复现，缺少可信独立执行环境认证。因此固定保留 `model_runtime_attested=false`、`real_model_quality_verified=false`。请勿把测试中 mock 生成的透明 PNG 作为真实 u2netp 推理结果，也不要把试验素材提交到公开 Git 仓库。
 
+## 网页逐 SKU 抠图人工复核与历史（M16）
+
+在本机工作台打开已完成的网页批次，准备 M6 审核包后点击「逐 SKU 检查商品抠图」。逐一查看原图及棋盘底抠图对照，结合机器风险提示填写主体完整性、透明边缘、包装和品牌标识的 PASS/FAIL，再选择人工总评和审核员标识；任意维度 FAIL 时填写具体问题。保存后自动记录 UTC 时间，之前的审核 CSV 会保留在审核包的私有 `_m6_cutout_review_history/<sha256>.csv`。审核 CSV 的 SHA-256 提供并发防护，若另一浏览器标签已经保存，当前操作将收到 409 冲突，需重新加载核对后再次保存。
+
+通过 `GET /api/batches/<batch_id>/m6-cutout-review` 可查看只读审核列表；`GET /api/batches/<batch_id>/m6-cutout-review/<sku_id>/comparison` 返回已验证对照 PNG；`POST /api/batches/<batch_id>/m6-cutout-review` 只允许更新当前 SKU 的人工审核字段。三种接口均使用现有本地网络限制和批次凭据门禁。下载 M6 ZIP 会包含最近一次有效的人工 CSV，`verify_m6_cutout_evidence` 可重新核对；原始图片和机器指标继续保持冻结。操作员标记 PASS 仍需独立的授权、真实模型执行、OCR 与商品质量验收。
+
 ## 抠图候选的补充人工证据（M13）\n\nM6 准备包现在会额外产生 `m6_cutout_evidence.json`、`m6_cutout_reviews.csv`，以及每个实际使用抠图候选的 `images/<sku>-cutout-comparison.png`。左侧始终是原商品图，右侧是透明主体在棋盘背景上的实际像素。自动指标包括主体覆盖率、边缘接触比例、连通组件数量、半透明比例和原图保留区域 RGB 差异，全部只用于人工优先级；可视化呈现不推断商品真实性或切图质量合格。\n\n完成审核表时必须独立核对 subject_integrity_review（主体完整性）、edge_artifact_review（边缘与残影）、brand_mark_review（品牌与包装细节）；使用 PASS/FAIL，标记 reviewer_alias 和 UTC reviewed_at_utc，填写 human_accept。完整证据验证命令：`python -m scripts.verify_m6_cutout_evidence --package data/.../m6_review_package --journal data/.../batch_import_results.json`。要求 20 个独立 SKU，且验证会重读执行凭据、原始 PNG、抠图、对照图并重新计算诊断指标。断言是操作员声明，模型运行的真实 ONNX 来源需另行记录和独立验收；不要把此证据作为审核通过或实际运行真实性。\n\n## 1. 样本冻结
 
 - 至少 20 个**不同 SKU**，每个 SKU 有合法使用的商品图片及可选 Logo；同 SKU 的多次生成不增加独立样本数。
