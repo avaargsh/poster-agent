@@ -73,6 +73,7 @@ input::file-selector-button{background:#253c55;color:var(--text);border:0;border
 .preview-empty svg{margin-bottom:24px;color:#7697b8}
 .preview-empty h3{color:var(--text);margin:0 0 8px}
 .preview-empty p{font-size:14px;margin:0 0 24px}
+.review-draft-tools{margin-bottom:20px}
 .asset-selection{display:flex;align-items:center;gap:12px;padding:10px;margin-bottom:12px;background:#0a1627;border:1px solid var(--line);border-radius:6px;font-size:12px;overflow-wrap:anywhere}
 .asset-selection img{width:52px;height:64px;object-fit:contain;flex-shrink:0}
 #productFileError:empty{display:none}
@@ -310,12 +311,15 @@ pre{max-width:100%}
   <h3>4:5 原生海报人工验收</h3>
   <p class="tip">请对照上面的原生导出预览检查商品是否完整、文字是否可读、构图与具体文案。每条标签绑定当前 4:5 PNG、商品与背景 SHA-256。此审核与下方方形版标注完全分开。</p>
   <div class="row"><label>4:5 审核员代号</label><input id="nativeReviewer" value="local-operator" maxlength="40"></div>
+<div class="review-draft-tools"><p id="nativeDraftStatus" class="tip" role="status">填写过程会保存为草稿，提交审核后才进入正式记录。</p><div class="actions"><button id="saveNativeDraft" type="button" class="secondary" disabled>保存进度</button><button id="reloadNativeDraft" type="button" class="secondary" disabled>载入已保存进度</button></div></div>
   <div id="nativeReviewFields"></div>
   <div class="actions">
-    <button type="button" id="saveNativeReview" class="secondary" disabled>保存 4:5 人工验收</button>
+    <button type="button" id="saveNativeReview" class="secondary" disabled>提交 4:5 审核</button>
     <a id="exportNativeReview" href="#" download="poster-native-4x5-labels.csv">导出该审核员 4:5 CSV</a>
   </div>
   <p class="tip" id="nativeReviewStatus">生成原生 4:5 海报后可审核。</p>
+
+
 </div>
 </details></section></div>
 <div id="editor-check" role="tabpanel" aria-labelledby="editor-tab-check" tabindex="0" hidden><section class="mt"><h2>方形海报检查</h2>
@@ -336,6 +340,7 @@ pre{max-width:100%}
 <section class="mt"><h2>方形海报人工审核</h2>
 <p class="tip">请对照上方 PNG 亲眼检查每个字段。提交后绑定当前版本的 SHA-256；这是你自己提供的标签，并非模型验证。</p>
 <div class="row"><label>审核员代号（2–40 位英文、数字、_、-）</label><input id="humanReviewer" value="local-operator" maxlength="40"></div>
+<div class="review-draft-tools"><p id="humanDraftStatus" class="tip" role="status">填写过程会保存为草稿，提交审核后才进入正式记录。</p><div class="actions"><button id="saveHumanDraft" type="button" class="secondary" disabled>保存进度</button><button id="reloadHumanDraft" type="button" class="secondary" disabled>载入已保存进度</button></div></div>
 <div id="humanFields">
   <div class="row" data-human-field="title"><label>主标题</label><select data-judgment><option value="">请选择</option><option value="correct">实际图片正确</option><option value="defective">实际图片有错误</option><option value="unsure">无法判断</option></select><input data-reason placeholder="依据 / 错误说明（可选）" maxlength="300"></div>
   <div class="row" data-human-field="price"><label>活动价</label><select data-judgment><option value="">请选择</option><option value="correct">实际图片正确</option><option value="defective">实际图片有错误</option><option value="unsure">无法判断</option></select><input data-reason placeholder="依据 / 错误说明（可选）" maxlength="300"></div>
@@ -343,8 +348,10 @@ pre{max-width:100%}
   <div class="row" data-human-field="subtitle"><label>副标题</label><select data-judgment><option value="">请选择</option><option value="correct">实际图片正确</option><option value="defective">实际图片有错误</option><option value="unsure">无法判断</option></select><input data-reason placeholder="依据 / 错误说明（可选）" maxlength="300"></div>
   <div class="row" data-human-field="original_price"><label>原价</label><select data-judgment><option value="">请选择</option><option value="correct">实际图片正确</option><option value="defective">实际图片有错误</option><option value="unsure">无法判断</option></select><input data-reason placeholder="依据 / 错误说明（可选）" maxlength="300"></div>
 </div>
-<div class="actions"><button type="button" id="saveHuman" class="secondary" disabled>保存人工标注</button><a id="exportHuman" href="#" download="poster-human-labels.csv">导出该审核员 CSV</a></div>
+<div class="actions"><button type="button" id="saveHuman" class="secondary" disabled>提交方形审核</button><a id="exportHuman" href="#" download="poster-human-labels.csv">导出该审核员 CSV</a></div>
 <p id="humanStatus" class="tip">生成海报后，先核对 PNG 再标注。</p>
+
+
 </section></div></section></section></div></section>
 <section class="workspace-view" id="view-batch" role="tabpanel" aria-labelledby="nav-batch" tabindex="0" hidden>
 <div class="workspace-heading"><div><h2>批量处理</h2><p class="tip">从一份商品清单开始，统一生成，再逐张审核。</p></div><span class="quiet-label">免费本地背景 · 支持中断续跑</span></div>
@@ -515,6 +522,7 @@ pre{max-width:100%}
 </main>
 <footer class="app-footer">文件与记录保存在本机。生成与自动检查完成后，仍需人工确认再使用。</footer>
 <script src="/static/create-draft.js"></script>
+<script src="/static/review-drafts.js"></script>
 <script>
 let current = null;
 let cutoutCandidate=null, cutoutOriginalUrl=null, cutoutResultUrl=null, cutoutSourceFile=null;
@@ -530,6 +538,31 @@ function resetCutoutPreview(){
 let activeReviewRunId = null;
 let activeReviewApproved = false;
 const $ = id => document.getElementById(id);
+function reviewDraftSession(context,variant,reviewer,containerId,attribute,prefix){
+  const container=$(containerId);
+  const rows=()=>[...container.querySelectorAll('['+attribute+']')]
+    .filter(row=>context.fields_to_review.includes(row.getAttribute(attribute)));
+  return new window.ReviewDraftAutosave({
+    context,container,
+    url:'/api/posters/'+context.poster_id+'/versions/'+context.version+'/review-draft?'+
+      new URLSearchParams({variant,reviewer}),
+    status:$(prefix+'DraftStatus'),saveButton:$('save'+(prefix==='human'?'Human':'Native')+'Draft'),
+    reloadButton:$('reload'+(prefix==='human'?'Human':'Native')+'Draft'),errorText,
+    read:()=>Object.fromEntries(rows().map(row=>[row.getAttribute(attribute),{
+      judgment:row.querySelector('[data-judgment]').value,
+      reason:row.querySelector('[data-reason]').value,
+    }])),
+    apply:fields=>{
+      for(const row of rows()){
+        const name=row.getAttribute(attribute);
+        const saved=fields[name]||context.existing_review?.fields?.[name]||{};
+        row.querySelector('[data-judgment]').value=
+          ['correct','defective','unsure'].includes(saved.judgment)?saved.judgment:'';
+        row.querySelector('[data-reason]').value=typeof saved.reason==='string'?saved.reason.slice(0,300):'';
+      }
+    },
+  });
+}
 const workspaceNames=['create','batch','review','history'];
 function showWorkspace(name,{focus=false}={}){
   if(!workspaceNames.includes(name))name='create';
@@ -1355,6 +1388,8 @@ $('loadReviewQueue').addEventListener('click',async()=>{
   finally{button.disabled=false;}
 });
 let nativeReviewContext=null;
+let nativeDraftSession=null;
+let nativeReviewRequest=0;
 const NATIVE_VISUAL_LABELS={
   sku_integrity:'商品完整/无遮挡',text_legibility:'整体文字可读性',composition:'画面构图与层次',
   title:'主标题',price:'活动价',cta:'CTA',subtitle:'副标题',original_price:'原价'
@@ -1375,6 +1410,8 @@ function nativeReviewExportUrl(){
     : 'poster-native-4x5-labels.csv';
 }
 async function loadNativeReviewContext(){
+  const request=++nativeReviewRequest;
+  nativeDraftSession?.close();nativeDraftSession=null;
   nativeReviewContext=null;
   $('saveNativeReview').disabled=true;
   $('nativeReviewFields').replaceChildren();
@@ -1392,7 +1429,7 @@ async function loadNativeReviewContext(){
     const response=await fetch(url);
     const info=await response.json();
     if(!response.ok)throw Error(errorText(info));
-    if(!current || current.poster_id!==posterId || current.version!==version ||
+    if(request!==nativeReviewRequest || !current || current.poster_id!==posterId || current.version!==version ||
        $('channelPreset').value!==variant || reviewer!==$('nativeReviewer').value.trim())return;
     nativeReviewContext=info;
     for(const key of info.fields_to_review){
@@ -1416,7 +1453,10 @@ async function loadNativeReviewContext(){
     $('nativeReviewStatus').textContent='v'+version+' · '+
       (variant==='feed_4x5_native_product_focus'?'商品主体优先':'经典分栏')+' · '+
       info.review_count+' 条人工审核记录（'+info.distinct_reviewers+' 位代号）；不自动放行';
-    $('saveNativeReview').disabled=false;
+    const draft=reviewDraftSession(info,variant,reviewer,'nativeReviewFields','data-native-field','native');
+    nativeDraftSession=draft;
+    const ready=await draft.start();
+    if(request===nativeReviewRequest&&nativeDraftSession===draft)$('saveNativeReview').disabled=!ready;
   }catch(e){$('nativeReviewStatus').textContent='无法读取 4:5 审核上下文：'+e.message;}
 }
 $('nativeReviewer').addEventListener('change',()=>{
@@ -1428,6 +1468,8 @@ $('saveNativeReview').addEventListener('click',async()=>{
   if(!current || !nativeReviewContext ||
      !['feed_4x5_native','feed_4x5_native_product_focus'].includes(variant))return;
   const posterId=current.poster_id,version=current.version;
+  const context=nativeReviewContext,draft=nativeDraftSession;
+  const reviewer=$('nativeReviewer').value.trim();
   const fields={};
   for(const row of $('nativeReviewFields').querySelectorAll('[data-native-field]')){
     const key=row.dataset.nativeField;
@@ -1435,29 +1477,34 @@ $('saveNativeReview').addEventListener('click',async()=>{
     if(!judgment){$('nativeReviewStatus').textContent='请审核所有显示的字段：'+(NATIVE_VISUAL_LABELS[key]||key);return;}
     fields[key]={judgment,reason:row.querySelector('[data-reason]').value.trim()};
   }
+  if(draft&&!await draft.beginSubmit())return;
+  if(nativeReviewContext!==context||nativeDraftSession!==draft)return;
   $('saveNativeReview').disabled=true;
   try{
     const response=await fetch(nativeHumanUrl(posterId,version,variant),{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        reviewer:$('nativeReviewer').value.trim(),fields,
-        image_sha256:nativeReviewContext.image_sha256,
-        source_image_sha256:nativeReviewContext.source_image_sha256,
-        spec_sha256:nativeReviewContext.spec_sha256,
-        asset_sha256:nativeReviewContext.asset_sha256
+        reviewer,fields,
+        image_sha256:context.image_sha256,
+        source_image_sha256:context.source_image_sha256,
+        spec_sha256:context.spec_sha256,
+        asset_sha256:context.asset_sha256
       })
     });
     const result=await response.json();
     if(!response.ok)throw Error(errorText(result));
     if(current?.poster_id===posterId&&current?.version===version&&
        $('channelPreset').value===variant){
-      $('nativeReviewStatus').textContent='已保存 '+(variant==='feed_4x5_native_product_focus'?'商品主体优先':'经典分栏')+' 4:5 审核 '+result.review_id+'；后续更正会新增记录';
+      draft?.close();
+      await loadNativeReviewContext();
+      $('nativeReviewStatus').textContent='已提交 '+(variant==='feed_4x5_native_product_focus'?'商品主体优先':'经典分栏')+' 4:5 审核 '+result.review_id+'；后续更正会新增记录';
       $('nativeReviewStatus').className='tip good';
     }
   }catch(e){
     $('nativeReviewStatus').textContent='4:5 审核失败：'+e.message;
     $('nativeReviewStatus').className='tip bad';
   }finally{
+    draft?.controls(false);
     if(current?.poster_id===posterId&&current?.version===version&&
        $('channelPreset').value===variant&&nativeReviewContext)
       $('saveNativeReview').disabled=false;
@@ -1740,6 +1787,8 @@ $('runGate').addEventListener('click', async () => {
 });
 
 let humanContext=null;
+let humanDraftSession=null;
+let humanReviewRequest=0;
 const humanLabels=[...document.querySelectorAll('[data-human-field]')];
 $('humanReviewer').value=localStorage.getItem('poster-human-reviewer')||'local-operator';
 function annotationUrl(){
@@ -1784,6 +1833,8 @@ refreshCliBatchJournal();
 
 async function loadHumanContext(){
   if(!current)return;
+  const request=++humanReviewRequest;
+  humanDraftSession?.close();humanDraftSession=null;
   humanContext=null;
   $('saveHuman').disabled=true;
   const posterId=current.poster_id,version=current.version;
@@ -1799,7 +1850,8 @@ async function loadHumanContext(){
     const response=await fetch(annotationUrl()+'?reviewer='+encodeURIComponent(reviewer));
     const info=await response.json();
     if(!response.ok)throw Error(errorText(info));
-    if(!current||current.poster_id!==posterId||current.version!==version)return;
+    if(request!==humanReviewRequest || !current||current.poster_id!==posterId||current.version!==version ||
+       reviewer!==$('humanReviewer').value.trim())return;
     humanContext=info;
     humanLabels.forEach(row=>{
       const name=row.dataset.humanField;
@@ -1811,7 +1863,10 @@ async function loadHumanContext(){
       }
     });
     $('humanStatus').textContent='v'+version+' · 已有 '+info.review_count+' 条审阅记录（含历史更正）';
-    $('saveHuman').disabled=false;
+    const draft=reviewDraftSession(info,'square',reviewer,'humanFields','data-human-field','human');
+    humanDraftSession=draft;
+    const ready=await draft.start();
+    if(request===humanReviewRequest&&humanDraftSession===draft)$('saveHuman').disabled=!ready;
   }catch(err){$('humanStatus').textContent='无法载入标注上下文：'+err.message;}
 }
 $('humanReviewer').addEventListener('change',()=>{
@@ -1826,6 +1881,7 @@ $('humanReviewer').addEventListener('change',()=>{
 });
 $('saveHuman').addEventListener('click',async()=>{
   if(!humanContext||!current)return;
+  const context=humanContext,draft=humanDraftSession;
   const reviewer=$('humanReviewer').value.trim();
   if(!/^[a-zA-Z0-9_-]{2,40}$/.test(reviewer)){ $('humanStatus').textContent='审核员代号无效'; return;}
   const fields={};
@@ -1837,24 +1893,30 @@ $('saveHuman').addEventListener('click',async()=>{
     fields[name]={judgment,reason:row.querySelector('[data-reason]').value};
   }
   const posterId=current.poster_id,version=current.version;
+  const url=annotationUrl();
+  if(draft&&!await draft.beginSubmit())return;
+  if(humanContext!==context||humanDraftSession!==draft)return;
   $('saveHuman').disabled=true;
   $('humanStatus').textContent='正在保存附带图片 SHA-256 的人工标签…';
   try{
-    const response=await fetch(annotationUrl(),{
+    const response=await fetch(url,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({reviewer,image_sha256:humanContext.image_sha256,
-        spec_sha256:humanContext.spec_sha256,fields})
+      body:JSON.stringify({reviewer,image_sha256:context.image_sha256,
+        spec_sha256:context.spec_sha256,fields})
     });
     const item=await response.json();
     if(!response.ok)throw Error(errorText(item));
     if(current?.poster_id===posterId&&current?.version===version){
-      $('humanStatus').textContent='已保存不可变标注：'+item.review_id+'。如需更正，可再次提交，历史保留。';
+      draft?.close();
+      await loadHumanContext();
+      $('humanStatus').textContent='已提交不可变标注：'+item.review_id+'。如需更正，可再次提交，历史保留。';
       $('humanStatus').className='tip good';
     }
   }catch(err){
     $('humanStatus').textContent='保存失败：'+err.message;
     $('humanStatus').className='tip bad';
   }finally{
+    draft?.controls(false);
     if(current?.poster_id===posterId&&current?.version===version)
       $('saveHuman').disabled=false;
   }

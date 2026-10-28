@@ -15,6 +15,7 @@
 | 公开仓库与开源发布准备（M5k） | [open-source-release.md](open-source-release.md) | Apache-2.0 已选定；源码/素材授权与历史审查仍待完成 |
 | GitHub Actions 节省额度 | [ci-budget.md](ci-budget.md) | PR Ready 一次 quick；full 与真实 OCR 手动触发 |
 | 人工标注和标签导出 | [m3c-human-review.md](m3c-human-review.md) | PNG 逐版审核、人工标注、导出 CSV |
+| 审核草稿自动保存与恢复 | [review-progress.md](review-progress.md) | 方形及两种原生 4:5 的部分进度、本机持久化、多页面冲突与断网备份 |
 | Mac / Linux 单图 OCR 诊断 | [m3d-ocr-runtime.md](m3d-ocr-runtime.md) | 本地 OCR 环境、诊断与结果证据 |
 | 价格区域校验 | [m3e-ocr-price-position.md](m3e-ocr-price-position.md) | 1024×1024 固定模板的启发式区域验证 |
 | OCR 识别框叠加 | [m3f-ocr-visual-diagnostics.md](m3f-ocr-visual-diagnostics.md) | 图像证据可视化与导出 |

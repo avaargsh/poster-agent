@@ -46,6 +46,7 @@ from .m6_package_download_routes import router as m6_package_download_router
 from .m6_cutout_review_routes import router as m6_cutout_review_router
 from .m6_overlay_routes import router as m6_overlay_router
 from .m6_review_sidecar_routes import router as m6_review_sidecar_router
+from .review_draft_routes import router as review_draft_router
 from .m6_ocr_capture_routes import router as m6_ocr_capture_router
 
 load_dotenv()
@@ -190,6 +191,7 @@ app.include_router(m6_package_download_router)
 app.include_router(m6_cutout_review_router)
 app.include_router(m6_overlay_router)
 app.include_router(m6_review_sidecar_router)
+app.include_router(review_draft_router)
 app.include_router(m6_ocr_capture_router)
 MAX_UPLOAD = 10 * 1024 * 1024
 # These limits apply to the *decoded* image, not the compressed upload size.
