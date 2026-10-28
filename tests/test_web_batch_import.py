@@ -1807,3 +1807,140 @@ def test_m6_zip_rejects_tampered_additive_cutout_evidence(tmp_path, monkeypatch)
     assert client.get(endpoint).status_code == 409
     path.write_bytes(original)
     assert client.get(endpoint).status_code == 200
+
+
+
+def _upload_cutout_review_batch(monkeypatch, tmp_path):
+    """Create one real transparent SKU with source-preserved batch evidence."""
+    from PIL import ImageDraw
+    monkeypatch.setenv("POSTER_BATCH_DIR", str(tmp_path / "batch-root"))
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
+    src = Image.new("RGBA", (160, 190), (238, 238, 238, 255))
+    result = Image.new("RGBA", (160, 190), (0, 0, 0, 0))
+    ImageDraw.Draw(src).rectangle((30, 20, 120, 170), fill=(50, 110, 200, 255))
+    ImageDraw.Draw(result).rectangle((30, 20, 120, 170), fill=(50, 110, 200, 255))
+    def png(image):
+        stream=io.BytesIO()
+        image.save(stream, format="PNG")
+        return stream.getvalue()
+    columns=["sku_id","product_image","product_cutout_image","title","price"]
+    buffer=io.StringIO(newline="")
+    writer=csv.DictWriter(buffer,fieldnames=columns)
+    writer.writeheader()
+    writer.writerow({"sku_id":"sku-cutout", "product_image":"original.png",
+                     "product_cutout_image":"cutout.png",
+                     "title":"透明主体审核", "price":"299"})
+    uploaded=client.post("/api/batches",files=[
+        ("manifest",("sku.csv",buffer.getvalue().encode(),"text/csv")),
+        ("images",("original.png",png(src),"image/png")),
+        ("images",("cutout.png",png(result),"image/png")),
+    ])
+    assert uploaded.status_code==201,uploaded.text
+    batch_id=uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code==202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code==201
+    return batch_id,tmp_path/"batch-root"/batch_id/"m6_review_package"
+
+
+def test_web_cutout_review_saves_human_labels_with_cas_and_immutable_evidence(
+    tmp_path, monkeypatch,
+):
+    import hashlib
+    from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
+    batch, package = _upload_cutout_review_batch(monkeypatch,tmp_path)
+    endpoint=f"/api/batches/{batch}/m6-cutout-review"
+    opened=client.get(endpoint)
+    assert opened.status_code==200,opened.text
+    snapshot=opened.json()
+    assert len(snapshot["rows"])==1
+    row=snapshot["rows"][0]
+    assert row["quality_state"]=="REVIEW_REQUIRED"
+    assert row["human_accept"]=="UNVERIFIED"
+    assert row["model_runtime_attested"]=="NO"
+    image=client.get(endpoint+"/sku-cutout/comparison")
+    assert image.status_code==200
+    assert image.headers["content-type"]=="image/png"
+    assert hashlib.sha256(image.content).hexdigest()==row["comparison_image_sha256"]
+    frozen=(package/"m6_cutout_evidence.json").read_bytes()
+    original_png=(package/row["comparison_image_path"]).read_bytes()
+    original_csv=(package/"m6_cutout_reviews.csv").read_bytes()
+    payload={
+        "expected_csv_sha256":snapshot["csv_sha256"],"sku_id":"sku-cutout",
+        "subject_integrity_review":"PASS","edge_artifact_review":"PASS",
+        "brand_mark_review":"PASS","human_accept":"PASS",
+        "reviewer_alias":"operator-a","reviewer_notes":"人工检查三项均通过",
+    }
+    saved=client.post(endpoint,json=payload)
+    assert saved.status_code==200,saved.text
+    assert saved.json()["status"]=="OPERATOR_ASSERTED_NOT_ATTESTED"
+    assert saved.json()["model_runtime_attested"] is False
+    assert saved.json()["csv_sha256"]!=snapshot["csv_sha256"]
+    assert client.post(endpoint,json=payload).status_code==409
+    assert (package/"m6_cutout_evidence.json").read_bytes()==frozen
+    assert (package/row["comparison_image_path"]).read_bytes()==original_png
+    from app.m6_cutout_review_routes import _HISTORY_DIR
+    history=package/_HISTORY_DIR
+    assert (history/(snapshot["csv_sha256"]+".csv")).read_bytes()==original_csv
+    verified=verify_cutout_evidence(
+        package,package.parent/"batch_import_results.json",min_skus=1)
+    assert verified["operator_accepted_count"]==1
+    assert client.get(f"/api/batches/{batch}/m6-package/download").status_code==200
+
+
+def test_web_cutout_review_rejects_inconsistent_labels_and_preserves_csv(
+    tmp_path, monkeypatch,
+):
+    batch, package = _upload_cutout_review_batch(monkeypatch,tmp_path)
+    endpoint=f"/api/batches/{batch}/m6-cutout-review"
+    starting=(package/"m6_cutout_reviews.csv").read_bytes()
+    base={
+        "expected_csv_sha256":client.get(endpoint).json()["csv_sha256"],
+        "sku_id":"sku-cutout","subject_integrity_review":"FAIL",
+        "edge_artifact_review":"PASS","brand_mark_review":"PASS",
+        "human_accept":"PASS","reviewer_alias":"r","reviewer_notes":"问题",
+    }
+    assert client.post(endpoint,json=base).status_code==422
+    assert client.post(endpoint,json={**base,"human_accept":"FAIL",
+                                      "reviewer_notes":""}).status_code==422
+    assert client.post(endpoint,json={**base,"sku_id":"../secret",
+                                      "human_accept":"FAIL"}).status_code in (404,422)
+    assert (package/"m6_cutout_reviews.csv").read_bytes()==starting
+    fail={**base,"human_accept":"FAIL","reviewer_notes":"主体被裁切"}
+    resp=client.post(endpoint,json=fail)
+    assert resp.status_code==200,resp.text
+    assert resp.json()["status"]=="OPERATOR_REJECTED"
+    assert resp.json()["operator_rejected_count"]==1
+
+
+def test_web_cutout_review_blocks_tampered_evidence_without_mutation(
+    tmp_path, monkeypatch,
+):
+    batch, package=_upload_cutout_review_batch(monkeypatch,tmp_path)
+    endpoint=f"/api/batches/{batch}/m6-cutout-review"
+    snapshot=client.get(endpoint).json()
+    img=package/"images"/"sku-cutout-cutout-comparison.png"
+    img.write_bytes(b"tampered")
+    payload={
+        "expected_csv_sha256":snapshot["csv_sha256"],"sku_id":"sku-cutout",
+        "subject_integrity_review":"PASS","edge_artifact_review":"PASS",
+        "brand_mark_review":"PASS","human_accept":"PASS",
+        "reviewer_alias":"r","reviewer_notes":"confirmed",
+    }
+    saved=(package/"m6_cutout_reviews.csv").read_bytes()
+    assert client.get(endpoint).status_code==409
+    assert client.post(endpoint,json=payload).status_code==409
+    assert client.get(endpoint+"/sku-cutout/comparison").status_code==409
+    assert (package/"m6_cutout_reviews.csv").read_bytes()==saved
+
+
+def test_cutout_review_ui_has_separate_sku_panel_and_frozen_evidence_controls():
+    html=client.get("/").text
+    for marker in (
+        'id="openM6CutoutReview"', 'id="m6CutoutReviewPanel"',
+        'id="m6CutoutSku"', 'id="m6CutoutComparison"',
+        'id="m6CutoutReviewer"', 'id="m6CutoutDecision"',
+        'id="m6CutoutSave"',
+    ):
+        assert marker in html
+    assert "/m6-cutout-review" in html
