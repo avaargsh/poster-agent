@@ -14,6 +14,7 @@ import warnings
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Request, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -59,6 +60,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"),
+          name="static")
 
 
 def _is_loopback_peer(host: str | None) -> bool:
