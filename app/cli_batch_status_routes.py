@@ -1,4 +1,5 @@
 """Read-only status for the default CLI M5g batch journal."""
+
 from __future__ import annotations
 
 import json
@@ -11,8 +12,7 @@ from fastapi import APIRouter, HTTPException
 router = APIRouter(prefix="/api/cli-batches", tags=["cli-batch-status"])
 
 JOURNAL_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "data/eval_runs/m5g_import/batch_import_results.json"
+    Path(__file__).resolve().parents[1] / "data/eval_runs/m5g_import/batch_import_results.json"
 )
 _SKU_ID = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -40,8 +40,7 @@ def _parse_journal(state: Any) -> dict[str, Any]:
         or type(state.get("completed")) is not bool
         or not isinstance(expected_ids, list)
         or not 1 <= len(expected_ids) <= 100
-        or any(not isinstance(sku, str) or not _SKU_ID.fullmatch(sku)
-               for sku in expected_ids)
+        or any(not isinstance(sku, str) or not _SKU_ID.fullmatch(sku) for sku in expected_ids)
         or len(set(expected_ids)) != len(expected_ids)
         or type(expected_count) is not int
         or expected_count != len(expected_ids)
@@ -64,8 +63,7 @@ def _parse_journal(state: Any) -> dict[str, Any]:
             raise _invalid_journal()
 
     summaries = [
-        {"sku_id": sku, "status": "COMPLETED" if sku in rows else "PENDING"}
-        for sku in expected_ids
+        {"sku_id": sku, "status": "COMPLETED" if sku in rows else "PENDING"} for sku in expected_ids
     ]
     completed_count = sum(item["status"] == "COMPLETED" for item in summaries)
     complete = state["completed"] is True and completed_count == expected_count

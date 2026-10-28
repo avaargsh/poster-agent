@@ -3,6 +3,7 @@
 Templates only fill absent style/subtitle/CTA. Product facts remain authoritative.
 This endpoint has no filesystem, model, staging or paid side effects.
 """
+
 from __future__ import annotations
 
 import csv
@@ -19,7 +20,9 @@ router = APIRouter(prefix="/api/campaign-presets", tags=["campaign-presets"])
 
 MAX_CSV_BYTES = 1024 * 1024
 _REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
-_OPTIONAL = frozenset({"original_price", "subtitle", "cta", "style", "logo_image", "product_cutout_image"})
+_OPTIONAL = frozenset(
+    {"original_price", "subtitle", "cta", "style", "logo_image", "product_cutout_image"}
+)
 _ALLOWED = _REQUIRED | _OPTIONAL
 _SKU = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 _FILLABLE = ("subtitle", "cta", "style")
@@ -27,16 +30,41 @@ _FILLABLE = ("subtitle", "cta", "style")
 # Reuse existing deterministic local-background styles; these are copy presets,
 # NOT configurable layout templates or AI generation instructions.
 _PRESETS = (
-    {"id": "tech", "name": "数码新品", "style": "蓝色科技风",
-     "subtitle": "新品上架 · 了解详情", "cta": "查看详情"},
-    {"id": "beauty", "name": "礼品甄选", "style": "粉色浪漫",
-     "subtitle": "精选好物 · 用心呈现", "cta": "了解更多"},
-    {"id": "nature", "name": "自然生活", "style": "绿色自然",
-     "subtitle": "发现生活灵感", "cta": "查看商品"},
-    {"id": "flash-sale", "name": "限时活动", "style": "橙色暖阳",
-     "subtitle": "活动进行中 · 详情以页面为准", "cta": "查看活动"},
-    {"id": "fashion", "name": "创意上新", "style": "紫色梦幻",
-     "subtitle": "新意呈现 · 随心挑选", "cta": "查看新品"},
+    {
+        "id": "tech",
+        "name": "数码新品",
+        "style": "蓝色科技风",
+        "subtitle": "新品上架 · 了解详情",
+        "cta": "查看详情",
+    },
+    {
+        "id": "beauty",
+        "name": "礼品甄选",
+        "style": "粉色浪漫",
+        "subtitle": "精选好物 · 用心呈现",
+        "cta": "了解更多",
+    },
+    {
+        "id": "nature",
+        "name": "自然生活",
+        "style": "绿色自然",
+        "subtitle": "发现生活灵感",
+        "cta": "查看商品",
+    },
+    {
+        "id": "flash-sale",
+        "name": "限时活动",
+        "style": "橙色暖阳",
+        "subtitle": "活动进行中 · 详情以页面为准",
+        "cta": "查看活动",
+    },
+    {
+        "id": "fashion",
+        "name": "创意上新",
+        "style": "紫色梦幻",
+        "subtitle": "新意呈现 · 随心挑选",
+        "cta": "查看新品",
+    },
 )
 _BY_ID = {preset["id"]: preset for preset in _PRESETS}
 
@@ -71,8 +99,7 @@ def _safe_manifest(blob: bytes, template: dict) -> tuple[str, int]:
                 raise ValueError(f"第 {index} 行列数与表头不一致")
             # Export to a spreadsheet is a trust boundary. No formula-bearing
             # source text is echoed into a downloadable CSV.
-            if any(value.lstrip().startswith(("=", "+", "-", "@"))
-                   for value in row.values()):
+            if any(value.lstrip().startswith(("=", "+", "-", "@")) for value in row.values()):
                 raise ValueError(f"第 {index} 行存在潜在 CSV 公式")
             sku = row["sku_id"].strip()
             if not _SKU.fullmatch(sku) or sku in seen:
@@ -89,12 +116,17 @@ def _safe_manifest(blob: bytes, template: dict) -> tuple[str, int]:
             # Respect all operator-entered facts and validate the resulting
             # spec against the same schema used for single-poster creation.
             try:
-                PosterSpec.model_validate({
-                    "title": result["title"], "price": result["price"],
-                    "original_price": (result.get("original_price") or "").strip() or None,
-                    "subtitle": result["subtitle"], "cta": result["cta"],
-                    "style": result["style"], "background_mode": "local",
-                })
+                PosterSpec.model_validate(
+                    {
+                        "title": result["title"],
+                        "price": result["price"],
+                        "original_price": (result.get("original_price") or "").strip() or None,
+                        "subtitle": result["subtitle"],
+                        "cta": result["cta"],
+                        "style": result["style"],
+                        "background_mode": "local",
+                    }
+                )
             except ValidationError as exc:
                 raise ValueError(f"第 {index} 行价格或文案不符合海报规格") from exc
             writer.writerow(result)
@@ -113,8 +145,12 @@ async def apply_campaign_preset(
     if template is None:
         raise HTTPException(status_code=422, detail="未知的活动文案预设")
     name = manifest.filename or ""
-    if (not name.lower().endswith(".csv") or "/" in name or "\\" in name
-            or any(ord(ch) < 32 for ch in name)):
+    if (
+        not name.lower().endswith(".csv")
+        or "/" in name
+        or "\\" in name
+        or any(ord(ch) < 32 for ch in name)
+    ):
         raise HTTPException(status_code=422, detail="请提供安全命名的 CSV 文件")
     payload = await manifest.read(MAX_CSV_BYTES + 1)
     if len(payload) > MAX_CSV_BYTES:

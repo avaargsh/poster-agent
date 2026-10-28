@@ -3,6 +3,7 @@
 The API chooses all paths server-side: no caller-controlled journal/output
 paths, no OCR or paid calls, and no overwrite of prior human review work.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException

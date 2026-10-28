@@ -3,6 +3,7 @@
 These tests construct tiny PNG headers that declare huge dimensions so CI
 never needs to allocate or decompress a 25-million-pixel image.
 """
+
 from __future__ import annotations
 
 import io
@@ -12,8 +13,8 @@ import zlib
 from fastapi.testclient import TestClient
 from PIL import Image, PngImagePlugin
 
-from app.main import MAX_DECODED_PIXELS, MAX_IMAGE_EDGE, MAX_UPLOAD, app
 from app import storage
+from app.main import MAX_DECODED_PIXELS, MAX_IMAGE_EDGE, MAX_UPLOAD, app
 
 client = TestClient(app)
 INPUT = {"title": "电动牙刷", "price": "199", "background_mode": "local"}
@@ -47,15 +48,19 @@ def _create(files, *, data=None, headers=None):
 
 
 def test_rejects_decompression_bomb_before_ever_invoking_paid_api(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
     # A 5000x5000 image is only a few hundred bytes here. It exceeds the
     # decoded-pixel limit and can otherwise allocate ~100MB+ when decompressed.
     massive = _fake_png_dimensions(product_bytes, 5000, 5000)
     assert len(massive) < MAX_UPLOAD
+
     async def forbid(_style):
         raise AssertionError("Must reject invalid source BEFORE any paid API call")
+
     monkeypatch.setattr("app.main.generate_ai_background", forbid)
     response = _create(
         {"product": ("bomb.png", massive, "image/png")},
@@ -67,7 +72,9 @@ def test_rejects_decompression_bomb_before_ever_invoking_paid_api(
 
 
 def test_rejects_oversized_edge_even_when_total_pixels_are_safe(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
     raw = _fake_png_dimensions(product_bytes, MAX_IMAGE_EDGE + 1, 800)
@@ -78,39 +85,45 @@ def test_rejects_oversized_edge_even_when_total_pixels_are_safe(
 
 
 def test_logo_has_same_pre_decode_protection(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
     huge_logo = _fake_png_dimensions(product_bytes, 5000, 5000)
-    response = _create({
-        "product": ("sku.png", product_bytes, "image/png"),
-        "logo": ("logo.png", huge_logo, "image/png"),
-    })
+    response = _create(
+        {
+            "product": ("sku.png", product_bytes, "image/png"),
+            "logo": ("logo.png", huge_logo, "image/png"),
+        }
+    )
     assert response.status_code == 413
     assert not list(tmp_path.iterdir())
 
 
 def test_retains_original_10mb_compressed_input_cap(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
-    response = _create({
-        "product": ("too-large.png", b"x" * (MAX_UPLOAD + 1), "image/png")
-    })
+    response = _create({"product": ("too-large.png", b"x" * (MAX_UPLOAD + 1), "image/png")})
     assert response.status_code == 413
     assert not list(tmp_path.iterdir())
 
 
 def test_product_and_logo_text_metadata_removed_before_disk_storage(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
     raw = _png_with_metadata()
     assert b"private-customer-identifier-M5a" in raw
-    response = _create({
-        "product": ("private.png", raw, "image/png"),
-        "logo": ("private-logo.png", raw, "image/png"),
-    })
+    response = _create(
+        {
+            "product": ("private.png", raw, "image/png"),
+            "logo": ("private-logo.png", raw, "image/png"),
+        }
+    )
     assert response.status_code == 201, response.text
     path = storage.poster_dir(response.json()["poster_id"])
     for name in ("product", "logo"):
@@ -130,9 +143,7 @@ def test_exif_orientation_is_applied_then_removed(tmp_path, monkeypatch):
     image = Image.new("RGB", (100, 70), (200, 130, 60))
     stream = io.BytesIO()
     image.save(stream, format="JPEG", exif=exif)
-    response = _create({
-        "product": ("camera.jpg", stream.getvalue(), "image/jpeg")
-    })
+    response = _create({"product": ("camera.jpg", stream.getvalue(), "image/jpeg")})
     assert response.status_code == 201, response.text
     stored = storage.poster_dir(response.json()["poster_id"]) / "assets" / "product.png"
     with Image.open(stored) as product:

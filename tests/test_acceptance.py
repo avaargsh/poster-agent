@@ -1,4 +1,5 @@
 """M3a Acceptance Gate: per-version persisted reports, never fake OCR results."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -13,9 +14,17 @@ def _create(tmp_path, monkeypatch, product_bytes, with_logo=True, title="电动�
     files = {"product": ("product.png", product_bytes, "image/png")}
     if with_logo:
         files["logo"] = ("logo.png", product_bytes, "image/png")
-    response = client.post("/api/posters", files=files,
-        data={"title": title, "price": "199", "original_price": "399",
-              "cta": "立即抢购", "subtitle": "品质生活 · 限时优惠"})
+    response = client.post(
+        "/api/posters",
+        files=files,
+        data={
+            "title": title,
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即抢购",
+            "subtitle": "品质生活 · 限时优惠",
+        },
+    )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
 
@@ -45,26 +54,31 @@ def test_no_ocr_never_claims_visual_text_pass(tmp_path, monkeypatch, product_byt
     assert len(result["image_sha256"]) == 64
 
 
-def test_mocked_ocr_and_brand_rules_can_pass_checks_but_still_need_review(tmp_path, monkeypatch, product_bytes):
+def test_mocked_ocr_and_brand_rules_can_pass_checks_but_still_need_review(
+    tmp_path, monkeypatch, product_bytes
+):
     policy = tmp_path / "brand-rules.json"
     policy.write_text('{"forbidden_terms":["国家级","保证治愈"]}', encoding="utf-8")
     monkeypatch.setenv("POSTER_BRAND_RULES_FILE", str(policy))
     poster_id = _create(tmp_path, monkeypatch, product_bytes)
+
     def fake_ocr(image_path):
         assert image_path.is_file()
         return [
-            {"text": "电动牙刷促销", "score": .98, "bbox": [80, 274, 435, 336]},
-            {"text": "¥199", "score": .98, "bbox": [68, 679, 297, 763]},
-            {"text": "原价 ¥399", "score": .98, "bbox": [77, 801, 336, 839]},
-            {"text": "立即抢购", "score": .98, "bbox": [91, 880, 374, 923]},
-            {"text": "品质生活 · 限时优惠", "score": .98, "bbox": [80, 382, 423, 413]},
+            {"text": "电动牙刷促销", "score": 0.98, "bbox": [80, 274, 435, 336]},
+            {"text": "¥199", "score": 0.98, "bbox": [68, 679, 297, 763]},
+            {"text": "原价 ¥399", "score": 0.98, "bbox": [77, 801, 336, 839]},
+            {"text": "立即抢购", "score": 0.98, "bbox": [91, 880, 374, 923]},
+            {"text": "品质生活 · 限时优惠", "score": 0.98, "bbox": [80, 382, 423, 413]},
         ]
+
     monkeypatch.setattr("app.acceptance.recognize", fake_ocr)
     result = client.post(_url(poster_id), json={"ocr_mode": "paddle"}).json()
     assert result["ocr_status"] == "OK"
     assert result["auto_checks"] == "PASS"
-    assert any(c["name"] == "ocr_price_position" and c["status"] == "PASS"
-               for c in result["checks"])
+    assert any(
+        c["name"] == "ocr_price_position" and c["status"] == "PASS" for c in result["checks"]
+    )
     assert result["verdict"] == "REVIEW_REQUIRED"
     assert all(check["status"] == "PASS" for check in result["checks"])
     assert client.get(_url(poster_id) + "?ocr_mode=paddle").status_code == 200
@@ -75,11 +89,16 @@ def test_ocr_wrong_price_blocks_and_can_be_reviewed(tmp_path, monkeypatch, produ
     policy.write_text('{"forbidden_terms":[]}', encoding="utf-8")
     monkeypatch.setenv("POSTER_BRAND_RULES_FILE", str(policy))
     poster_id = _create(tmp_path, monkeypatch, product_bytes)
-    monkeypatch.setattr("app.acceptance.recognize", lambda path: [
-        {"text": "电动牙刷促销", "score": .9}, {"text": "¥189", "score": .9},
-        {"text": "¥399", "score": .9}, {"text": "立即抢购", "score": .9},
-        {"text": "品质生活·限时优惠", "score": .9},
-    ])
+    monkeypatch.setattr(
+        "app.acceptance.recognize",
+        lambda path: [
+            {"text": "电动牙刷促销", "score": 0.9},
+            {"text": "¥189", "score": 0.9},
+            {"text": "¥399", "score": 0.9},
+            {"text": "立即抢购", "score": 0.9},
+            {"text": "品质生活·限时优惠", "score": 0.9},
+        ],
+    )
     report = client.post(_url(poster_id), json={"ocr_mode": "paddle"}).json()
     assert report["auto_checks"] == "FAIL"
     assert report["verdict"] == "BLOCKED"
@@ -90,15 +109,21 @@ def test_ocr_wrong_price_blocks_and_can_be_reviewed(tmp_path, monkeypatch, produ
 
 def test_unavailable_ocr_and_absent_logo_are_unverified(tmp_path, monkeypatch, product_bytes):
     from app.ocr_provider import OCRUnavailable
+
     monkeypatch.delenv("POSTER_BRAND_RULES_FILE", raising=False)
     poster_id = _create(tmp_path, monkeypatch, product_bytes, with_logo=False)
+
     def unavailable(_):
         raise OCRUnavailable("PaddleOCR not installed")
+
     monkeypatch.setattr("app.acceptance.recognize", unavailable)
     report = client.post(_url(poster_id), json={"ocr_mode": "paddle"}).json()
     assert report["ocr_status"] == "UNAVAILABLE"
     assert report["auto_checks"] == "INCOMPLETE"
-    assert next(c for c in report["checks"] if c["name"] == "logo_asset_present")["status"] == "UNVERIFIED"
+    assert (
+        next(c for c in report["checks"] if c["name"] == "logo_asset_present")["status"]
+        == "UNVERIFIED"
+    )
     assert next(c for c in report["checks"] if c["name"] == "ocr_price")["status"] == "UNVERIFIED"
 
 
@@ -113,7 +138,9 @@ def test_forbidden_terms_blocks_spec(tmp_path, monkeypatch, product_bytes):
     assert c["evidence"]["violations"] == ["顶级"]
 
 
-def test_reports_are_version_specific_and_invalid_inputs_rejected(tmp_path, monkeypatch, product_bytes):
+def test_reports_are_version_specific_and_invalid_inputs_rejected(
+    tmp_path, monkeypatch, product_bytes
+):
     monkeypatch.delenv("POSTER_BRAND_RULES_FILE", raising=False)
     poster_id = _create(tmp_path, monkeypatch, product_bytes)
     assert client.get(_url(poster_id)).status_code == 404
@@ -132,6 +159,7 @@ def test_reports_are_version_specific_and_invalid_inputs_rejected(tmp_path, monk
 
 def test_ocr_price_cannot_match_longer_price():
     from app.acceptance import _has_text
+
     assert not _has_text(["活动价¥1990"], "¥199")
     assert _has_text(["活动价¥199"], "¥199")
     assert _has_text(["活动价￥199"], "¥199")

@@ -4,17 +4,18 @@ The only supported model is the local u2netp ONNX file. The CLI is an opt-in
 operator-installed dependency; no implicit model download is initiated by
 Poster Agent. The rembg CLI performs the inference in a bounded child process.
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
 import os
 import re
-import threading
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
+from pathlib import Path
 
 from PIL import Image
 
@@ -67,8 +68,7 @@ def local_model_identity() -> dict[str, str]:
         raise CutoutUnavailable("请先设置 POSTER_CUTOUT_REMBG_HOME 并预装 u2netp 模型")
     home = Path(home_raw).expanduser().resolve()
     model = home / "models" / "u2netp" / "u2netp.onnx"
-    if (not model.is_file() or model.is_symlink()
-            or model.stat().st_size == 0):
+    if not model.is_file() or model.is_symlink() or model.stat().st_size == 0:
         raise CutoutUnavailable("找不到预装的 u2netp.onnx 本地模型，已停止抠图")
     expected_sha = os.getenv("POSTER_CUTOUT_MODEL_SHA256", "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
@@ -120,12 +120,12 @@ def _execute_preview(original: Image.Image, home: Path, executable: str) -> byte
             "http_proxy": "http://127.0.0.1:9",
             "https_proxy": "http://127.0.0.1:9",
             "all_proxy": "http://127.0.0.1:9",
-            "NO_PROXY": "", "no_proxy": "",
+            "NO_PROXY": "",
+            "no_proxy": "",
         }
         command = [executable, "i", "-m", "u2netp", str(source), str(target)]
         try:
-            result = subprocess.run(command, env=env, timeout=60,
-                                    capture_output=True, check=False)
+            result = subprocess.run(command, env=env, timeout=60, capture_output=True, check=False)
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise CutoutExecutionError("本地背景分离执行失败或超过 60 秒") from exc
         if result.returncode != 0 or not target.is_file():

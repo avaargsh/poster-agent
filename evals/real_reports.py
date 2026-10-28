@@ -4,6 +4,7 @@ This loader NEVER generates labels or assumes a PNG's text is correct because
 the design spec says so. The user must inspect actual exported posters and
 provide annotations separately. Stale reports are rejected by SHA-256.
 """
+
 from __future__ import annotations
 
 import csv
@@ -44,10 +45,16 @@ def load_labels(path: Path) -> list[dict]:
                 if identity in seen:
                     raise ValueError("重复的同海报版本字段")
                 seen.add(identity)
-                records.append({
-                    "poster_id": poster_id, "version": version, "field": field,
-                    "defective": answer == "true", "image_sha256": sha, "reviewer": reviewer,
-                })
+                records.append(
+                    {
+                        "poster_id": poster_id,
+                        "version": version,
+                        "field": field,
+                        "defective": answer == "true",
+                        "image_sha256": sha,
+                        "reviewer": reviewer,
+                    }
+                )
             except (ValueError, AttributeError, TypeError) as exc:
                 raise ValueError(f"标注 CSV 第 {i} 行无效，请修正数据") from exc
         if not records:
@@ -68,7 +75,9 @@ def evaluate_real_reports(annotations: Path, output_dir: Path, ocr_mode: str = "
         spec_digest = hashlib.sha256(spec.read_bytes()).hexdigest()
         if record["image_sha256"] != image_digest:
             raise ValueError(f"{poster_id} v{version}: 人工标注与当前图片 SHA-256 不一致")
-        report_file = storage.poster_dir(poster_id) / "versions" / f"v{version}.acceptance.{ocr_mode}.json"
+        report_file = (
+            storage.poster_dir(poster_id) / "versions" / f"v{version}.acceptance.{ocr_mode}.json"
+        )
         if not report_file.is_file():
             raise ValueError(f"{poster_id} v{version}: 还没有 {ocr_mode} 模式的验收报告")
         report = json.loads(report_file.read_text(encoding="utf-8"))
@@ -80,13 +89,18 @@ def evaluate_real_reports(annotations: Path, output_dir: Path, ocr_mode: str = "
         predicted = checks.get("ocr_" + field)
         if predicted not in {"PASS", "FAIL", "UNVERIFIED"}:
             raise ValueError(f"{poster_id} v{version}: 缺少必要的字段 OCR 检查 {field}")
-        rows.append({
-            "poster_id": poster_id, "version": version, "field": field,
-            "reviewer": record["reviewer"], "ground_truth_defective": record["defective"],
-            "prediction": predicted,
-            "outcome": _classification(predicted, record["defective"]),
-            "image_sha256": image_digest,
-        })
+        rows.append(
+            {
+                "poster_id": poster_id,
+                "version": version,
+                "field": field,
+                "reviewer": record["reviewer"],
+                "ground_truth_defective": record["defective"],
+                "prediction": predicted,
+                "outcome": _classification(predicted, record["defective"]),
+                "image_sha256": image_digest,
+            }
+        )
     grouped = defaultdict(list)
     for row in rows:
         grouped[row["field"]].append(row["outcome"])

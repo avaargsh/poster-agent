@@ -2,6 +2,7 @@
 
 No network calls, OCR engine or AI model is invoked in these regressions.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -22,8 +23,10 @@ def _source_png() -> bytes:
     img = Image.new("RGB", (1024, 1024), "white")
     # Distinct corner pixels make unexpected cropping detectable by comparisons.
     for xy, color in [
-        ((0, 0), (255, 0, 0)), ((1023, 0), (0, 255, 0)),
-        ((0, 1023), (0, 0, 255)), ((1023, 1023), (255, 255, 0)),
+        ((0, 0), (255, 0, 0)),
+        ((1023, 0), (0, 255, 0)),
+        ((0, 1023), (0, 0, 255)),
+        ((1023, 1023), (255, 255, 0)),
     ]:
         img.putpixel(xy, color)
     out = io.BytesIO()
@@ -49,7 +52,8 @@ def test_export_size_determinism_and_complete_poster(preset, size):
     assert x1 >= MARGIN or y1 >= MARGIN
     original = Image.open(io.BytesIO(source)).convert("RGB")
     expected = ImageOps.contain(
-        original, (size[0] - 2*MARGIN, size[1] - 2*MARGIN),
+        original,
+        (size[0] - 2 * MARGIN, size[1] - 2 * MARGIN),
         method=Image.Resampling.LANCZOS,
     )
     assert expected.size == (x2 - x1, y2 - y1)
@@ -75,18 +79,26 @@ def _create_poster(tmp_path, monkeypatch, product_bytes):
     response = client.post(
         "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷促销", "price": "199",
-              "original_price": "399", "background_mode": "local"},
+        data={
+            "title": "电动牙刷促销",
+            "price": "199",
+            "original_price": "399",
+            "background_mode": "local",
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
 
 
-def test_exports_use_saved_version_only_without_ai_or_new_version(tmp_path, monkeypatch, product_bytes):
+def test_exports_use_saved_version_only_without_ai_or_new_version(
+    tmp_path, monkeypatch, product_bytes
+):
     poster = _create_poster(tmp_path, monkeypatch, product_bytes)
     pid = poster["poster_id"]
+
     def forbidden(*args, **kwargs):
         raise AssertionError("channel derivative must not call AI")
+
     monkeypatch.setattr("app.main.generate_ai_background", forbidden)
     source_path = storage.version_path(pid, 1)
     source = source_path.read_bytes()
@@ -107,7 +119,9 @@ def test_exports_use_saved_version_only_without_ai_or_new_version(tmp_path, monk
         assert result.headers["x-export-size"] == f"{size[0]}x{size[1]}"
         assert "attachment" in result.headers["content-disposition"]
         assert Image.open(io.BytesIO(result.content)).size == size
-        assert client.get(f"/api/posters/{pid}/versions/1/exports/{preset}").content == result.content
+        assert (
+            client.get(f"/api/posters/{pid}/versions/1/exports/{preset}").content == result.content
+        )
 
     assert source_path.read_bytes() == source
     assert (storage.poster_dir(pid) / "meta.json").read_bytes() == initial_meta

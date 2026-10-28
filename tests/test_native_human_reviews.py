@@ -2,6 +2,7 @@
 
 No OCR inference is performed; checks use a real local Pillow-generated PNG.
 """
+
 from __future__ import annotations
 
 import csv
@@ -22,11 +23,18 @@ PRODUCT_FOCUS = "feed_4x5_native_product_focus"
 def _create(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     monkeypatch.delenv("POSTER_BRAND_RULES_FILE", raising=False)
-    response = client.post("/api/posters",
+    response = client.post(
+        "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷限时促销", "price": "199",
-              "original_price": "399", "subtitle": "品质生活",
-              "cta": "立即抢购", "background_mode": "local"})
+        data={
+            "title": "电动牙刷限时促销",
+            "price": "199",
+            "original_price": "399",
+            "subtitle": "品质生活",
+            "cta": "立即抢购",
+            "background_mode": "local",
+        },
+    )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
 
@@ -46,8 +54,9 @@ def _payload(info, reviewer=REVIEWER, defective=None, unsure=None):
         "asset_sha256": info["asset_sha256"],
         "fields": {
             key: {
-                "judgment": ("unsure" if key in unsure else
-                             "defective" if key in defective else "correct"),
+                "judgment": (
+                    "unsure" if key in unsure else "defective" if key in defective else "correct"
+                ),
                 "reason": "需要检查" if key in defective else "",
             }
             for key in info["fields_to_review"]
@@ -61,7 +70,9 @@ def _csv_rows(response):
 
 
 def test_context_is_specific_to_native_pixels_and_includes_visual_checks(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     native = client.get(_url(pid)).json()
@@ -73,14 +84,26 @@ def test_context_is_specific_to_native_pixels_and_includes_visual_checks(
     assert native["image_sha256"] == hashlib.sha256(image.content).hexdigest()
     assert native["image_sha256"] != square["image_sha256"]
     assert native["spec_sha256"] == square["spec_sha256"]
-    assert set(["sku_integrity", "text_legibility", "composition",
-                "title", "price", "cta", "subtitle", "original_price"]) == set(native["fields_to_review"])
+    assert set(
+        [
+            "sku_integrity",
+            "text_legibility",
+            "composition",
+            "title",
+            "price",
+            "cta",
+            "subtitle",
+            "original_price",
+        ]
+    ) == set(native["fields_to_review"])
     assert native["auto_approved"] is False
     assert native["review_count"] == 0
 
 
 def test_submit_is_append_only_and_latest_review_restores_without_consensus(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     info = client.get(_url(pid)).json()
@@ -90,8 +113,7 @@ def test_submit_is_append_only_and_latest_review_restores_without_consensus(
     second = client.post(_url(pid), json=_payload(info, defective=["composition"]))
     assert second.status_code == 201, second.text
     assert first.json()["review_id"] != second.json()["review_id"]
-    third = client.post(_url(pid), json=_payload(info, reviewer="reviewer-B",
-                                                defective=["title"]))
+    third = client.post(_url(pid), json=_payload(info, reviewer="reviewer-B", defective=["title"]))
     assert third.status_code == 201
     context = client.get(_url(pid) + "?reviewer=" + REVIEWER).json()
     assert context["review_count"] == 3
@@ -99,14 +121,17 @@ def test_submit_is_append_only_and_latest_review_restores_without_consensus(
     assert context["existing_review"]["review_id"] == second.json()["review_id"]
     assert context["existing_review"]["fields"]["composition"]["judgment"] == "defective"
     assert storage.version_path(pid, 1).read_bytes() == original_png
-    records = list((storage.poster_dir(pid) / "versions" /
-                    "v1.feed_4x5_native.human_reviews").glob("*.json"))
+    records = list(
+        (storage.poster_dir(pid) / "versions" / "v1.feed_4x5_native.human_reviews").glob("*.json")
+    )
     assert len(records) == 3
     assert not list((storage.poster_dir(pid) / "versions").glob("v1.human_reviews/*"))
 
 
 def test_native_export_has_separate_schema_from_square_csv(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     info = client.get(_url(pid)).json()
@@ -125,7 +150,9 @@ def test_native_export_has_separate_schema_from_square_csv(
 
 
 def test_missing_fields_and_nonexistent_version_rejected(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     context = client.get(_url(pid)).json()
@@ -138,7 +165,9 @@ def test_missing_fields_and_nonexistent_version_rejected(
 
 
 def test_image_or_asset_modified_after_context_is_conflict(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     ctx = client.get(_url(pid)).json()
@@ -155,11 +184,15 @@ def test_image_or_asset_modified_after_context_is_conflict(
     assert client.post(_url(pid), json=_payload(ctx)).status_code == 201
     path.write_bytes(source + b"changed")
     assert client.get(_url(pid) + "?reviewer=" + REVIEWER).status_code == 409
-    assert client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 409
+    assert (
+        client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 409
+    )
 
 
 def test_version_and_reviewer_exports_do_not_mix(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     one = client.get(_url(pid)).json()
@@ -178,20 +211,28 @@ def test_version_and_reviewer_exports_do_not_mix(
 
 
 def test_no_human_reviews_means_no_approval_and_no_empty_csv(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     context = client.get(_url(pid)).json()
     assert context["existing_review"] is None
     assert context["auto_approved"] is False
-    assert client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 422
+    assert (
+        client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 422
+    )
     unsure = _payload(context, unsure=context["fields_to_review"])
     assert client.post(_url(pid), json=unsure).status_code == 201
-    assert client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 422
+    assert (
+        client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 422
+    )
 
 
 def test_product_focus_human_reviews_are_isolated_from_classic_labels(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     focus = client.get(_url(pid, variant=PRODUCT_FOCUS)).json()
@@ -221,9 +262,9 @@ def test_product_focus_human_reviews_are_isolated_from_classic_labels(
     assert not classic_folder.exists()
 
     # Variant-specific CSV exports cannot consume one another's labels.
-    assert client.get(
-        "/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER
-    ).status_code == 422
+    assert (
+        client.get("/api/annotations/native-4x5/export.csv?reviewer=" + REVIEWER).status_code == 422
+    )
     csv_response = client.get(
         "/api/annotations/native-4x5-product-focus/export.csv?reviewer=" + REVIEWER
     )
@@ -234,7 +275,9 @@ def test_product_focus_human_reviews_are_isolated_from_classic_labels(
 
 
 def test_product_focus_labels_reject_stale_source_evidence(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     url = _url(pid, variant=PRODUCT_FOCUS)

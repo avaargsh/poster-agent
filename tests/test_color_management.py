@@ -1,4 +1,5 @@
 """M5b ICC color tests use actual Pillow/LittleCMS transforms, no AI or OCR."""
+
 from __future__ import annotations
 
 import io
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageCms
 
 from app import storage
-from app.color_management import InvalidColorProfile, MAX_ICC_BYTES, normalize_upload_color
+from app.color_management import MAX_ICC_BYTES, InvalidColorProfile, normalize_upload_color
 from app.main import app
 
 client = TestClient(app)
@@ -21,8 +22,7 @@ def _srgb() -> bytes:
 
 
 def _image_png(*, profile: bytes | None, mode: str = "RGBA") -> bytes:
-    image = Image.new(mode, (128, 96), (47, 115, 207, 180) if mode == "RGBA"
-                      else (47, 115, 207))
+    image = Image.new(mode, (128, 96), (47, 115, 207, 180) if mode == "RGBA" else (47, 115, 207))
     image.putpixel((0, 0), (230, 75, 10, 0) if mode == "RGBA" else (230, 75, 10))
     image.putpixel((64, 32), (15, 225, 90, 97) if mode == "RGBA" else (15, 225, 90))
     buf = io.BytesIO()
@@ -44,7 +44,8 @@ def _stored_image(tmp_path, monkeypatch, product: bytes, logo: bytes | None = No
 
 
 def test_tagged_srgb_and_untagged_look_the_same_after_normalization(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     tagged = _image_png(profile=_srgb())
     untagged = _image_png(profile=None)
@@ -58,20 +59,23 @@ def test_tagged_srgb_and_untagged_look_the_same_after_normalization(
     assert "exif" not in product.info
     # Source is tagged sRGB, destination is sRGB; color shifts should be
     # at most a couple of 8-bit rounding levels.
-    for (x, y) in ((0, 0), (64, 32), (127, 95)):
+    for x, y in ((0, 0), (64, 32), (127, 95)):
         p, l = product.getpixel((x, y)), logo.getpixel((x, y))
         assert p[3] == l[3]
-        assert max(abs(a-b) for a, b in zip(p[:3], l[:3])) <= 3
+        assert max(abs(a - b) for a, b in zip(p[:3], l[:3])) <= 3
     assert product.getpixel((0, 0))[3] == 0
     assert product.getpixel((64, 32))[3] == 97
 
 
 def test_invalid_icc_is_rejected_before_paid_background(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
+
     async def forbidden(_):
         raise AssertionError("Never call paid model on an invalid ICC upload")
+
     monkeypatch.setattr("app.main.generate_ai_background", forbidden)
     damaged = _image_png(profile=b"not-a-valid-icc-profile")
     response = client.post(
@@ -103,8 +107,10 @@ def test_invalid_logo_icc_rejects_entire_request(tmp_path, monkeypatch):
 
 def test_rejects_oversized_icc_without_attempting_color_transform(monkeypatch):
     image = Image.new("RGB", (128, 96), (10, 20, 30))
+
     def forbidden(*_args, **_kwargs):
         raise AssertionError("Oversize ICC must be rejected before LittleCMS")
+
     monkeypatch.setattr("app.color_management.ImageCms.profileToProfile", forbidden)
     with pytest.raises(InvalidColorProfile, match="过大"):
         normalize_upload_color(image, b"x" * (MAX_ICC_BYTES + 1))

@@ -3,8 +3,7 @@ import hashlib
 
 import pytest
 
-from scripts.import_abo_sample import _existing_sample, _synthetic_prices, _title, _category
-
+from scripts.import_abo_sample import _category, _existing_sample, _synthetic_prices, _title
 
 
 def _write_valid_existing_sample(output_dir, count=2):
@@ -20,21 +19,21 @@ def _write_valid_existing_sample(output_dir, count=2):
         image_bytes = f"fixture-image-{index}".encode()
         (image_dir / image_name).write_bytes(image_bytes)
         image_sha = hashlib.sha256(image_bytes).hexdigest()
-        rows.append({
-            "sku_id": sku,
-            "product_image": f"images/{image_name}",
-            "title": f"Product {index}",
-            "price": "19.90",
-        })
+        rows.append(
+            {
+                "sku_id": sku,
+                "product_image": f"images/{image_name}",
+                "title": f"Product {index}",
+                "price": "19.90",
+            }
+        )
         attribution_rows.append(
             f"| {item_id} | Product {index} | Home | image-{index} | {image_sha} |"
         )
 
     manifest = output_dir / "real_skus.csv"
     with manifest.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(
-            stream, fieldnames=["sku_id", "product_image", "title", "price"]
-        )
+        writer = csv.DictWriter(stream, fieldnames=["sku_id", "product_image", "title", "price"])
         writer.writeheader()
         writer.writerows(rows)
     manifest_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -43,12 +42,11 @@ def _write_valid_existing_sample(output_dir, count=2):
         "# Dataset attribution and limitations\n\n"
         f"Manifest SHA-256: `{manifest_sha}`\n\n"
         "| Item ID | Title | Category | Main image ID | Local image SHA-256 |\n"
-        "|---|---|---|---|---|\n"
-        + "\n".join(attribution_rows)
-        + "\n",
+        "|---|---|---|---|---|\n" + "\n".join(attribution_rows) + "\n",
         encoding="utf-8",
     )
     return manifest, attribution
+
 
 def test_synthetic_prices_are_stable_and_original_price_is_higher():
     assert _synthetic_prices("B075X4QMX3") == _synthetic_prices("B075X4QMX3")
@@ -56,12 +54,19 @@ def test_synthetic_prices_are_stable_and_original_price_is_higher():
     assert float(price) > 0
     assert float(original) > float(price)
 
+
 def test_titles_are_trimmed_to_poster_contract():
-    row = {"item_name": [{"language_tag": "en_US", "value": "A very long public catalog product title " * 3}]}
+    row = {
+        "item_name": [
+            {"language_tag": "en_US", "value": "A very long public catalog product title " * 3}
+        ]
+    }
     assert 1 <= len(_title(row)) <= 35
+
 
 def test_title_falls_back_to_any_language():
     assert _title({"item_name": [{"language_tag": "zh_CN", "value": "公开商品"}]}) == "公开商品"
+
 
 def test_category_fallbacks():
     assert _category({"node": [{"node_name": "Home/Furniture"}]}) == "Home/Furniture"
@@ -93,16 +98,17 @@ def test_existing_sample_rejects_empty_or_oversized_manifest(tmp_path):
         _existing_sample(tmp_path)
 
     with manifest.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(
-            stream, fieldnames=["sku_id", "product_image", "title", "price"]
-        )
+        writer = csv.DictWriter(stream, fieldnames=["sku_id", "product_image", "title", "price"])
         writer.writeheader()
-        writer.writerows({
-            "sku_id": f"ABO-item-{index}",
-            "product_image": f"images/ABO-item-{index}.jpg",
-            "title": f"Product {index}",
-            "price": "19.90",
-        } for index in range(101))
+        writer.writerows(
+            {
+                "sku_id": f"ABO-item-{index}",
+                "product_image": f"images/ABO-item-{index}.jpg",
+                "title": f"Product {index}",
+                "price": "19.90",
+            }
+            for index in range(101)
+        )
     with pytest.raises(ValueError, match="1..100"):
         _existing_sample(tmp_path)
 
@@ -129,9 +135,7 @@ def test_existing_sample_rejects_image_path_escape(tmp_path):
         rows = list(csv.DictReader(stream))
     rows[0]["product_image"] = "../../outside.jpg"
     with manifest.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(
-            stream, fieldnames=["sku_id", "product_image", "title", "price"]
-        )
+        writer = csv.DictWriter(stream, fieldnames=["sku_id", "product_image", "title", "price"])
         writer.writeheader()
         writer.writerows(rows)
     new_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -147,15 +151,22 @@ def test_existing_sample_rejects_image_path_escape(tmp_path):
     with pytest.raises(ValueError, match="missing or escapes"):
         _existing_sample(tmp_path)
 
+
 def test_import_sample_publishes_complete_cohort_atomically(tmp_path, monkeypatch):
     from scripts import import_abo_sample as importer
 
-    monkeypatch.setattr(importer, "_select", lambda limit: [{
-        "item_id": "item-1",
-        "image_id": "image-1",
-        "title": "Example product",
-        "category": "Home",
-    }])
+    monkeypatch.setattr(
+        importer,
+        "_select",
+        lambda limit: [
+            {
+                "item_id": "item-1",
+                "image_id": "image-1",
+                "title": "Example product",
+                "category": "Home",
+            }
+        ],
+    )
     monkeypatch.setattr(importer, "_paths", lambda ids: {"image-1": "example.jpg"})
 
     def fake_download(path, destination):
@@ -171,8 +182,13 @@ def test_import_sample_publishes_complete_cohort_atomically(tmp_path, monkeypatc
     assert (output / "images" / "ABO-item-1.jpg").read_bytes() == b"fixture-image"
     assert (output / "real_skus.csv").is_file()
     assert (output / "PUBLIC_DATASET_ATTRIBUTION.md").is_file()
-    assert "Manifest SHA-256: `" in (output / "PUBLIC_DATASET_ATTRIBUTION.md").read_text(encoding="utf-8")
-    assert result["manifest_sha256"] == hashlib.sha256((output / "real_skus.csv").read_bytes()).hexdigest()
+    assert "Manifest SHA-256: `" in (output / "PUBLIC_DATASET_ATTRIBUTION.md").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        result["manifest_sha256"]
+        == hashlib.sha256((output / "real_skus.csv").read_bytes()).hexdigest()
+    )
     assert result["manifest"] == str(output / "real_skus.csv")
     assert result["attribution"] == str(output / "PUBLIC_DATASET_ATTRIBUTION.md")
     assert not list(tmp_path.glob(".abo-sample-*"))
@@ -181,12 +197,18 @@ def test_import_sample_publishes_complete_cohort_atomically(tmp_path, monkeypatc
 def test_import_sample_failure_leaves_no_partial_cohort(tmp_path, monkeypatch):
     from scripts import import_abo_sample as importer
 
-    monkeypatch.setattr(importer, "_select", lambda limit: [{
-        "item_id": "item-1",
-        "image_id": "image-1",
-        "title": "Example product",
-        "category": "Home",
-    }])
+    monkeypatch.setattr(
+        importer,
+        "_select",
+        lambda limit: [
+            {
+                "item_id": "item-1",
+                "image_id": "image-1",
+                "title": "Example product",
+                "category": "Home",
+            }
+        ],
+    )
     monkeypatch.setattr(importer, "_paths", lambda ids: {"image-1": "example.jpg"})
 
     def fail_download(path, destination):
@@ -215,7 +237,6 @@ def test_import_sample_refuses_nonempty_destination_without_mutating_it(tmp_path
         import_sample(output, limit=1)
 
     assert sentinel.read_text(encoding="utf-8") == "keep"
-
 
 
 def test_existing_sample_rejects_explicit_limit_mismatch(tmp_path):

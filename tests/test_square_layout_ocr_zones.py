@@ -2,6 +2,7 @@
 
 Synthetic OCR geometry only; no live model execution or product-quality claim.
 """
+
 from __future__ import annotations
 
 import io
@@ -40,32 +41,32 @@ def test_hero_uses_independent_price_regions_and_rejects_classic_coordinates():
 def test_hero_acceptance_overlay_uses_hero_zones_not_classic(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     created = client.post(
-        "/api/posters", files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "商品上新", "price": "199", "original_price": "399",
-              "layout_id": "hero"},
+        "/api/posters",
+        files={"product": ("sku.png", product_bytes, "image/png")},
+        data={"title": "商品上新", "price": "199", "original_price": "399", "layout_id": "hero"},
     )
     assert created.status_code == 201, created.text
     pid = created.json()["poster_id"]
-    monkeypatch.setattr("app.acceptance.recognize", lambda _: [
-        _ocr("¥199", [90, 846, 290, 912]),
-        _ocr("原价 ¥399", [95, 943, 294, 977]),
-    ])
-    result = client.post(
-        f"/api/posters/{pid}/versions/1/acceptance", json={"ocr_mode": "paddle"}
+    monkeypatch.setattr(
+        "app.acceptance.recognize",
+        lambda _: [
+            _ocr("¥199", [90, 846, 290, 912]),
+            _ocr("原价 ¥399", [95, 943, 294, 977]),
+        ],
     )
+    result = client.post(f"/api/posters/{pid}/versions/1/acceptance", json={"ocr_mode": "paddle"})
     assert result.status_code == 200, result.text
     report = {c["name"]: c for c in result.json()["checks"]}
     assert report["ocr_price_position"]["status"] == "PASS"
     assert report["ocr_original_price_position"]["status"] == "PASS"
 
     saved_png = storage.version_path(pid, 1).read_bytes()
-    overlay = client.get(
-        f"/api/posters/{pid}/versions/1/acceptance/overlay?ocr_mode=paddle"
-    )
+    overlay = client.get(f"/api/posters/{pid}/versions/1/acceptance/overlay?ocr_mode=paddle")
     assert overlay.status_code == 200, overlay.text
-    with Image.open(io.BytesIO(saved_png)) as original, Image.open(
-        io.BytesIO(overlay.content)
-    ) as diagnostic:
+    with (
+        Image.open(io.BytesIO(saved_png)) as original,
+        Image.open(io.BytesIO(overlay.content)) as diagnostic,
+    ):
         assert original.size == diagnostic.size == (1024, 1024)
         # The border at (45,812) exists only on the hero price zone.
         assert diagnostic.getpixel((45, 812)) != original.getpixel((45, 812))

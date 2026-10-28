@@ -20,17 +20,18 @@ class WorkerLockUnavailable(RuntimeError):
 
 def _paths() -> list[Path]:
     ledger = Path(os.getenv("POSTER_EXECUTION_DB", "data/executions.sqlite3")).resolve()
-    checkpoints = Path(
-        os.getenv("POSTER_CHECKPOINT_DB", "data/checkpoints.sqlite3")
-    ).resolve()
+    checkpoints = Path(os.getenv("POSTER_CHECKPOINT_DB", "data/checkpoints.sqlite3")).resolve()
     posters = storage.root()
     # Any shared execution, workflow checkpoint, or poster path requires
     # exclusive ownership, even when the other settings differ.
-    return sorted({
-        ledger.with_name(f".{ledger.name}.poster-agent-worker.lock"),
-        checkpoints.with_name(f".{checkpoints.name}.poster-agent-worker.lock"),
-        posters.with_name(f".{posters.name}.poster-agent-worker.lock"),
-    }, key=str)
+    return sorted(
+        {
+            ledger.with_name(f".{ledger.name}.poster-agent-worker.lock"),
+            checkpoints.with_name(f".{checkpoints.name}.poster-agent-worker.lock"),
+            posters.with_name(f".{posters.name}.poster-agent-worker.lock"),
+        },
+        key=str,
+    )
 
 
 @contextmanager

@@ -1,4 +1,5 @@
 """M6 OCR capture verifier: synthetic JSON only, not a model attestation."""
+
 from __future__ import annotations
 
 import copy
@@ -16,22 +17,26 @@ def _fixture(tmp_path):
     observations = []
     for sku in ("sku-one", "sku-two"):
         for variant in ("square", "feed_4x5_native"):
-            rows.append({
-                "cohort_id": "m6-fixture",
-                "sku_id": sku,
-                "variant_id": variant,
-                "poster_id": "b" * 32,
-                "output_image_sha256": SHA,
-            })
-            observations.append({
-                "sku_id": sku,
-                "variant_id": variant,
-                "poster_id": "b" * 32,
-                "image_sha256": SHA,
-                "recognized_lines": [{"text": "¥99", "confidence": 0.98}],
-                "recognized_line_count": 1,
-                "status": "CAPTURED_REVIEW_REQUIRED",
-            })
+            rows.append(
+                {
+                    "cohort_id": "m6-fixture",
+                    "sku_id": sku,
+                    "variant_id": variant,
+                    "poster_id": "b" * 32,
+                    "output_image_sha256": SHA,
+                }
+            )
+            observations.append(
+                {
+                    "sku_id": sku,
+                    "variant_id": variant,
+                    "poster_id": "b" * 32,
+                    "image_sha256": SHA,
+                    "recognized_lines": [{"text": "¥99", "confidence": 0.98}],
+                    "recognized_line_count": 1,
+                    "status": "CAPTURED_REVIEW_REQUIRED",
+                }
+            )
     data = {
         "schema_version": "m6-paddle-ocr-evidence-1",
         "cohort_id": "m6-fixture",
@@ -61,7 +66,10 @@ def _fixture(tmp_path):
 
 def _verify(path, rows):
     return verify_ocr_capture(
-        path, rows, cohort_id="m6-fixture", reviews_sha256="f" * 64,
+        path,
+        rows,
+        cohort_id="m6-fixture",
+        reviews_sha256="f" * 64,
     )
 
 
@@ -76,14 +84,17 @@ def test_capture_consistency_is_not_runtime_attestation(tmp_path):
     assert len(result["evidence_sha256"]) == 64
 
 
-@pytest.mark.parametrize(("field", "value"), [
-    ("real_ocr_inference_attempted", False),
-    ("paddleocr_version", "test-double-not-real-ocr"),
-    ("automatically_accepted", True),
-    ("reviews_csv_sha256", "0" * 64),
-    ("cohort_id", "wrong-cohort"),
-    ("captured_variant_count", 3),
-])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("real_ocr_inference_attempted", False),
+        ("paddleocr_version", "test-double-not-real-ocr"),
+        ("automatically_accepted", True),
+        ("reviews_csv_sha256", "0" * 64),
+        ("cohort_id", "wrong-cohort"),
+        ("captured_variant_count", 3),
+    ],
+)
 def test_block_unverified_or_stale_capture_metadata(tmp_path, field, value):
     path, data, rows = _fixture(tmp_path)
     data[field] = value
@@ -92,15 +103,23 @@ def test_block_unverified_or_stale_capture_metadata(tmp_path, field, value):
         _verify(path, rows)
 
 
-@pytest.mark.parametrize(("mutator", "reason"), [
-    (lambda data: data["observations"].pop(), "缺少"),
-    (lambda data: data["observations"].append(copy.deepcopy(data["observations"][0])), "重复"),
-    (lambda data: data["observations"][0].update(image_sha256="0" * 64), "不一致"),
-    (lambda data: data["observations"][0].update(poster_id="0" * 32), "不一致"),
-    (lambda data: data["observations"][0].update(status="PASS"), "状态"),
-    (lambda data: data["observations"][0].update(recognized_line_count=2), "数量"),
-    (lambda data: data["observations"][0]["recognized_lines"][0].update(confidence=float("nan")), "置信度"),
-])
+@pytest.mark.parametrize(
+    ("mutator", "reason"),
+    [
+        (lambda data: data["observations"].pop(), "缺少"),
+        (lambda data: data["observations"].append(copy.deepcopy(data["observations"][0])), "重复"),
+        (lambda data: data["observations"][0].update(image_sha256="0" * 64), "不一致"),
+        (lambda data: data["observations"][0].update(poster_id="0" * 32), "不一致"),
+        (lambda data: data["observations"][0].update(status="PASS"), "状态"),
+        (lambda data: data["observations"][0].update(recognized_line_count=2), "数量"),
+        (
+            lambda data: data["observations"][0]["recognized_lines"][0].update(
+                confidence=float("nan")
+            ),
+            "置信度",
+        ),
+    ],
+)
 def test_block_missing_duplicate_or_corrupt_observations(tmp_path, mutator, reason):
     path, data, rows = _fixture(tmp_path)
     mutator(data)
@@ -173,11 +192,18 @@ def test_verifier_legacy_capture_without_boxes_remains_unlocated(tmp_path):
     assert result["unlocated_line_count"] == 4
 
 
-@pytest.mark.parametrize("bad_box", [
-    [10, 10, 0, 20], [0, -1, 20, 20], [0, 0, 1025, 20],
-    [0, 0, 20, float("inf")], [False, 0, 20, 20],
-    "0,0,20,20", [0, 0, 20],
-])
+@pytest.mark.parametrize(
+    "bad_box",
+    [
+        [10, 10, 0, 20],
+        [0, -1, 20, 20],
+        [0, 0, 1025, 20],
+        [0, 0, 20, float("inf")],
+        [False, 0, 20, 20],
+        "0,0,20,20",
+        [0, 0, 20],
+    ],
+)
 def test_verifier_rejects_invalid_spatial_evidence(tmp_path, bad_box):
     path, data, rows = _fixture(tmp_path)
     data["observations"][0]["recognized_lines"][0]["bbox"] = bad_box

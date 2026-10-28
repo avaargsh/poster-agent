@@ -1,4 +1,5 @@
 """Local-only web API for staged, resumable real-SKU batch imports."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,18 +11,17 @@ import shutil
 import threading
 from datetime import datetime, timezone
 from importlib import import_module
-from typing import Literal
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
 
-from . import storage
-from .layout_templates import embed_template, read_template
 from .batch_artifact_integrity import (
     BatchArtifactIntegrityError,
     verify_batch_artifact,
 )
+from .layout_templates import embed_template, read_template
 
 router = APIRouter(prefix="/api/batches", tags=["batch-import"])
 
@@ -42,9 +42,11 @@ def _now() -> str:
 
 
 def _root() -> Path:
-    return Path(
-        os.environ.get("POSTER_BATCH_DIR", "data/eval_runs/web_batches")
-    ).expanduser().resolve()
+    return (
+        Path(os.environ.get("POSTER_BATCH_DIR", "data/eval_runs/web_batches"))
+        .expanduser()
+        .resolve()
+    )
 
 
 def _batch_dir(batch_id: str) -> Path:
@@ -140,12 +142,14 @@ def _public_state(batch_dir: Path, state: dict) -> dict:
             row_status = "UNKNOWN"
         else:
             row_status = "PENDING"
-        rows.append({
-            "sku_id": sku,
-            "status": row_status,
-            "poster_id": result.get("poster_id") if row_status == "COMPLETED" else None,
-            "version": result.get("version") if row_status == "COMPLETED" else None,
-        })
+        rows.append(
+            {
+                "sku_id": sku,
+                "status": row_status,
+                "poster_id": result.get("poster_id") if row_status == "COMPLETED" else None,
+                "version": result.get("version") if row_status == "COMPLETED" else None,
+            }
+        )
 
     return {
         "batch_id": state["batch_id"],
@@ -171,8 +175,9 @@ def _public_state(batch_dir: Path, state: dict) -> dict:
 def list_batches(
     limit: int = Query(default=10, ge=1, le=50),
     offset: int = Query(default=0, ge=0, le=10000),
-    status: Literal["READY", "RUNNING", "COMPLETED", "FAILED", "INTERRUPTED"]
-    | None = Query(default=None),
+    status: Literal["READY", "RUNNING", "COMPLETED", "FAILED", "INTERRUPTED"] | None = Query(
+        default=None
+    ),
 ):
     """Read-only summary of locally staged batches, newest first.
 
@@ -183,8 +188,12 @@ def list_batches(
     root = _root()
     if not root.is_dir():
         return {
-            "items": [], "limit": limit, "offset": offset, "status": status,
-            "has_more": False, "skipped_invalid": 0,
+            "items": [],
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "has_more": False,
+            "skipped_invalid": 0,
         }
     with _ACTIVE_LOCK:
         active = _ACTIVE_BATCHES.copy()
@@ -211,7 +220,8 @@ def list_batches(
             or phase not in {"READY", "RUNNING", "COMPLETED", "FAILED", "INTERRUPTED"}
             or not isinstance(sku_ids, list)
             or not 1 <= len(sku_ids) <= 100
-            or type(count) is not int or not 0 <= count <= len(sku_ids)
+            or type(count) is not int
+            or not 0 <= count <= len(sku_ids)
             or not isinstance(created, str)
             or not isinstance(updated, str)
         ):
@@ -221,17 +231,19 @@ def list_batches(
             phase = "INTERRUPTED"
         if status is not None and phase != status:
             continue
-        batches.append({
-            "batch_id": folder.name,
-            "status": phase,
-            "created_at": created,
-            "updated_at": updated,
-            "processed": count,
-            "total": len(sku_ids),
-        })
+        batches.append(
+            {
+                "batch_id": folder.name,
+                "status": phase,
+                "created_at": created,
+                "updated_at": updated,
+                "processed": count,
+                "total": len(sku_ids),
+            }
+        )
     batches.sort(key=lambda item: (item["updated_at"], item["batch_id"]), reverse=True)
     return {
-        "items": batches[offset:offset + limit],
+        "items": batches[offset : offset + limit],
         "limit": limit,
         "offset": offset,
         "status": status,
@@ -277,9 +289,7 @@ async def create_batch(
             )
         try:
             template, layout_source = read_template(layout_poster_id, layout_version)
-            layout_source["original_manifest_sha256"] = hashlib.sha256(
-                manifest_bytes
-            ).hexdigest()
+            layout_source["original_manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
             manifest_bytes = embed_template(manifest_bytes, template)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="模板来源海报或版本不存在") from exc
@@ -321,9 +331,7 @@ async def create_batch(
         uploaded = {name for name, _ in image_payloads}
         unused = sorted(uploaded - referenced)
         if unused:
-            raise batch.BatchError(
-                "上传了未被 CSV 引用的图片：" + "、".join(unused[:5])
-            )
+            raise batch.BatchError("上传了未被 CSV 引用的图片：" + "、".join(unused[:5]))
 
         plan = {
             "manifest_sha256": manifest_sha,
@@ -346,12 +354,15 @@ async def create_batch(
             "plan": plan,
         }
         _write_json_atomic(batch_dir / "batch_status.json", state)
-        _write_json_atomic(batch_dir / "batch_preflight.json", {
-            "schema_version": "m5g-1",
-            "manifest_sha256": manifest_sha,
-            "mode": "check",
-            **plan,
-        })
+        _write_json_atomic(
+            batch_dir / "batch_preflight.json",
+            {
+                "schema_version": "m5g-1",
+                "manifest_sha256": manifest_sha,
+                "mode": "check",
+                **plan,
+            },
+        )
         return _public_state(batch_dir, state)
     except HTTPException:
         shutil.rmtree(batch_dir, ignore_errors=True)
@@ -392,22 +403,26 @@ def _execute_batch(batch_id: str) -> None:
                 manage_lifespan=False,
             )
             state = _read_state(batch_dir)
-            state.update({
-                "status": "COMPLETED",
-                "processed": result["created_or_reused"],
-                "current_sku": None,
-                "error": None,
-                "updated_at": _now(),
-            })
+            state.update(
+                {
+                    "status": "COMPLETED",
+                    "processed": result["created_or_reused"],
+                    "current_sku": None,
+                    "error": None,
+                    "updated_at": _now(),
+                }
+            )
             _write_json_atomic(batch_dir / "batch_status.json", state)
         except Exception as exc:
             try:
                 state = _read_state(batch_dir)
-                state.update({
-                    "status": "FAILED",
-                    "error": str(exc).replace(str(batch_dir), "[batch]")[:500],
-                    "updated_at": _now(),
-                })
+                state.update(
+                    {
+                        "status": "FAILED",
+                        "error": str(exc).replace(str(batch_dir), "[batch]")[:500],
+                        "updated_at": _now(),
+                    }
+                )
                 _write_json_atomic(batch_dir / "batch_status.json", state)
             except Exception:
                 pass
@@ -434,20 +449,19 @@ def apply_batch(batch_id: str, background_tasks: BackgroundTasks):
             state["error"] = "执行进程已不在当前服务中；续跑前会复用已有 SKU 账本"
         if state.get("status") not in {"READY", "FAILED", "INTERRUPTED"}:
             raise HTTPException(status_code=409, detail="当前批次状态不允许启动")
-        state.update({
-            "status": "RUNNING",
-            "processed": state.get("processed", 0),
-            "current_sku": None,
-            "error": None,
-            "updated_at": _now(),
-        })
+        state.update(
+            {
+                "status": "RUNNING",
+                "processed": state.get("processed", 0),
+                "current_sku": None,
+                "error": None,
+                "updated_at": _now(),
+            }
+        )
         _write_json_atomic(batch_dir / "batch_status.json", state)
         _ACTIVE_BATCHES.add(batch_id)
     background_tasks.add_task(_execute_batch, batch_id)
     return _public_state(batch_dir, state)
-
-
-
 
 
 def _verify_review_artifact(poster_id: str, journal_row: dict) -> None:
@@ -458,6 +472,7 @@ def _verify_review_artifact(poster_id: str, journal_row: dict) -> None:
             status_code=409,
             detail="已保存的批次海报产物缺失、损坏或与执行凭据不一致；禁止进入整批审核",
         ) from exc
+
 
 def _validated_review_scope(batch_id: str, state: dict, journal: object) -> dict:
     """Summarize only complete, matching M5g journal records for the review UI."""
@@ -471,8 +486,7 @@ def _validated_review_scope(batch_id: str, state: dict, journal: object) -> dict
     if (
         not isinstance(expected, list)
         or not 1 <= len(expected) <= 100
-        or any(not isinstance(sku, str) or not _BATCH_SKU.fullmatch(sku)
-               for sku in expected)
+        or any(not isinstance(sku, str) or not _BATCH_SKU.fullmatch(sku) for sku in expected)
         or len(set(expected)) != len(expected)
         or not isinstance(digest, str)
         or not _BATCH_SHA.fullmatch(digest)
@@ -537,6 +551,7 @@ def batch_review_scope(batch_id: str):
         raise HTTPException(status_code=409, detail="批次账本缺失或损坏") from exc
     return _validated_review_scope(batch_id, state, journal)
 
+
 @router.get("/{batch_id}")
 def get_batch(batch_id: str):
     batch_dir = _batch_dir(batch_id)
@@ -548,10 +563,12 @@ def get_batch(batch_id: str):
                 # must not replace COMPLETED/FAILED written just before exit.
                 state = _read_state(batch_dir)
                 if state.get("status") == "RUNNING":
-                    state.update({
-                        "status": "INTERRUPTED",
-                        "error": "服务可能在批次执行期间重启；可安全续跑相同批次",
-                        "updated_at": _now(),
-                    })
+                    state.update(
+                        {
+                            "status": "INTERRUPTED",
+                            "error": "服务可能在批次执行期间重启；可安全续跑相同批次",
+                            "updated_at": _now(),
+                        }
+                    )
                     _write_json_atomic(batch_dir / "batch_status.json", state)
     return _public_state(batch_dir, state)

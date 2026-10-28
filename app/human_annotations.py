@@ -4,6 +4,7 @@ Append-only reviews on disk; exports only decisive (correct/defective) labels
 for an explicitly selected reviewer. No auth: MUST NOT expose this service
 to untrusted networks. Human judgements are self-reported, not verified.
 """
+
 from __future__ import annotations
 
 import csv
@@ -12,11 +13,10 @@ import io
 import json
 import re
 from datetime import datetime, timezone
-from pathlib import Path
-from uuid import uuid4
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import storage
 from app.schemas import PosterSpec
@@ -126,12 +126,15 @@ def submit(poster_id: str, version: int, annotation: SubmitAnnotation) -> dict:
 
         review_id = uuid4().hex
         record = {
-            "review_id": review_id, "poster_id": poster_id, "version": version,
+            "review_id": review_id,
+            "poster_id": poster_id,
+            "version": version,
             "reviewer": annotation.reviewer,
             "image_sha256": source["image_sha256"],
             "spec_sha256": source["spec_sha256"],
-            "fields": {field: val.model_dump(mode="json")
-                       for field, val in annotation.fields.items()},
+            "fields": {
+                field: val.model_dump(mode="json") for field, val in annotation.fields.items()
+            },
             "created_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             "origin": "manual_review",
         }
@@ -165,32 +168,50 @@ def export_labels(reviewer: str) -> tuple[str, dict]:
                     if latest is None:
                         continue
                     source = _source(poster_id, version)
-                    if latest["image_sha256"] != source["image_sha256"] or latest["spec_sha256"] != source["spec_sha256"]:
-                        raise AnnotationConflict(f"{poster_id} v{version}: 人工审核结果与图片/规格已不一致")
+                    if (
+                        latest["image_sha256"] != source["image_sha256"]
+                        or latest["spec_sha256"] != source["spec_sha256"]
+                    ):
+                        raise AnnotationConflict(
+                            f"{poster_id} v{version}: 人工审核结果与图片/规格已不一致"
+                        )
                     considered += 1
                     for field, result in latest["fields"].items():
                         if result["judgment"] == "unsure":
                             skipped_uncertain += 1
                             continue
-                        rows.append({
-                            "poster_id": poster_id,
-                            "version": version,
-                            "field": field,
-                            "defective": "true" if result["judgment"] == "defective" else "false",
-                            "image_sha256": source["image_sha256"],
-                            "reviewer": reviewer,
-                        })
+                        rows.append(
+                            {
+                                "poster_id": poster_id,
+                                "version": version,
+                                "field": field,
+                                "defective": "true"
+                                if result["judgment"] == "defective"
+                                else "false",
+                                "image_sha256": source["image_sha256"],
+                                "reviewer": reviewer,
+                            }
+                        )
                 except FileNotFoundError as exc:
                     raise AnnotationConflict(f"{poster_id}: 本地审核数据对应版本丢失") from exc
     if not rows:
         raise ValueError("当前审核员尚无确定性字段标注，不能导出空评测集")
     handle = io.StringIO()
-    writer = csv.DictWriter(handle, fieldnames=[
-        "poster_id", "version", "field", "defective", "image_sha256", "reviewer",
-    ])
+    writer = csv.DictWriter(
+        handle,
+        fieldnames=[
+            "poster_id",
+            "version",
+            "field",
+            "defective",
+            "image_sha256",
+            "reviewer",
+        ],
+    )
     writer.writeheader()
     writer.writerows(rows)
     return handle.getvalue(), {
-        "poster_versions": considered, "field_labels": len(rows),
+        "poster_versions": considered,
+        "field_labels": len(rows),
         "uncertain_excluded": skipped_uncertain,
     }

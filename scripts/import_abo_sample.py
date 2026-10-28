@@ -1,5 +1,7 @@
 """Download a small CC BY 4.0 ABO cohort and optionally generate posters locally."""
+
 from __future__ import annotations
+
 import argparse
 import csv
 import gzip
@@ -15,6 +17,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+
 from PIL import Image, UnidentifiedImageError
 
 BASE = "https://amazon-berkeley-objects.s3.us-east-1.amazonaws.com/"
@@ -23,9 +26,13 @@ MAX_BYTES = 10 * 1024 * 1024
 PRICES = (19.90, 29.90, 39.90, 49.90, 59.90, 79.90, 99.90, 129.90, 159.90, 199.90)
 STYLES = ("蓝色科技风", "简约清新", "暖色促销", "极简高级")
 
+
 def _open(url: str):
-    return urllib.request.urlopen(urllib.request.Request(
-        url, headers={"User-Agent": "poster-agent-abo-smoke-test/1.0"}), timeout=45)
+    return urllib.request.urlopen(
+        urllib.request.Request(url, headers={"User-Agent": "poster-agent-abo-smoke-test/1.0"}),
+        timeout=45,
+    )
+
 
 def _jsonl(url: str) -> Iterator[dict]:
     with _open(url) as response, gzip.GzipFile(fileobj=response) as gz:
@@ -36,12 +43,16 @@ def _jsonl(url: str) -> Iterator[dict]:
                     if isinstance(value, dict):
                         yield value
 
+
 def _title(record: dict) -> str:
     names = record.get("item_name") or []
-    value = next((x.get("value", "") for x in names
-                  if x.get("language_tag") == "en_US" and x.get("value")), "")
+    value = next(
+        (x.get("value", "") for x in names if x.get("language_tag") == "en_US" and x.get("value")),
+        "",
+    )
     value = value or next((x.get("value", "") for x in names if x.get("value")), "")
     return re.sub(r"\s+", " ", str(value)).strip()[:35].strip(" -,:;") or "Catalog product"
+
 
 def _category(record: dict) -> str:
     nodes = record.get("node") or []
@@ -50,11 +61,13 @@ def _category(record: dict) -> str:
     types = record.get("product_type") or []
     return str(types[0].get("value") or "unknown") if types else "unknown"
 
+
 def _synthetic_prices(item_id: str) -> tuple[str, str]:
     digest = hashlib.sha256(item_id.encode()).digest()
     price = PRICES[int.from_bytes(digest[:2], "big") % len(PRICES)]
     original = round(price * (1.3, 1.4, 1.5, 1.6)[digest[2] % 4], 2)
     return f"{price:.2f}", f"{original:.2f}"
+
 
 def _select(limit: int) -> list[dict]:
     selected, seen, categories = [], set(), {}
@@ -63,14 +76,23 @@ def _select(limit: int) -> list[dict]:
         url = f"{BASE}listings/metadata/listings_{shard}.json.gz"
         try:
             for row in _jsonl(url):
-                item_id, image_id = str(row.get("item_id") or "").strip(), str(row.get("main_image_id") or "").strip()
+                item_id, image_id = (
+                    str(row.get("item_id") or "").strip(),
+                    str(row.get("main_image_id") or "").strip(),
+                )
                 if not item_id or not image_id or item_id in seen:
                     continue
                 category = _category(row)
                 if categories.get(category, 0) >= cap:
                     continue
-                selected.append({"item_id": item_id, "image_id": image_id,
-                                 "title": _title(row), "category": category})
+                selected.append(
+                    {
+                        "item_id": item_id,
+                        "image_id": image_id,
+                        "title": _title(row),
+                        "category": category,
+                    }
+                )
                 seen.add(item_id)
                 categories[category] = categories.get(category, 0) + 1
                 if len(selected) == limit:
@@ -80,6 +102,7 @@ def _select(limit: int) -> list[dict]:
                 continue
             raise RuntimeError(f"ABO listing metadata HTTP {exc.code}: {url}") from exc
     raise RuntimeError(f"Only found {len(selected)} products; requested {limit}")
+
 
 def _paths(ids: set[str]) -> dict[str, str]:
     found = {}
@@ -96,6 +119,7 @@ def _paths(ids: set[str]) -> dict[str, str]:
         raise RuntimeError(f"Image metadata missing {len(ids - set(found))} selected IDs")
     return found
 
+
 def _download(path: str, destination: Path) -> str:
     url = f"{BASE}images/original/{path.lstrip('/')}"
     with _open(url) as response:
@@ -110,6 +134,7 @@ def _download(path: str, destination: Path) -> str:
     destination.write_bytes(raw)
     return hashlib.sha256(raw).hexdigest()
 
+
 def _import_sample_into(output_dir: Path, limit: int = 20) -> dict:
     if not 1 <= limit <= 100:
         raise ValueError("limit must be in 1..100")
@@ -123,8 +148,17 @@ def _import_sample_into(output_dir: Path, limit: int = 20) -> dict:
     paths = _paths({x["image_id"] for x in products})
     manifest = output_dir / "real_skus.csv"
     rows = []
-    fields = ["sku_id", "product_image", "title", "price", "original_price",
-              "subtitle", "cta", "style", "logo_image"]
+    fields = [
+        "sku_id",
+        "product_image",
+        "title",
+        "price",
+        "original_price",
+        "subtitle",
+        "cta",
+        "style",
+        "logo_image",
+    ]
     with manifest.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
@@ -137,12 +171,23 @@ def _import_sample_into(output_dir: Path, limit: int = 20) -> dict:
             local = f"{sku}{suffix}"
             image_sha = _download(source_path, image_dir / local)
             price, original = _synthetic_prices(product["item_id"])
-            writer.writerow({"sku_id": sku, "product_image": f"images/{local}",
-                "title": product["title"], "price": price, "original_price": original,
-                "subtitle": "公开目录技术验证·模拟价格", "cta": "查看详情",
-                "style": STYLES[index % len(STYLES)], "logo_image": ""})
-            rows.append(f"| {product['item_id']} | {product['title'].replace('|', '/')} | "
-                        f"{product['category'].replace('|', '/')} | {product['image_id']} | {image_sha} |")
+            writer.writerow(
+                {
+                    "sku_id": sku,
+                    "product_image": f"images/{local}",
+                    "title": product["title"],
+                    "price": price,
+                    "original_price": original,
+                    "subtitle": "公开目录技术验证·模拟价格",
+                    "cta": "查看详情",
+                    "style": STYLES[index % len(STYLES)],
+                    "logo_image": "",
+                }
+            )
+            rows.append(
+                f"| {product['item_id']} | {product['title'].replace('|', '/')} | "
+                f"{product['category'].replace('|', '/')} | {product['image_id']} | {image_sha} |"
+            )
     manifest_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
     (output_dir / "PUBLIC_DATASET_ATTRIBUTION.md").write_text(
         "# Dataset attribution and limitations\n\n"
@@ -156,12 +201,22 @@ def _import_sample_into(output_dir: Path, limit: int = 20) -> dict:
         "and generated deterministic synthetic prices because the dataset is not a current-price feed. "
         "Prices are NOT actual Amazon or Chinese marketplace prices. Keep this cohort local; do not commit it.\n\n"
         "| Item ID | Title | Category | Main image ID | Local image SHA-256 |\n|---|---|---|---|---|\n"
-        + "\n".join(rows) + "\n", encoding="utf-8")
-    return {"dataset": "Amazon Berkeley Objects", "license": "CC BY 4.0", "count": len(products),
-            "category_count": len({x["category"] for x in products}), "manifest": str(manifest),
-            "manifest_sha256": manifest_sha,
-            "attribution": str(output_dir / "PUBLIC_DATASET_ATTRIBUTION.md"),
-            "synthetic_prices": True, "image_hashes_recorded": len(rows)}
+        + "\n".join(rows)
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "dataset": "Amazon Berkeley Objects",
+        "license": "CC BY 4.0",
+        "count": len(products),
+        "category_count": len({x["category"] for x in products}),
+        "manifest": str(manifest),
+        "manifest_sha256": manifest_sha,
+        "attribution": str(output_dir / "PUBLIC_DATASET_ATTRIBUTION.md"),
+        "synthetic_prices": True,
+        "image_hashes_recorded": len(rows),
+    }
+
 
 def import_sample(output_dir: Path, limit: int = 20) -> dict:
     """Download a cohort atomically so failed network runs leave no partial output."""
@@ -213,9 +268,7 @@ def _existing_sample(output_dir: Path, expected_limit: int | None = None) -> dic
         (line for line in attribution_text.splitlines() if line.startswith("Manifest SHA-256:")),
         "",
     )
-    recorded_manifest = digest_line.removeprefix("Manifest SHA-256:").replace(
-        chr(96), ""
-    ).strip()
+    recorded_manifest = digest_line.removeprefix("Manifest SHA-256:").replace(chr(96), "").strip()
     if recorded_manifest != manifest_digest:
         raise ValueError(
             "Existing cohort manifest does not match its attribution digest; "
@@ -280,11 +333,23 @@ def _existing_sample(output_dir: Path, expected_limit: int | None = None) -> dic
         "reused_existing_sample": True,
     }
 
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import a small public ABO cohort for local poster-agent smoke testing")
-    parser.add_argument("--limit", type=int, default=None, help="SKU count (default: 20 for a new download; when reusing a cohort, omit to use its recorded row count)")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/real_trial/abo_public_sample"))
-    parser.add_argument("--apply", action="store_true", help="Generate posters via M5g and audit M5j readiness")
+    parser = argparse.ArgumentParser(
+        description="Import a small public ABO cohort for local poster-agent smoke testing"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="SKU count (default: 20 for a new download; when reusing a cohort, omit to use its recorded row count)",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("data/real_trial/abo_public_sample")
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="Generate posters via M5g and audit M5j readiness"
+    )
     args = parser.parse_args()
     try:
         imported = _existing_sample(args.output_dir, args.limit) if args.apply else None
@@ -292,10 +357,21 @@ def main() -> int:
             imported = import_sample(args.output_dir, args.limit if args.limit is not None else 20)
         print(json.dumps(imported, ensure_ascii=False, indent=2))
         from scripts.real_sku_batch import preflight, run_batch
+
         manifest = Path(imported["manifest"])
         digest, prepared = preflight(manifest)
-        print(json.dumps({"m5g_preflight": "PASS", "sku_count": len(prepared),
-                          "manifest_sha256": digest, "generation_applied": args.apply}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "m5g_preflight": "PASS",
+                    "sku_count": len(prepared),
+                    "manifest_sha256": digest,
+                    "generation_applied": args.apply,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         if not args.apply:
             print("Download and preflight only. Add --apply to generate posters.")
             return 0
@@ -304,17 +380,32 @@ def main() -> int:
         journal = batch_dir / "batch_import_results.json"
         from evals.native_batch_scope import load_batch_scope
         from evals.native_trial import run_trial
-        readiness = run_trial("abo-public-smoke", manifest.parent / "m5j",
-                              score=False, batch_scope=load_batch_scope(journal))
-        print(json.dumps({"m5g_result": batch_result, "m5j_readiness": readiness,
-            "ocr_inference_performed": False, "human_review_performed": False,
-            "quality_score_computed": False,
-            "warning": "Synthetic prices and readiness audit are not a marketplace quality score."},
-            ensure_ascii=False, indent=2))
+
+        readiness = run_trial(
+            "abo-public-smoke",
+            manifest.parent / "m5j",
+            score=False,
+            batch_scope=load_batch_scope(journal),
+        )
+        print(
+            json.dumps(
+                {
+                    "m5g_result": batch_result,
+                    "m5j_readiness": readiness,
+                    "ocr_inference_performed": False,
+                    "human_review_performed": False,
+                    "quality_score_computed": False,
+                    "warning": "Synthetic prices and readiness audit are not a marketplace quality score.",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     except (RuntimeError, ValueError, OSError, csv.Error, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

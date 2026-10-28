@@ -2,6 +2,7 @@
 
 This tests the product-facing create/edit workflow, not real SKU acceptance.
 """
+
 from io import BytesIO
 
 from fastapi.testclient import TestClient
@@ -19,16 +20,22 @@ def test_classic_default_matches_explicit_settings():
     product = Image.new("RGBA", (180, 320), (50, 160, 240, 255))
     bg = local_background("蓝色科技风")
     legacy = PosterSpec(title="日常好物", price="129")
-    explicit = PosterSpec(title="日常好物", price="129",
-                          layout_id="classic", product_align="center", product_scale="full")
+    explicit = PosterSpec(
+        title="日常好物",
+        price="129",
+        layout_id="classic",
+        product_align="center",
+        product_scale="full",
+    )
     assert compose(legacy, product, None, bg) == compose(explicit, product, None, bg)
 
 
 def test_hero_variant_and_product_geometry_produce_distinct_full_size_images():
     product = Image.new("RGBA", (180, 320), (140, 210, 80, 255))
     bg = local_background("蓝色科技风")
-    base = dict(title="电动牙刷", price="199", subtitle="高效清洁",
-                original_price="399", cta="查看详情")
+    base = dict(
+        title="电动牙刷", price="199", subtitle="高效清洁", original_price="399", cta="查看详情"
+    )
     layouts = [
         PosterSpec(**base, layout_id="classic"),
         PosterSpec(**base, layout_id="hero"),
@@ -47,14 +54,23 @@ def test_hero_variant_and_product_geometry_produce_distinct_full_size_images():
 
 def test_create_and_edit_preserve_assets_and_versioned_layout(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
-    monkeypatch.setattr("app.main.generate_ai_background",
-                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                            AssertionError("layout edit must never call AI")))
+    monkeypatch.setattr(
+        "app.main.generate_ai_background",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("layout edit must never call AI")
+        ),
+    )
     created = client.post(
-        "/api/posters", files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷", "price": "199", "layout_id": "hero",
-              "product_align": "top", "product_scale": "compact",
-              "background_mode": "local"},
+        "/api/posters",
+        files={"product": ("sku.png", product_bytes, "image/png")},
+        data={
+            "title": "电动牙刷",
+            "price": "199",
+            "layout_id": "hero",
+            "product_align": "top",
+            "product_scale": "compact",
+            "background_mode": "local",
+        },
     )
     assert created.status_code == 201, created.text
     first = created.json()
@@ -70,8 +86,12 @@ def test_create_and_edit_preserve_assets_and_versioned_layout(tmp_path, monkeypa
 
     revised = client.post(
         f"/api/posters/{pid}/revisions",
-        json={"expected_version": 1, "layout_id": "classic",
-              "product_align": "bottom", "product_scale": "full"},
+        json={
+            "expected_version": 1,
+            "layout_id": "classic",
+            "product_align": "bottom",
+            "product_scale": "full",
+        },
     )
     assert revised.status_code == 201, revised.text
     updated = revised.json()
@@ -82,8 +102,10 @@ def test_create_and_edit_preserve_assets_and_versioned_layout(tmp_path, monkeypa
     assert client.get(first["image_url"]).content == first_png
     old = client.get(f"/api/posters/{pid}/versions/1").json()
     assert old["spec"]["layout_id"] == "hero"
-    assert all((storage.poster_dir(pid) / "assets" / key).read_bytes() == old_data
-               for key, old_data in assets.items())
+    assert all(
+        (storage.poster_dir(pid) / "assets" / key).read_bytes() == old_data
+        for key, old_data in assets.items()
+    )
     stale = client.post(
         f"/api/posters/{pid}/revisions",
         json={"expected_version": 1, "layout_id": "hero"},
@@ -91,10 +113,15 @@ def test_create_and_edit_preserve_assets_and_versioned_layout(tmp_path, monkeypa
     assert stale.status_code == 409
 
 
-def test_invalid_layout_input_is_rejected_before_asset_creation(tmp_path, monkeypatch, product_bytes):
+def test_invalid_layout_input_is_rejected_before_asset_creation(
+    tmp_path, monkeypatch, product_bytes
+):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
-    for field, bad in (("layout_id", "freeform"), ("product_scale", "huge"),
-                       ("product_align", "../../outside")):
+    for field, bad in (
+        ("layout_id", "freeform"),
+        ("product_scale", "huge"),
+        ("product_align", "../../outside"),
+    ):
         created = client.post(
             "/api/posters",
             files={"product": ("sku.png", product_bytes, "image/png")},
@@ -132,10 +159,15 @@ def test_existing_version_specs_without_layout_fields_load_as_classic():
 def test_web_editor_exposes_layout_and_product_position_as_versioned_fields():
     html = client.get("/").text
     for marker in (
-        'id="create-layout_id"', 'name="layout_id"',
-        'id="create-product_align"', 'name="product_align"',
-        'id="create-product_scale"', 'name="product_scale"',
-        'id="editLayout"', 'id="editProductAlign"', 'id="editProductScale"',
+        'id="create-layout_id"',
+        'name="layout_id"',
+        'id="create-product_align"',
+        'name="product_align"',
+        'id="create-product_scale"',
+        'name="product_scale"',
+        'id="editLayout"',
+        'id="editProductAlign"',
+        'id="editProductScale"',
     ):
         assert marker in html
     assert "layout_id:$('editLayout').value" in html
@@ -154,9 +186,13 @@ def test_approved_brief_disallows_unapproved_layout_change(tmp_path, monkeypatch
     assert run.status_code == 201, run.text
     run_id = run.json()["run_id"]
     confirmed_spec = {
-        "title": "电动牙刷", "subtitle": "品质生活 · 限时优惠",
-        "price": "199", "original_price": "399", "style": "蓝色科技风",
-        "cta": "立即抢购", "background_mode": "local",
+        "title": "电动牙刷",
+        "subtitle": "品质生活 · 限时优惠",
+        "price": "199",
+        "original_price": "399",
+        "style": "蓝色科技风",
+        "cta": "立即抢购",
+        "background_mode": "local",
     }
     decision = client.post(
         f"/api/briefs/runs/{run_id}/decision",
@@ -165,9 +201,14 @@ def test_approved_brief_disallows_unapproved_layout_change(tmp_path, monkeypatch
     assert decision.status_code == 200, decision.text
     data = {**confirmed_spec, "review_run_id": run_id}
     files = {"product": ("sku.png", product_bytes, "image/png")}
-    changed = client.post("/api/posters", files=files, data={
-        **data, "layout_id": "hero",
-    })
+    changed = client.post(
+        "/api/posters",
+        files=files,
+        data={
+            **data,
+            "layout_id": "hero",
+        },
+    )
     assert changed.status_code == 409, changed.text
     assert not storage.root().exists()
     legacy = client.post("/api/posters", files=files, data=data)

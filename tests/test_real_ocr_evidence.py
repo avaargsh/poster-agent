@@ -3,6 +3,7 @@
 Mocked rows and environments intentionally exercise the failure-closed contract.
 Only the separate real-ocr GitHub Actions run can verify a real model process.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,7 @@ from PIL import Image
 from evals import ocr_runtime
 from evals.image_fixtures import generate_fixture_set
 from evals.image_runner import evaluate_image_manifest
-from scripts.verify_real_ocr_evidence import EvidenceInvalid, verify_probe, verify_batch
+from scripts.verify_real_ocr_evidence import EvidenceInvalid, verify_batch, verify_probe
 
 
 def _fake_env():
@@ -33,7 +34,9 @@ def _make_probe(tmp_path, monkeypatch):
     image_file = tmp_path / "sample.png"
     Image.new("RGB", (100, 100), "white").save(image_file)
     result = ocr_runtime.probe(
-        image_file, infer=True, include_text=True,
+        image_file,
+        infer=True,
+        include_text=True,
         runner=lambda _: [{"text": "¥199", "score": 0.98, "bbox": [2, 3, 30, 25]}],
     )
     path = tmp_path / "probe.json"
@@ -89,14 +92,16 @@ def test_tampered_input_and_missing_installed_versions_rejected(tmp_path, monkey
 
 def test_batch_manifest_observations_and_hashes_are_checked(tmp_path, monkeypatch):
     manifest = generate_fixture_set(tmp_path / "images")
-    monkeypatch.setattr("evals.image_runner.recognize", lambda path: [
-        {"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}
-    ])
+    monkeypatch.setattr(
+        "evals.image_runner.recognize",
+        lambda path: [{"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}],
+    )
     base = tmp_path / "bench"
     evaluate_image_manifest(manifest, base, "paddle")
     # The replay runner expects manifest under batch_dir/images, so copy the
     # programmatic fixtures into this standard layout for the test.
     import shutil
+
     shutil.copytree(manifest.parent, base / "images")
     outcome = verify_batch(base)
     assert outcome["fixture_count"] == 20
@@ -113,6 +118,7 @@ def test_batch_rejects_fake_not_run_summary(tmp_path, monkeypatch):
     base = tmp_path / "bench"
     evaluate_image_manifest(manifest, base, "none")
     import shutil
+
     shutil.copytree(manifest.parent, base / "images")
     with pytest.raises(EvidenceInvalid, match="PaddleOCR"):
         verify_batch(base)

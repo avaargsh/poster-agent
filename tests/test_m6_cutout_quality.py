@@ -1,4 +1,5 @@
 """M6 cutout evidence is independent of visual human acceptance or real ONNX claims."""
+
 from __future__ import annotations
 
 import csv
@@ -14,11 +15,8 @@ from scripts.prepare_m6_review import prepare_package
 
 
 def _png(mask: bool) -> bytes:
-    image = Image.new("RGBA", (200, 240),
-                      (0, 0, 0, 0) if mask else (242, 242, 242, 255))
-    ImageDraw.Draw(image).rectangle(
-        (40, 30, 163, 205), fill=(65, 140, 220, 255)
-    )
+    image = Image.new("RGBA", (200, 240), (0, 0, 0, 0) if mask else (242, 242, 242, 255))
+    ImageDraw.Draw(image).rectangle((40, 30, 163, 205), fill=(65, 140, 220, 255))
     output = io.BytesIO()
     image.save(output, "PNG")
     return output.getvalue()
@@ -39,8 +37,10 @@ def _batch(tmp_path, monkeypatch, *, with_cutout=True):
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         row = {
-            "sku_id": "test-sku", "product_image": "original.png",
-            "title": "商品", "price": "199",
+            "sku_id": "test-sku",
+            "product_image": "original.png",
+            "title": "商品",
+            "price": "199",
         }
         if with_cutout:
             row["product_cutout_image"] = "cutout.png"
@@ -84,7 +84,8 @@ def test_risky_masks_are_flags_not_quality_pass():
 
 
 def test_m6_batch_export_adds_cutout_review_worksheet_without_changing_legacy_reviews(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     journal = _batch(tmp_path, monkeypatch)
     output = tmp_path / "review"
@@ -136,7 +137,8 @@ def test_m6_original_only_sku_is_not_misreported_as_model_output(tmp_path, monke
 
 
 def test_cutout_asset_tampering_refuses_comparison_and_preserves_review_denominator(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     journal = _batch(tmp_path, monkeypatch)
     ledger = json.loads(journal.read_text())
@@ -155,7 +157,6 @@ def test_cutout_asset_tampering_refuses_comparison_and_preserves_review_denomina
     assert len(_rows(output / "m6_output_reviews.csv")) == 2
 
 
-
 def test_cutout_verifier_is_read_only_and_returns_pending_human_review(tmp_path, monkeypatch):
     from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
 
@@ -172,9 +173,11 @@ def test_cutout_verifier_is_read_only_and_returns_pending_human_review(tmp_path,
 
 
 def test_cutout_verifier_rejects_corrupted_comparison_without_exposing_approval(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import pytest
+
     from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
 
     journal = _batch(tmp_path, monkeypatch)
@@ -188,8 +191,9 @@ def test_cutout_verifier_rejects_corrupted_comparison_without_exposing_approval(
 
 def test_cutout_verifier_requires_human_details_for_operator_pass(tmp_path, monkeypatch):
     import pytest
-    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
+
     from app.cutout_quality import REVIEW_FIELDS
+    from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
 
     journal = _batch(tmp_path, monkeypatch)
     output = tmp_path / "review"
@@ -218,9 +222,11 @@ def test_cutout_verifier_requires_human_details_for_operator_pass(tmp_path, monk
 
 
 def test_cutout_verifier_enforces_twenty_distinct_skus_for_real_acceptance(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import pytest
+
     from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
 
     journal = _batch(tmp_path, monkeypatch)
@@ -230,10 +236,11 @@ def test_cutout_verifier_enforces_twenty_distinct_skus_for_real_acceptance(
         verify_cutout_evidence(output, journal)
 
 
-
 def test_zip_contains_actual_cutout_contact_sheet_and_is_hash_bound(tmp_path, monkeypatch):
     import zipfile
+
     import pytest
+
     from app.m6_package_download_routes import _zip_contents
 
     journal = _batch(tmp_path, monkeypatch)
@@ -249,8 +256,10 @@ def test_zip_contains_actual_cutout_contact_sheet_and_is_hash_bound(tmp_path, mo
         assert "m6_cutout_reviews.csv" in names
         assert "images/test-sku-cutout-comparison.png" in names
         row = _rows(folder / "m6_cutout_reviews.csv")[0]
-        assert (hashlib.sha256(archive.read(row["comparison_image_path"])).hexdigest()
-                == row["comparison_image_sha256"])
+        assert (
+            hashlib.sha256(archive.read(row["comparison_image_path"])).hexdigest()
+            == row["comparison_image_sha256"]
+        )
     picture = folder / "images" / "test-sku-cutout-comparison.png"
     picture.write_bytes(b"swapped")
     with pytest.raises(Exception):
@@ -258,9 +267,9 @@ def test_zip_contains_actual_cutout_contact_sheet_and_is_hash_bound(tmp_path, mo
             _zip_contents(archive, folder, {"test-sku": record["poster_id"]})
 
 
-
 def test_original_only_cannot_forge_cutout_model_provenance(tmp_path, monkeypatch):
     import pytest
+
     from app.cutout_quality import REVIEW_FIELDS
     from scripts.verify_m6_cutout_evidence import CutoutEvidenceError, verify_cutout_evidence
 

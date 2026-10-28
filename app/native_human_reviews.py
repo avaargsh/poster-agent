@@ -3,6 +3,7 @@
 This is intentionally separate from square-vN human labels. Neither OCR
 accuracy nor product fidelity is inferred automatically from a human click.
 """
+
 from __future__ import annotations
 
 import csv
@@ -11,15 +12,19 @@ import io
 import json
 import re
 from datetime import datetime, timezone
-from uuid import uuid4
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import storage
-from app.human_annotations import HumanFieldReview, REVIEWER_PATTERN, VALID_ID
+from app.human_annotations import REVIEWER_PATTERN, VALID_ID, HumanFieldReview
 from app.native_acceptance import (
-    NativeVariant, PRODUCT_FOCUS_VARIANT, VARIANT, _render, _sources,
+    PRODUCT_FOCUS_VARIANT,
+    VARIANT,
+    NativeVariant,
+    _render,
+    _sources,
 )
 
 VISUAL_FIELDS = ("sku_integrity", "text_legibility", "composition")
@@ -48,12 +53,18 @@ class NativeReviewSubmission(BaseModel):
     image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    asset_sha256: dict[
-        Literal["product", "background", "logo", "product_cutout"], str | None
-    ]
+    asset_sha256: dict[Literal["product", "background", "logo", "product_cutout"], str | None]
     fields: dict[
-        Literal["sku_integrity", "text_legibility", "composition",
-                "title", "price", "cta", "subtitle", "original_price"],
+        Literal[
+            "sku_integrity",
+            "text_legibility",
+            "composition",
+            "title",
+            "price",
+            "cta",
+            "subtitle",
+            "original_price",
+        ],
         HumanFieldReview,
     ]
 
@@ -69,7 +80,9 @@ def _digest(raw: bytes) -> str:
 
 
 def _snapshot(
-    poster_id: str, version: int, variant: NativeVariant = VARIANT,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant = VARIANT,
 ) -> dict:
     spec, spec_bytes, assets, square_png = _sources(poster_id, version)
     native_png = _render(poster_id, spec, variant)
@@ -90,19 +103,20 @@ def _snapshot(
 
 
 def _folder(
-    poster_id: str, version: int, variant: NativeVariant = VARIANT,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant = VARIANT,
 ):
     storage.version_path(poster_id, version)
     if variant not in (VARIANT, PRODUCT_FOCUS_VARIANT):
         raise ValueError("不支持的原生版式")
-    return (
-        storage.poster_dir(poster_id) / "versions"
-        / f"v{version}.{variant}.human_reviews"
-    )
+    return storage.poster_dir(poster_id) / "versions" / f"v{version}.{variant}.human_reviews"
 
 
 def _all_reviews(
-    poster_id: str, version: int, variant: NativeVariant = VARIANT,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant = VARIANT,
 ) -> list[dict]:
     folder = _folder(poster_id, version, variant)
     records = []
@@ -123,17 +137,21 @@ def _latest_reviews(records: list[dict]) -> dict[str, dict]:
 
 
 def _matches(review: dict, snapshot: dict) -> bool:
-    return all((
-        review.get("image_sha256") == snapshot["image_sha256"],
-        review.get("source_image_sha256") == snapshot["source_image_sha256"],
-        review.get("spec_sha256") == snapshot["spec_sha256"],
-        review.get("asset_sha256") == snapshot["asset_sha256"],
-        review.get("variant_id") == snapshot["variant_id"],
-    ))
+    return all(
+        (
+            review.get("image_sha256") == snapshot["image_sha256"],
+            review.get("source_image_sha256") == snapshot["source_image_sha256"],
+            review.get("spec_sha256") == snapshot["spec_sha256"],
+            review.get("asset_sha256") == snapshot["asset_sha256"],
+            review.get("variant_id") == snapshot["variant_id"],
+        )
+    )
 
 
 def context(
-    poster_id: str, version: int, reviewer: str | None = None,
+    poster_id: str,
+    version: int,
+    reviewer: str | None = None,
     variant: NativeVariant = VARIANT,
 ) -> dict:
     with storage.LOCK:
@@ -144,7 +162,9 @@ def context(
         if existing is not None and not _matches(existing, snapshot):
             raise NativeReviewConflict("旧人工标签与实际原生图或源素材不一致，请重新审核")
         return {
-            "poster_id": poster_id, "version": version, "variant_id": variant,
+            "poster_id": poster_id,
+            "version": version,
+            "variant_id": variant,
             "image_url": f"/api/posters/{poster_id}/versions/{version}/exports/{variant}",
             "image_sha256": snapshot["image_sha256"],
             "source_image_sha256": snapshot["source_image_sha256"],
@@ -161,17 +181,21 @@ def context(
 
 
 def submit(
-    poster_id: str, version: int, payload: NativeReviewSubmission,
+    poster_id: str,
+    version: int,
+    payload: NativeReviewSubmission,
     variant: NativeVariant = VARIANT,
 ) -> dict:
     with storage.LOCK:
         snapshot = _snapshot(poster_id, version, variant)
-        if not all((
-            payload.image_sha256 == snapshot["image_sha256"],
-            payload.source_image_sha256 == snapshot["source_image_sha256"],
-            payload.spec_sha256 == snapshot["spec_sha256"],
-            payload.asset_sha256 == snapshot["asset_sha256"],
-        )):
+        if not all(
+            (
+                payload.image_sha256 == snapshot["image_sha256"],
+                payload.source_image_sha256 == snapshot["source_image_sha256"],
+                payload.spec_sha256 == snapshot["spec_sha256"],
+                payload.asset_sha256 == snapshot["asset_sha256"],
+            )
+        ):
             raise NativeReviewConflict("审核中原生海报或 SKU/背景/规格变化，请刷新页面")
         if set(payload.fields) != set(snapshot["fields_to_review"]):
             raise ValueError("请准确标注当前原生版本的全部字段")
@@ -186,8 +210,7 @@ def submit(
             "source_image_sha256": snapshot["source_image_sha256"],
             "spec_sha256": snapshot["spec_sha256"],
             "asset_sha256": snapshot["asset_sha256"],
-            "fields": {key: value.model_dump(mode="json")
-                       for key, value in payload.fields.items()},
+            "fields": {key: value.model_dump(mode="json") for key, value in payload.fields.items()},
             "created_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             "origin": "manual_review",
             "auto_approved": False,
@@ -202,7 +225,9 @@ def submit(
 
 
 def export(
-    reviewer: str, *, target_versions: dict[str, int] | None = None,
+    reviewer: str,
+    *,
+    target_versions: dict[str, int] | None = None,
     variant: NativeVariant = VARIANT,
 ) -> tuple[str, dict]:
     if re.fullmatch(REVIEWER_PATTERN, reviewer) is None:
@@ -226,7 +251,9 @@ def export(
                     version = int(source.stem[1:])
                     if target_versions is not None and version != target_versions[poster.name]:
                         continue
-                    latest = _latest_reviews(_all_reviews(poster.name, version, variant)).get(reviewer)
+                    latest = _latest_reviews(_all_reviews(poster.name, version, variant)).get(
+                        reviewer
+                    )
                     if latest is None:
                         continue
                     snapshot = _snapshot(poster.name, version, variant)
@@ -240,14 +267,20 @@ def export(
                         if result["judgment"] == "unsure":
                             uncertain += 1
                             continue
-                        rows.append({
-                            "poster_id": poster.name, "version": version,
-                            "variant_id": variant, "field": key,
-                            "defective": "true" if result["judgment"] == "defective" else "false",
-                            "image_sha256": snapshot["image_sha256"],
-                            "source_image_sha256": snapshot["source_image_sha256"],
-                            "reviewer": reviewer,
-                        })
+                        rows.append(
+                            {
+                                "poster_id": poster.name,
+                                "version": version,
+                                "variant_id": variant,
+                                "field": key,
+                                "defective": "true"
+                                if result["judgment"] == "defective"
+                                else "false",
+                                "image_sha256": snapshot["image_sha256"],
+                                "source_image_sha256": snapshot["source_image_sha256"],
+                                "reviewer": reviewer,
+                            }
+                        )
                 except (OSError, ValueError) as exc:
                     raise NativeReviewConflict(
                         f"{poster.name}: 人工标注对应的原生图或规格无效"
@@ -257,13 +290,20 @@ def export(
         raise ValueError("该审核员没有可导出的确定性原生 4:5 标签")
     output = io.StringIO()
     columns = [
-        "poster_id", "version", "variant_id", "field", "defective",
-        "image_sha256", "source_image_sha256", "reviewer",
+        "poster_id",
+        "version",
+        "variant_id",
+        "field",
+        "defective",
+        "image_sha256",
+        "source_image_sha256",
+        "reviewer",
     ]
     writer = csv.DictWriter(output, fieldnames=columns)
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue(), {
-        "poster_versions": considered, "field_labels": len(rows),
+        "poster_versions": considered,
+        "field_labels": len(rows),
         "uncertain_excluded": uncertain,
     }

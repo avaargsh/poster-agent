@@ -3,10 +3,11 @@
 M2 第一步只抽取事实，不自动生成海报。特别是价格等业务字段：
 LLM 的候选值必须经过确定性来源校验，缺字段则要求用户手动填写。
 """
+
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import os
 import re
 from decimal import Decimal, InvalidOperation
@@ -14,7 +15,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError
 
 from .image_provider import _allowed_provider_url
 
@@ -101,7 +102,9 @@ async def _qwen_extract(brief: str) -> dict:
     if not key or not endpoint:
         raise BriefCompilerError("Qwen 编译模式需要配置 DASHSCOPE_API_KEY 和 QWEN_CHAT_ENDPOINT")
     if not _safe_chat_endpoint(endpoint):
-        raise BriefCompilerError("QWEN_CHAT_ENDPOINT 必须是阿里云 HTTPS /compatible-mode/v1/chat/completions 地址")
+        raise BriefCompilerError(
+            "QWEN_CHAT_ENDPOINT 必须是阿里云 HTTPS /compatible-mode/v1/chat/completions 地址"
+        )
 
     system = (
         "你是电商营销海报规格字段提取器。请只输出 JSON 对象，"
@@ -118,7 +121,9 @@ async def _qwen_extract(brief: str) -> dict:
         "stream": False,
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=10.0), follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(40.0, connect=10.0), follow_redirects=False
+        ) as client:
             response = await client.post(
                 endpoint,
                 json=payload,
@@ -146,7 +151,11 @@ async def _qwen_extract(brief: str) -> dict:
 
 
 async def compile_brief(request: BriefRequest) -> BriefDraft:
-    raw = _demo_extract(request.brief) if request.compiler == "demo" else await _qwen_extract(request.brief)
+    raw = (
+        _demo_extract(request.brief)
+        if request.compiler == "demo"
+        else await _qwen_extract(request.brief)
+    )
     if not isinstance(raw, dict):
         raise BriefCompilerError("编译器返回的数据结构无效")
     data = {name: raw.get(name) for name in DraftFields.model_fields if raw.get(name) not in ("",)}
@@ -162,11 +171,20 @@ async def compile_brief(request: BriefRequest) -> BriefDraft:
     except ValidationError as exc:
         raise BriefCompilerError("规格草稿格式或字段长度不符合要求，请修改 Brief") from exc
 
-    if fields.price is not None and fields.original_price is not None and fields.original_price < fields.price:
+    if (
+        fields.price is not None
+        and fields.original_price is not None
+        and fields.original_price < fields.price
+    ):
         warnings.append("原价低于活动价，生成前必须修正")
     missing = [name for name in ("title", "price") if getattr(fields, name) is None]
     if request.compiler == "demo":
         warnings.append("当前为规则演示模式，不是大模型智能抽取")
     warnings.append("所有价格、标题和宣传信息均须由运营人员确认，编译结果不会直接投放")
-    return BriefDraft(fields=fields, compiler=request.compiler, missing_fields=missing,
-                      warnings=warnings, requires_confirmation=True)
+    return BriefDraft(
+        fields=fields,
+        compiler=request.compiler,
+        missing_fields=missing,
+        warnings=warnings,
+        requires_confirmation=True,
+    )

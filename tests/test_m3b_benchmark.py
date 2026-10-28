@@ -1,6 +1,8 @@
 """M3b evaluator regression and metric consistency; fixtures are NOT real OCR data."""
-from pathlib import Path
+
 import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -16,8 +18,13 @@ def test_dataset_has_20_unique_labeled_synthetic_cases():
     assert len({case.id for case in dataset.cases}) == 20
     assert set(dataset.target_fields) == {"title", "price", "cta"}
     assert {c.category for c in dataset.cases} >= {
-        "clean", "price_error", "false_alarm", "missed_defect",
-        "abstention", "confidence_threshold", "fragmented_text",
+        "clean",
+        "price_error",
+        "false_alarm",
+        "missed_defect",
+        "abstention",
+        "confidence_threshold",
+        "fragmented_text",
     }
 
 
@@ -37,11 +44,18 @@ def test_benchmark_reports_fp_fn_and_abstentions_from_actual_evaluator():
     assert outcomes["S19"] == "ABSTAIN_DEFECT"
     assert outcomes["S20"] == "FP"  # split title
     assert report["case_metrics"]["confusion"] == {
-        "TP": 8, "FP": 5, "FN": 2, "TN": 3,
-        "ABSTAIN_GOOD": 1, "ABSTAIN_DEFECT": 1,
+        "TP": 8,
+        "FP": 5,
+        "FN": 2,
+        "TN": 3,
+        "ABSTAIN_GOOD": 1,
+        "ABSTAIN_DEFECT": 1,
     }
     assert report["case_metrics"]["coverage"] == 0.9
-    assert report["case_metrics"]["recall_including_abstentions"] < report["case_metrics"]["recall_on_assessed"]
+    assert (
+        report["case_metrics"]["recall_including_abstentions"]
+        < report["case_metrics"]["recall_on_assessed"]
+    )
     assert report["warning"].startswith("SYNTHETIC")
 
 

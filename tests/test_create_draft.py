@@ -1,4 +1,5 @@
 """Exercise browser draft persistence without accessing user browser storage."""
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,18 +12,22 @@ from app.main import app
 
 def test_draft_module_served_and_restore_actions_present():
     client = TestClient(app)
-    assert client.get('/static/create-draft.js').status_code == 200
-    page = client.get('/').text
-    for element in ('createDraftStatus', 'restoreCreateDraft', 'saveCreateDraft',
-                    'discardCreateDraft'):
+    assert client.get("/static/create-draft.js").status_code == 200
+    page = client.get("/").text
+    for element in (
+        "createDraftStatus",
+        "restoreCreateDraft",
+        "saveCreateDraft",
+        "discardCreateDraft",
+    ):
         assert f'id="{element}"' in page
 
 
 def test_draft_storage_conflicts_and_restricted_payload():
-    node = shutil.which('node')
+    node = shutil.which("node")
     if not node:
-        pytest.skip('Node.js is needed to exercise the browser storage module')
-    script = r'''
+        pytest.skip("Node.js is needed to exercise the browser storage module")
+    script = r"""
 const assert = require('node:assert/strict');
 const {createStore, decode} = require('./app/static/create-draft.js');
 let raw=null;
@@ -51,24 +56,33 @@ assert.equal(broken.read().state,'unavailable');
 assert.equal(broken.discard().state,'unavailable');
 const full=createStore({getItem:()=>null,setItem:()=>{throw Error('quota exceeded')}});
 assert.equal(full.save(data).state,'unavailable');
-'''
-    result = subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=10)
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert result.returncode == 0, result.stderr
 
 
 def _run_node(script):
-    node = shutil.which('node')
+    node = shutil.which("node")
     if not node:
-        pytest.skip('Node.js is needed to exercise the browser storage module')
-    result = subprocess.run([node, '-e', script],
-                            cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=10)
+        pytest.skip("Node.js is needed to exercise the browser storage module")
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert result.returncode == 0, result.stderr
 
 
 def test_draft_field_bounds_and_whitelist():
-    _run_node(r'''
+    _run_node(r"""
 const assert = require('node:assert/strict');
 const {createStore} = require('./app/static/create-draft.js');
 let raw=null;
@@ -104,11 +118,11 @@ const read=store.read();
 assert.equal(read.state,'available');
 assert.equal(read.draft.files.product,'');
 assert.equal(read.draft.files.logo,'');
-''')
+""")
 
 
 def test_draft_lifecycle_states():
-    _run_node(r'''
+    _run_node(r"""
 const assert = require('node:assert/strict');
 const {createStore} = require('./app/static/create-draft.js');
 let raw=null;
@@ -128,11 +142,11 @@ raw='null';
 assert.equal(store.read().state,'invalid');
 raw=null;
 assert.equal(store.read().state,'empty');
-''')
+""")
 
 
 def test_draft_persists_only_whitelisted_copy_and_file_names():
-    _run_node(r'''
+    _run_node(r"""
 const assert = require('node:assert/strict');
 const {createStore, KEY} = require('./app/static/create-draft.js');
 let raw=null;
@@ -154,18 +168,25 @@ assert.ok(!raw.includes('AAAA'));
 const read=store.read();
 assert.equal(read.draft.fields.background_mode,undefined);
 assert.equal(read.draft.fields.review_run_id,undefined);
-''')
+""")
 
 
 def test_create_draft_page_wires_module_and_state_copy():
     client = TestClient(app)
-    page = client.get('/').text
+    page = client.get("/").text
     assert '<script src="/static/create-draft.js"></script>' in page
-    assert ("const createDraftFields=['title','subtitle','price','original_price','cta',"
-            "'style','layout_id','product_align','product_scale']") in page
-    for copy in ('文案与版式会自动保存在此浏览器', '另一页面更新了草稿',
-                 '草稿已恢复，已使用免费配色背景', '已删除浏览器中的草稿',
-                 '已存草稿格式无法读取', '正在保存文案与版式'):
+    assert (
+        "const createDraftFields=['title','subtitle','price','original_price','cta',"
+        "'style','layout_id','product_align','product_scale']"
+    ) in page
+    for copy in (
+        "文案与版式会自动保存在此浏览器",
+        "另一页面更新了草稿",
+        "草稿已恢复，已使用免费配色背景",
+        "已删除浏览器中的草稿",
+        "已存草稿格式无法读取",
+        "正在保存文案与版式",
+    ):
         assert copy in page
     assert "field('background_mode').value='local'" in page
     assert "field('product').value=''" in page
@@ -174,6 +195,6 @@ def test_create_draft_page_wires_module_and_state_copy():
 
 def test_static_mount_serves_only_static_directory():
     client = TestClient(app)
-    assert client.get('/static/create-draft.js').status_code == 200
-    response = client.get('/static/%2e%2e/app/main.py')
+    assert client.get("/static/create-draft.js").status_code == 200
+    response = client.get("/static/%2e%2e/app/main.py")
     assert response.status_code in (400, 404)

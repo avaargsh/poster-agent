@@ -2,6 +2,7 @@
 
 These are behavioral contract tests, NOT real OCR accuracy experiments.
 """
+
 from __future__ import annotations
 
 import csv
@@ -24,17 +25,21 @@ def _poster(tmp_path, monkeypatch, product_bytes):
     response = client.post(
         "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷促销", "subtitle": "限时福利", "price": "199",
-              "original_price": "399", "cta": "立即购买", "background_mode": "local"},
+        data={
+            "title": "电动牙刷促销",
+            "subtitle": "限时福利",
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即购买",
+            "background_mode": "local",
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
 
 
 def _context(pid, version=1):
-    resp = client.get(
-        f"/api/posters/{pid}/versions/{version}/exports/feed_4x5_native/human-review"
-    )
+    resp = client.get(f"/api/posters/{pid}/versions/{version}/exports/feed_4x5_native/human-review")
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -49,8 +54,11 @@ def _submit(pid, ctx, *, defective=(), unsure=(), reviewer=REVIEWER):
         "asset_sha256": ctx["asset_sha256"],
         "fields": {
             name: {
-                "judgment": "unsure" if name in unsure
-                else "defective" if name in defective else "correct",
+                "judgment": "unsure"
+                if name in unsure
+                else "defective"
+                if name in defective
+                else "correct",
                 "reason": "",
             }
             for name in ctx["fields_to_review"]
@@ -73,6 +81,7 @@ def _labels(tmp_path, reviewer=REVIEWER):
 
 def _ocr(_path):
     from PIL import Image
+
     with Image.open(_path) as img:
         assert img.size == (1080, 1350)
     return [
@@ -95,7 +104,9 @@ def _report(pid, monkeypatch, lines=_ocr):
 
 
 def test_reuses_metrics_with_native_hashes_and_visual_fields_not_predicted(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     ctx = _context(pid)
@@ -115,19 +126,25 @@ def test_reuses_metrics_with_native_hashes_and_visual_fields_not_predicted(
     assert (tmp_path / "result/native_real_summary.json").is_file()
     assert (tmp_path / "result/native_real_cases.csv").is_file()
     with (tmp_path / "result/native_real_cases.csv").open() as f:
-        assert all(r["field"] not in {"sku_integrity", "text_legibility", "composition"}
-                   for r in csv.DictReader(f))
+        assert all(
+            r["field"] not in {"sku_integrity", "text_legibility", "composition"}
+            for r in csv.DictReader(f)
+        )
 
 
 def test_price_position_failure_is_not_overridden_by_global_text_match(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
+
     def wrong_places(path):
         rows = _ocr(path)
         rows[2]["text"] = "¥399"
         rows[3]["text"] = "原价 ¥199"
         return rows
+
     _report(pid, monkeypatch, wrong_places)
     _submit(pid, _context(pid), defective=["price", "original_price"])
     summary = evaluate_native_reports(_labels(tmp_path), tmp_path / "out")
@@ -138,13 +155,17 @@ def test_price_position_failure_is_not_overridden_by_global_text_match(
 
 
 def test_low_confidence_or_missing_box_abstains_not_a_good_prediction(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
+
     def unlocated_price(path):
         rows = _ocr(path)
         rows[2]["bbox"] = None
         return rows
+
     _report(pid, monkeypatch, unlocated_price)
     _submit(pid, _context(pid), defective=["price"])
     summary = evaluate_native_reports(_labels(tmp_path), tmp_path / "out")
@@ -154,7 +175,9 @@ def test_low_confidence_or_missing_box_abstains_not_a_good_prediction(
 
 
 def test_missing_real_ocr_or_only_rule_checks_fails_closed(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _submit(pid, _context(pid))
@@ -173,11 +196,14 @@ def test_missing_real_ocr_or_only_rule_checks_fails_closed(
 
 
 def test_ocr_unavailable_or_error_not_scored(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _submit(pid, _context(pid))
     from app.ocr_provider import OCRUnavailable
+
     monkeypatch.setattr(
         "app.native_acceptance.recognize",
         lambda _: (_ for _ in ()).throw(OCRUnavailable("missing engine")),
@@ -193,7 +219,9 @@ def test_ocr_unavailable_or_error_not_scored(
 
 
 def test_modified_native_assets_make_saved_report_stale(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _report(pid, monkeypatch)
@@ -206,9 +234,15 @@ def test_modified_native_assets_make_saved_report_stale(
         evaluate_native_reports(labels, tmp_path / "out")
 
 
-@pytest.mark.parametrize("change", ["variant_id", "image_sha256", "source_image_sha256", "duplicate", "field", "reviewer"])
+@pytest.mark.parametrize(
+    "change",
+    ["variant_id", "image_sha256", "source_image_sha256", "duplicate", "field", "reviewer"],
+)
 def test_refuses_incompatible_or_forged_csv(
-    tmp_path, monkeypatch, product_bytes, change,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
+    change,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _submit(pid, _context(pid))
@@ -237,7 +271,9 @@ def test_refuses_incompatible_or_forged_csv(
 
 
 def test_new_version_never_inherits_v1_ocr_report(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _report(pid, monkeypatch)
@@ -252,12 +288,17 @@ def test_new_version_never_inherits_v1_ocr_report(
 def test_no_native_labels_rejects_square_only_csv(tmp_path, monkeypatch, product_bytes):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     ctx = client.get(f"/api/posters/{pid}/versions/1/human-review").json()
-    r = client.post(f"/api/posters/{pid}/versions/1/human-review", json={
-        "reviewer": REVIEWER, "image_sha256": ctx["image_sha256"],
-        "spec_sha256": ctx["spec_sha256"],
-        "fields": {field: {"judgment": "correct", "reason": ""}
-                   for field in ctx["fields_to_review"]},
-    })
+    r = client.post(
+        f"/api/posters/{pid}/versions/1/human-review",
+        json={
+            "reviewer": REVIEWER,
+            "image_sha256": ctx["image_sha256"],
+            "spec_sha256": ctx["spec_sha256"],
+            "fields": {
+                field: {"judgment": "correct", "reason": ""} for field in ctx["fields_to_review"]
+            },
+        },
+    )
     assert r.status_code == 201
     response = client.get("/api/annotations/export.csv?reviewer=" + REVIEWER)
     assert response.status_code == 200
@@ -268,7 +309,9 @@ def test_no_native_labels_rejects_square_only_csv(tmp_path, monkeypatch, product
 
 
 def test_product_focus_scoring_uses_own_labels_ocr_and_report_hashes(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     """Focus metrics may only come from matching focus pixels and OCR evidence."""
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT, VARIANT
@@ -285,10 +328,7 @@ def test_product_focus_scoring_uses_own_labels_ocr_and_report_hashes(
         "source_image_sha256": ctx["source_image_sha256"],
         "spec_sha256": ctx["spec_sha256"],
         "asset_sha256": ctx["asset_sha256"],
-        "fields": {
-            name: {"judgment": "correct", "reason": ""}
-            for name in ctx["fields_to_review"]
-        },
+        "fields": {name: {"judgment": "correct", "reason": ""} for name in ctx["fields_to_review"]},
     }
     assert client.post(review_url, json=payload).status_code == 201
 
@@ -318,8 +358,7 @@ def test_product_focus_scoring_uses_own_labels_ocr_and_report_hashes(
     labels.write_bytes(labels_response.content)
 
     assert all(
-        record["variant_id"] == variant
-        for record in read_native_labels(labels, variant=variant)
+        record["variant_id"] == variant for record in read_native_labels(labels, variant=variant)
     )
     with pytest.raises(ValueError):
         read_native_labels(labels)  # Classic default must reject focus.
@@ -327,9 +366,7 @@ def test_product_focus_scoring_uses_own_labels_ocr_and_report_hashes(
         evaluate_native_reports(labels, tmp_path / "cross_variant")
     assert not (tmp_path / "cross_variant").exists()
 
-    scored = evaluate_native_reports(
-        labels, tmp_path / "focus_output", variant=variant
-    )
+    scored = evaluate_native_reports(labels, tmp_path / "focus_output", variant=variant)
     assert scored["variant_id"] == variant
     assert scored["poster_versions"] == 1
     assert scored["ocr_text_labels"] == 5
@@ -337,22 +374,23 @@ def test_product_focus_scoring_uses_own_labels_ocr_and_report_hashes(
     assert scored["metrics"]["confusion"]["TN"] >= 1
     assert scored["source_report_sha256"]
     assert (tmp_path / "focus_output/native_real_cases.csv").is_file()
-    assert not (storage.poster_dir(pid) / "versions"
-                / f"v1.{VARIANT}.acceptance.paddle.json").exists()
+    assert not (
+        storage.poster_dir(pid) / "versions" / f"v1.{VARIANT}.acceptance.paddle.json"
+    ).exists()
 
     # A classic-only human label can never masquerade as a focus label.
     classic = _context(pid)
     _submit(pid, classic)
     classic_labels = _labels(tmp_path)
     with pytest.raises(ValueError):
-        evaluate_native_reports(
-            classic_labels, tmp_path / "wrong_focus", variant=variant
-        )
+        evaluate_native_reports(classic_labels, tmp_path / "wrong_focus", variant=variant)
     assert not (tmp_path / "wrong_focus").exists()
 
 
 def test_product_focus_scoring_rejects_stale_saved_focus_report(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT
 
@@ -367,8 +405,7 @@ def test_product_focus_scoring_rejects_stale_saved_focus_report(
         "spec_sha256": ctx["spec_sha256"],
         "asset_sha256": ctx["asset_sha256"],
         "fields": {
-            field: {"judgment": "correct", "reason": ""}
-            for field in ctx["fields_to_review"]
+            field: {"judgment": "correct", "reason": ""} for field in ctx["fields_to_review"]
         },
     }
     assert client.post(url, json=data).status_code == 201
@@ -387,7 +424,5 @@ def test_product_focus_scoring_rejects_stale_saved_focus_report(
     asset = storage.poster_dir(pid) / "assets" / "background.png"
     asset.write_bytes(asset.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="未过期"):
-        evaluate_native_reports(
-            labels, tmp_path / "stale_output", variant=variant
-        )
+        evaluate_native_reports(labels, tmp_path / "stale_output", variant=variant)
     assert not (tmp_path / "stale_output").exists()

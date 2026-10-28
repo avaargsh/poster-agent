@@ -3,6 +3,7 @@
 The operator chooses two local CSVs. We neither retain their content nor read
 referenced paths: filenames, authorization claims and image hashes are untrusted.
 """
+
 from __future__ import annotations
 
 import csv
@@ -20,8 +21,15 @@ SHA_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 VARIANTS = ("square", "feed_4x5_native")
 LABELS = frozenset({"PASS", "FAIL", "UNVERIFIED", "N/A"})
 FIELDS = (
-    "sku_integrity", "text_legibility", "title", "subtitle", "price",
-    "original_price", "price_position", "original_price_position", "cta",
+    "sku_integrity",
+    "text_legibility",
+    "title",
+    "subtitle",
+    "price",
+    "original_price",
+    "price_position",
+    "original_price_position",
+    "cta",
     "composition",
 )
 
@@ -67,7 +75,9 @@ def _valid_utc(value: str) -> bool:
     return dt.tzinfo is not None and dt.utcoffset() == timedelta(0)
 
 
-def summarize_progress(registry: list[dict[str, str]], reviews: list[dict[str, str]]) -> dict[str, Any]:
+def summarize_progress(
+    registry: list[dict[str, str]], reviews: list[dict[str, str]]
+) -> dict[str, Any]:
     """Return actionable counts; never infer source integrity or OCR execution."""
     registry_by_sku: dict[str, dict[str, str]] = {}
     cohort_ids = {item["cohort_id"] for item in registry}
@@ -86,8 +96,10 @@ def summarize_progress(registry: list[dict[str, str]], reviews: list[dict[str, s
     for row in reviews:
         sku, variant = row["sku_id"], row["variant_id"]
         if (
-            row["cohort_id"] != cohort_id or sku not in registry_by_sku
-            or variant not in VARIANTS or (sku, variant) in review_by_key
+            row["cohort_id"] != cohort_id
+            or sku not in registry_by_sku
+            or variant not in VARIANTS
+            or (sku, variant) in review_by_key
         ):
             raise _invalid("M6 reviews 与 registry 的 cohort、SKU 或版式不匹配/重复")
         review_by_key[(sku, variant)] = row
@@ -110,18 +122,21 @@ def summarize_progress(registry: list[dict[str, str]], reviews: list[dict[str, s
         if governance_ok:
             governance_asserted += 1
         else:
-            issues.append({
-                "sku_id": sku, "variant_id": "", "code": "GOVERNANCE_PENDING",
-            })
+            issues.append(
+                {
+                    "sku_id": sku,
+                    "variant_id": "",
+                    "code": "GOVERNANCE_PENDING",
+                }
+            )
         for variant in VARIANTS:
             row = review_by_key.get((sku, variant))
             if row is None:
                 missing_outputs += 1
                 issues.append({"sku_id": sku, "variant_id": variant, "code": "MISSING_ROW"})
                 continue
-            if (
-                not row["output_image_path"]
-                or not SHA_PATTERN.fullmatch(row["output_image_sha256"])
+            if not row["output_image_path"] or not SHA_PATTERN.fullmatch(
+                row["output_image_sha256"]
             ):
                 missing_outputs += 1
                 issues.append({"sku_id": sku, "variant_id": variant, "code": "OUTPUT_MISSING"})
@@ -173,7 +188,8 @@ def summarize_progress(registry: list[dict[str, str]], reviews: list[dict[str, s
 
 @router.post("/review-progress")
 async def preview_m6_progress(
-    registry: UploadFile = File(...), reviews: UploadFile = File(...),
+    registry: UploadFile = File(...),
+    reviews: UploadFile = File(...),
 ) -> dict[str, Any]:
     # Lazy import avoids importing the batch runner (which imports app.main)
     # during app.main's router initialization. These are the existing schemas.

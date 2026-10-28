@@ -1,4 +1,5 @@
 """Regression tests for the documented local-only server launcher."""
+
 from __future__ import annotations
 
 import argparse

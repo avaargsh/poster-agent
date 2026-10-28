@@ -1,4 +1,5 @@
 """M7: enforce the local-only request boundary for the app, not only its launcher."""
+
 from fastapi.testclient import TestClient
 
 from app.main import app

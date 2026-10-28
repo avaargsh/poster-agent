@@ -3,6 +3,7 @@
 A journal is local operator-supplied metadata, not a signed attestation of
 image origin. Never broaden the cohort if a row is invalid or missing.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,10 +28,14 @@ def load_batch_scope(journal: Path) -> dict:
         data = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("M5g 导入结果不是合法 UTF-8 JSON") from exc
-    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA or \
-            data.get("mode") != "apply" or not isinstance(data.get("rows"), dict) or \
-            not isinstance(data.get("manifest_sha256"), str) or \
-            not SHA.fullmatch(data["manifest_sha256"]):
+    if (
+        not isinstance(data, dict)
+        or data.get("schema_version") != SCHEMA
+        or data.get("mode") != "apply"
+        or not isinstance(data.get("rows"), dict)
+        or not isinstance(data.get("manifest_sha256"), str)
+        or not SHA.fullmatch(data["manifest_sha256"])
+    ):
         raise ValueError("仅接受 M5g 已执行 --apply 的有效批次结果")
 
     # M5g writes an incomplete journal after each successful SKU so it can
@@ -40,10 +45,14 @@ def load_batch_scope(journal: Path) -> dict:
         raise ValueError("M5g 批次导入尚未完成；请重新运行原 --apply 命令补齐/确认")
     expected = data.get("expected_sku_ids")
     expected_count = data.get("expected_sku_count")
-    if type(expected_count) is not int or not 1 <= expected_count <= 100 or \
-            not isinstance(expected, list) or len(expected) != expected_count or \
-            any(not isinstance(sku, str) or not SKU.fullmatch(sku) for sku in expected) or \
-            len(set(expected)) != expected_count:
+    if (
+        type(expected_count) is not int
+        or not 1 <= expected_count <= 100
+        or not isinstance(expected, list)
+        or len(expected) != expected_count
+        or any(not isinstance(sku, str) or not SKU.fullmatch(sku) for sku in expected)
+        or len(set(expected)) != expected_count
+    ):
         raise ValueError("M5g 预期 SKU 清单不合法，拒绝缩小评分分母")
     items = data["rows"]
     if set(items) != set(expected):
@@ -64,8 +73,11 @@ def load_batch_scope(journal: Path) -> dict:
         logo = record.get("logo_sha256")
         if logo is not None and (not isinstance(logo, str) or not SHA.fullmatch(logo)):
             raise ValueError(f"{sku}: Logo 摘要不合法")
-        if record.get("version") != 1 or not isinstance(record.get("idempotency_key"), str) or \
-                not KEY.fullmatch(record["idempotency_key"]):
+        if (
+            record.get("version") != 1
+            or not isinstance(record.get("idempotency_key"), str)
+            or not KEY.fullmatch(record["idempotency_key"])
+        ):
             raise ValueError(f"{sku}: 不是 M5g 创建的原始版本或幂等键无效")
         sku_by_id[pid] = sku
         original_product_shas.add(record["product_sha256"])

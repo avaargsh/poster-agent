@@ -5,6 +5,7 @@ configure existing local OCR model directories through process environment
 variables and trigger the already established non-clobber capture function.
 The in-memory job state is advisory only and is lost on server restart.
 """
+
 from __future__ import annotations
 
 import importlib.metadata
@@ -34,9 +35,8 @@ _DEVICES = frozenset(("cpu", "gpu", "gpu:0"))
 
 def _runtime_available() -> bool:
     try:
-        return (
-            importlib.metadata.version("paddleocr").startswith("3.")
-            and bool(importlib.metadata.version("paddlepaddle"))
+        return importlib.metadata.version("paddleocr").startswith("3.") and bool(
+            importlib.metadata.version("paddlepaddle")
         )
     except importlib.metadata.PackageNotFoundError:
         return False
@@ -61,10 +61,13 @@ def _configuration() -> tuple[Path, Path, str] | None:
 def _unsafe_state(batch_id: str, package: Path) -> dict:
     """Read-only local status; a matching OCR JSON is still not runtime attestation."""
     from scripts.capture_m6_paddle_ocr import (
-        OCREvidenceError, _identities, _review_rows,
+        OCREvidenceError,
+        _identities,
+        _review_rows,
     )
     from scripts.verify_m6_ocr_capture import (
-        OCRCaptureEvidenceError, verify_ocr_capture,
+        OCRCaptureEvidenceError,
+        verify_ocr_capture,
     )
 
     output = package / "m6_paddle_ocr_evidence.json"
@@ -75,17 +78,22 @@ def _unsafe_state(batch_id: str, package: Path) -> dict:
             review_sha, initial = _review_rows(package)
             cohort, rows, count = _identities(initial)
             verified = verify_ocr_capture(
-                output, rows, cohort_id=cohort, reviews_sha256=review_sha,
+                output,
+                rows,
+                cohort_id=cohort,
+                reviews_sha256=review_sha,
             )
             # This is a local declaration plus hash/structural consistency,
             # never proof that a model actually executed.
             state = "EVIDENCE_PRESENT_UNATTESTED"
             return {
-                "state": state, "ready_to_capture": False,
+                "state": state,
+                "ready_to_capture": False,
                 "expected_sku_count": count,
                 "declared_capture_consistency": verified["status"],
                 "automatically_accepted": False,
-                "quality_verified": False, "runtime_attested": False,
+                "quality_verified": False,
+                "runtime_attested": False,
             }
         except (OSError, OCREvidenceError, OCRCaptureEvidenceError, ValueError):
             state, ready = "BLOCKED", False
@@ -107,9 +115,11 @@ def _unsafe_state(batch_id: str, package: Path) -> dict:
         else:
             state, ready = "READY", True
     response = {
-        "state": state, "ready_to_capture": ready,
+        "state": state,
+        "ready_to_capture": ready,
         "automatically_accepted": False,
-        "quality_verified": False, "runtime_attested": False,
+        "quality_verified": False,
+        "runtime_attested": False,
     }
     if state == "RUNNING":
         response["completed_variants"] = completed
@@ -181,8 +191,10 @@ def start_m6_ocr_capture(batch_id: str, background: BackgroundTasks):
     return JSONResponse(
         status_code=202,
         content={
-            "state": "RUNNING", "automatically_accepted": False,
-            "quality_verified": False, "runtime_attested": False,
+            "state": "RUNNING",
+            "automatically_accepted": False,
+            "quality_verified": False,
+            "runtime_attested": False,
             "message": "已提交本机 OCR 采集，刷新状态前不表示 OCR 成功或可投放",
         },
     )

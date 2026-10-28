@@ -4,6 +4,7 @@ The JSON is an operator-writable statement, NOT an independently authenticated
 OCR runtime or a product-quality score. Real model execution must be verified
 separately using isolated provenance / the existing M5j reports.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -123,8 +124,12 @@ def verify_ocr_capture(
     if document.get("min_20_real_skus_proven") is not False:
         raise _blocked("OCR 采集不可声明真实独立 SKU 已验收")
     elapsed = document.get("elapsed_seconds")
-    if (type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0
-        or not _capture_time_ok(document.get("captured_at_utc"))):
+    if (
+        type(elapsed) not in (int, float)
+        or not math.isfinite(elapsed)
+        or elapsed < 0
+        or not _capture_time_ok(document.get("captured_at_utc"))
+    ):
         raise _blocked("OCR 采集时间或耗时无效")
 
     expected: dict[tuple[str, str], dict[str, str]] = {}
@@ -139,17 +144,21 @@ def verify_ocr_capture(
             raise _blocked("评审表包含缺失或非法输出 SHA-256")
         expected[key] = review
     skus = {key[0] for key in expected}
-    if not skus or len(expected) != 2 * len(skus) or any(
-        (sku, variant) not in expected for sku in skus for variant in _VARIANTS
+    if (
+        not skus
+        or len(expected) != 2 * len(skus)
+        or any((sku, variant) not in expected for sku in skus for variant in _VARIANTS)
     ):
         raise _blocked("评审表缺少必需的方形/4:5 行")
 
-    if (type(document.get("sku_count")) is not int or
-        document["sku_count"] != len(skus) or
-        type(document.get("expected_variant_count")) is not int or
-        document["expected_variant_count"] != len(expected) or
-        type(document.get("captured_variant_count")) is not int or
-        document["captured_variant_count"] != len(expected)):
+    if (
+        type(document.get("sku_count")) is not int
+        or document["sku_count"] != len(skus)
+        or type(document.get("expected_variant_count")) is not int
+        or document["expected_variant_count"] != len(expected)
+        or type(document.get("captured_variant_count")) is not int
+        or document["captured_variant_count"] != len(expected)
+    ):
         raise _blocked("OCR SKU/版式数量不一致")
     observations = document.get("observations")
     if not isinstance(observations, list) or len(observations) > 200:
@@ -169,40 +178,53 @@ def verify_ocr_capture(
         source = expected.get(key)
         if source is None:
             raise _blocked("OCR observations 含额外 SKU 或版式")
-        if (row.get("poster_id") != source["poster_id"] or
-            row.get("image_sha256") != source["output_image_sha256"]):
+        if (
+            row.get("poster_id") != source["poster_id"]
+            or row.get("image_sha256") != source["output_image_sha256"]
+        ):
             raise _blocked("OCR 图片/海报身份与冻结评审记录不一致")
         if row.get("status") != "CAPTURED_REVIEW_REQUIRED":
             raise _blocked("OCR observations 状态不得声称通过")
         lines = row.get("recognized_lines")
-        if (not isinstance(lines, list) or len(lines) > 2000 or
-            type(row.get("recognized_line_count")) is not int or
-            row["recognized_line_count"] != len(lines)):
+        if (
+            not isinstance(lines, list)
+            or len(lines) > 2000
+            or type(row.get("recognized_line_count")) is not int
+            or row["recognized_line_count"] != len(lines)
+        ):
             raise _blocked("OCR 文本与识别行数量不一致")
         for line in lines:
             if not isinstance(line, dict) or not isinstance(line.get("text"), str):
                 raise _blocked("OCR 文本格式无效")
             confidence = line.get("confidence")
-            if (type(confidence) not in (int, float) or
-                not math.isfinite(confidence) or not 0 <= confidence <= 1):
+            if (
+                type(confidence) not in (int, float)
+                or not math.isfinite(confidence)
+                or not 0 <= confidence <= 1
+            ):
                 raise _blocked("OCR 置信度无效")
             box = line.get("bbox")
             if box is None:
                 unlocated += 1
                 continue
             width, height = (1024, 1024) if key[1] == "square" else (1080, 1350)
-            if (not isinstance(box, list) or len(box) != 4 or
-                any(type(value) is not int for value in box)):
+            if (
+                not isinstance(box, list)
+                or len(box) != 4
+                or any(type(value) is not int for value in box)
+            ):
                 raise _blocked("OCR 检测框坐标必须为四个整数")
             x1, y1, x2, y2 = box
             if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
                 raise _blocked("OCR 检测框超出当前版式尺寸或存在无效边界")
             positioned += 1
-    if ("positioned_line_count" in document or "unlocated_line_count" in document):
-        if (type(document.get("positioned_line_count")) is not int or
-            type(document.get("unlocated_line_count")) is not int or
-            document["positioned_line_count"] != positioned or
-            document["unlocated_line_count"] != unlocated):
+    if "positioned_line_count" in document or "unlocated_line_count" in document:
+        if (
+            type(document.get("positioned_line_count")) is not int
+            or type(document.get("unlocated_line_count")) is not int
+            or document["positioned_line_count"] != positioned
+            or document["unlocated_line_count"] != unlocated
+        ):
             raise _blocked("OCR 空间检测框数量与采集摘要不一致")
     if seen != set(expected):
         raise _blocked("OCR observations 缺少必需版式")

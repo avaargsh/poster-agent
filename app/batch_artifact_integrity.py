@@ -1,4 +1,5 @@
 """Shared integrity check for the immutable v1 artifacts created by M5g."""
+
 from __future__ import annotations
 
 import hashlib
@@ -28,8 +29,10 @@ def verify_batch_artifact(poster_id: str, journal_row: dict) -> None:
         versions = path / "versions"
         meta_path = path / "meta.json"
         if (
-            path.is_symlink() or not path.is_dir()
-            or assets.is_symlink() or versions.is_symlink()
+            path.is_symlink()
+            or not path.is_dir()
+            or assets.is_symlink()
+            or versions.is_symlink()
             or meta_path.is_symlink()
         ):
             raise ValueError("invalid poster storage directory")
@@ -38,9 +41,7 @@ def verify_batch_artifact(poster_id: str, journal_row: dict) -> None:
         image_path = storage.version_path(poster_id, 1)
         spec_path = versions / "v1.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        spec = PosterSpec.model_validate(
-            json.loads(spec_path.read_text(encoding="utf-8"))
-        )
+        spec = PosterSpec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
         if (
             not isinstance(meta, dict)
             or meta.get("poster_id") != poster_id
@@ -54,7 +55,8 @@ def verify_batch_artifact(poster_id: str, journal_row: dict) -> None:
         key = journal_row.get("idempotency_key")
         expected = receipt.get("sha256")
         if (
-            not isinstance(key, str) or not key
+            not isinstance(key, str)
+            or not key
             or receipt.get("key") != key
             or not isinstance(expected, dict)
             or not isinstance(receipt.get("request_hash"), str)
@@ -84,8 +86,10 @@ def verify_batch_artifact(poster_id: str, journal_row: dict) -> None:
         for name, file in files.items():
             digest = expected[name]
             if (
-                file.is_symlink() or not file.is_file()
-                or not isinstance(digest, str) or not _SHA256.fullmatch(digest)
+                file.is_symlink()
+                or not file.is_file()
+                or not isinstance(digest, str)
+                or not _SHA256.fullmatch(digest)
                 or hashlib.sha256(file.read_bytes()).hexdigest() != digest
             ):
                 raise ValueError(f"stored {name} does not match receipt")

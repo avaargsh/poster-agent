@@ -1,4 +1,5 @@
 """M6 offline package: synthetic tests, never real customers or paid models."""
+
 from __future__ import annotations
 
 import csv
@@ -31,10 +32,14 @@ def _fixture(tmp_path, monkeypatch):
             fieldnames=["sku_id", "product_image", "title", "price"],
         )
         writer.writeheader()
-        writer.writerow({
-            "sku_id": "sku-test", "product_image": "product.png",
-            "title": "测试商品", "price": "199",
-        })
+        writer.writerow(
+            {
+                "sku_id": "sku-test",
+                "product_image": "product.png",
+                "title": "测试商品",
+                "price": "199",
+            }
+        )
     batch_dir = tmp_path / "batch"
     real_sku_batch.run_batch(manifest, batch_dir, apply=True)
     return batch_dir / "batch_import_results.json"
@@ -61,8 +66,10 @@ def test_plan_does_not_render_or_create_any_output(tmp_path, monkeypatch):
 def test_apply_exports_both_formats_as_unverified(tmp_path, monkeypatch):
     journal = _fixture(tmp_path, monkeypatch)
     output = tmp_path / "m6"
+
     def unexpected_ai(*args, **kwargs):
         raise AssertionError("M6 export must not call a paid background model")
+
     monkeypatch.setattr("app.main.generate_ai_background", unexpected_ai)
     report = prepare_package(journal, output, apply=True)
     registry = _csv_rows(output / "m6_cohort_registry.csv")
@@ -76,7 +83,8 @@ def test_apply_exports_both_formats_as_unverified(tmp_path, monkeypatch):
     assert registry[0]["distinct_sku_verified"] == "UNVERIFIED"
     assert registry[0]["authorization_evidence_ref"] == ""
     assert {row["variant_id"] for row in reviews} == {
-        "square", "feed_4x5_native",
+        "square",
+        "feed_4x5_native",
     }
     assert all(row["overall_accept"] == "UNVERIFIED" for row in reviews)
     assert all(row["reviewer_alias"] == "" for row in reviews)
@@ -86,9 +94,7 @@ def test_apply_exports_both_formats_as_unverified(tmp_path, monkeypatch):
         img = output / row["output_image_path"]
         with Image.open(img) as opened:
             assert opened.format == "PNG"
-            assert opened.size == (
-                (1024, 1024) if row["variant_id"] == "square" else (1080, 1350)
-            )
+            assert opened.size == ((1024, 1024) if row["variant_id"] == "square" else (1080, 1350))
     poster_id = reviews[0]["poster_id"]
     assert storage.view(poster_id)["version"] == 1
 
@@ -104,8 +110,10 @@ def test_apply_exports_both_formats_as_unverified(tmp_path, monkeypatch):
 
 def test_native_failure_still_keeps_expected_row(tmp_path, monkeypatch):
     journal = _fixture(tmp_path, monkeypatch)
+
     def bad_render(*args, **kwargs):
         raise ValueError("synthetic native overflow")
+
     monkeypatch.setattr("app.channel_export_routes.render_native_feed", bad_render)
     output = tmp_path / "m6"
     report = prepare_package(journal, output, apply=True)
@@ -141,9 +149,11 @@ def test_refuses_incomplete_batch(tmp_path, monkeypatch):
         prepare_package(journal, output, apply=True)
     assert not output.exists()
 
+
 def test_offline_review_prepares_while_local_workbench_is_running(tmp_path, monkeypatch):
     """An existing web worker must not block read-only offline M6 exports."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     journal = _fixture(tmp_path, monkeypatch)
@@ -160,7 +170,8 @@ def test_offline_review_prepares_while_local_workbench_is_running(tmp_path, monk
     assert result["review_rows_created"] == 2
     reviews = _csv_rows(output / "m6_output_reviews.csv")
     assert {row["variant_id"] for row in reviews} == {
-        "square", "feed_4x5_native",
+        "square",
+        "feed_4x5_native",
     }
     for row in reviews:
         with Image.open(output / row["output_image_path"]) as image:
@@ -173,17 +184,20 @@ def test_offline_review_prepares_while_local_workbench_is_running(tmp_path, monk
 def _publish_later_version(poster_id: str):
     """Simulate a user editing a poster after the M5g batch was completed."""
     current = storage.version_view(poster_id, 1)
-    spec = PosterSpec.model_validate({
-        **current["spec"],
-        "title": "后续修改版本",
-    })
+    spec = PosterSpec.model_validate(
+        {
+            **current["spec"],
+            "title": "后续修改版本",
+        }
+    )
     buffer = io.BytesIO()
     Image.new("RGB", (1024, 1024), (210, 30, 40)).save(buffer, "PNG")
     return storage.new_version(poster_id, spec, buffer.getvalue())
 
 
 def test_m6_review_package_uses_exact_batch_pinned_version_after_later_edit(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     journal = _fixture(tmp_path, monkeypatch)
     batch = json.loads(journal.read_text(encoding="utf-8"))
@@ -213,7 +227,8 @@ def test_m6_review_package_uses_exact_batch_pinned_version_after_later_edit(
 
 
 def test_m6_review_package_does_not_fallback_to_latest_when_pinned_version_is_missing(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     journal = _fixture(tmp_path, monkeypatch)
     batch = json.loads(journal.read_text(encoding="utf-8"))
@@ -234,7 +249,9 @@ def test_m6_review_package_does_not_fallback_to_latest_when_pinned_version_is_mi
 
 @pytest.mark.parametrize("artifact", ["product", "render", "spec"])
 def test_m6_review_package_rejects_receipt_mismatch(
-    tmp_path, monkeypatch, artifact,
+    tmp_path,
+    monkeypatch,
+    artifact,
 ):
     """Valid-looking local edits must not replace the M5g creation evidence."""
     journal = _fixture(tmp_path, monkeypatch)
@@ -264,7 +281,4 @@ def test_m6_review_package_rejects_receipt_mismatch(
     assert len(reviews) == 2
     assert all(row["output_image_path"] == "" for row in reviews)
     assert all(row["output_image_sha256"] == "" for row in reviews)
-    assert all(
-        row["overall_reason"].startswith("OUTPUT_MISSING:SOURCE_INVALID")
-        for row in reviews
-    )
+    assert all(row["overall_reason"].startswith("OUTPUT_MISSING:SOURCE_INVALID") for row in reviews)

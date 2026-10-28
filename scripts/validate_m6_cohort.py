@@ -4,16 +4,17 @@ This validates local manifests, authorization registry, batch provenance, curren
 poster versions, review worksheet hashes, and M5j readiness. It never runs OCR,
 calls a model, uploads files, or computes a product-quality score.
 """
+
 from __future__ import annotations
 
 import argparse
 import csv
 import hashlib
 import io
-import os
-import tempfile
 import json
+import os
 import re
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,29 +37,69 @@ LABELS = frozenset({"PASS", "FAIL", "UNVERIFIED"})
 VARIANTS = ("square", "feed_4x5_native")
 
 REGISTRY_FIELDS = (
-    "cohort_id", "sku_id", "product_category", "product_family_id",
-    "variant_or_packaging_condition", "source_asset_authorization_status",
-    "authorization_evidence_ref", "logo_authorization_status",
-    "source_image_sha256", "distinct_sku_verified",
-    "duplicate_source_image_reviewed", "reviewer_alias", "notes",
+    "cohort_id",
+    "sku_id",
+    "product_category",
+    "product_family_id",
+    "variant_or_packaging_condition",
+    "source_asset_authorization_status",
+    "authorization_evidence_ref",
+    "logo_authorization_status",
+    "source_image_sha256",
+    "distinct_sku_verified",
+    "duplicate_source_image_reviewed",
+    "reviewer_alias",
+    "notes",
 )
 REVIEW_FIELDS = (
-    "cohort_id", "sku_id", "poster_id", "source_version", "variant_id",
-    "output_image_path", "source_product_sha256", "request_sha256",
-    "spec_sha256", "output_image_sha256", "source_square_image_sha256",
-    "reviewer_alias", "sku_integrity", "text_legibility", "title",
-    "subtitle", "price", "original_price", "price_position",
-    "original_price_position", "cta", "composition", "overall_accept",
-    "overall_reason", "reviewed_at_utc",
+    "cohort_id",
+    "sku_id",
+    "poster_id",
+    "source_version",
+    "variant_id",
+    "output_image_path",
+    "source_product_sha256",
+    "request_sha256",
+    "spec_sha256",
+    "output_image_sha256",
+    "source_square_image_sha256",
+    "reviewer_alias",
+    "sku_integrity",
+    "text_legibility",
+    "title",
+    "subtitle",
+    "price",
+    "original_price",
+    "price_position",
+    "original_price_position",
+    "cta",
+    "composition",
+    "overall_accept",
+    "overall_reason",
+    "reviewed_at_utc",
 )
 NATIVE_MANIFEST_FIELDS = (
-    "poster_id", "version", "sku_id", "status", "definite_labels",
-    "ocr_text_labels", "unsure_labels", "product_sha256",
-    "native_image_sha256", "action",
+    "poster_id",
+    "version",
+    "sku_id",
+    "status",
+    "definite_labels",
+    "ocr_text_labels",
+    "unsure_labels",
+    "product_sha256",
+    "native_image_sha256",
+    "action",
 )
 FIELD_LABELS = (
-    "sku_integrity", "text_legibility", "title", "subtitle", "price",
-    "original_price", "price_position", "original_price_position", "cta",
+    "sku_integrity",
+    "text_legibility",
+    "title",
+    "subtitle",
+    "price",
+    "original_price",
+    "price_position",
+    "original_price_position",
+    "cta",
     "composition",
 )
 
@@ -137,13 +178,15 @@ def _output_path(value: str, reviews_path: Path) -> Path:
     return path.resolve(strict=True)
 
 
-
-_MANUAL_REVIEW_COLUMNS = frozenset(FIELD_LABELS) | frozenset((
-    "reviewer_alias", "overall_accept", "overall_reason", "reviewed_at_utc",
-))
-_IMMUTABLE_REVIEW_COLUMNS = tuple(
-    col for col in REVIEW_FIELDS if col not in _MANUAL_REVIEW_COLUMNS
+_MANUAL_REVIEW_COLUMNS = frozenset(FIELD_LABELS) | frozenset(
+    (
+        "reviewer_alias",
+        "overall_accept",
+        "overall_reason",
+        "reviewed_at_utc",
+    )
 )
+_IMMUTABLE_REVIEW_COLUMNS = tuple(col for col in REVIEW_FIELDS if col not in _MANUAL_REVIEW_COLUMNS)
 
 
 def _bind_human_reviews_to_ocr_source(source_rows, human_rows) -> list[str]:
@@ -167,8 +210,7 @@ def _bind_human_reviews_to_ocr_source(source_rows, human_rows) -> list[str]:
         for col in _IMMUTABLE_REVIEW_COLUMNS:
             if source[key][col] != human[key][col]:
                 errors.append(
-                    f"{key[1]}/{key[2]}: OCR 冻结源快照与最终人工表的"
-                    f"不可变字段 {col} 不一致"
+                    f"{key[1]}/{key[2]}: OCR 冻结源快照与最终人工表的不可变字段 {col} 不一致"
                 )
     return errors
 
@@ -207,19 +249,16 @@ def validate_bundle(
             source, REVIEW_FIELDS, "OCR 冻结源评审表"
         )
         split_binding_errors = _bind_human_reviews_to_ocr_source(
-            source_review_rows, review_rows,
+            source_review_rows,
+            review_rows,
         )
-        source_binding = (
-            "BLOCKED" if split_binding_errors else "MATCHED_IMMUTABLE_FIELDS"
-        )
+        source_binding = "BLOCKED" if split_binding_errors else "MATCHED_IMMUTABLE_FIELDS"
     _native_manifest_path, native_rows, native_manifest_sha = _read_csv(
         Path(native_manifest), NATIVE_MANIFEST_FIELDS, "M5j native trial manifest"
     )
     journal_path = Path(journal).resolve(strict=True)
     journal_path, journal_data, journal_sha = _read_json(journal_path, "M5g batch journal")
-    _readiness_path, readiness_data, readiness_sha = _read_json(
-        Path(readiness), "M5j readiness"
-    )
+    _readiness_path, readiness_data, readiness_sha = _read_json(Path(readiness), "M5j readiness")
 
     try:
         manifest_sha, prepared = preflight(manifest_path)
@@ -321,7 +360,8 @@ def validate_bundle(
         "can_score": readiness_data.get("can_score") is True,
         "scope_mode": readiness_data.get("scope_mode") == "batch_latest_per_sku",
         "journal_sha256": readiness_data.get("source_batch_journal_sha256") == journal_sha,
-        "native_manifest_sha256": readiness_data.get("native_trial_manifest_sha256") == native_manifest_sha,
+        "native_manifest_sha256": readiness_data.get("native_trial_manifest_sha256")
+        == native_manifest_sha,
         "manifest_sha256": readiness_data.get("source_manifest_sha256") == manifest_sha,
         "batch_sku_count": readiness_data.get("batch_sku_count") == len(expected_skus),
         "total_versions": readiness_data.get("total_versions") == len(expected_skus),
@@ -331,7 +371,9 @@ def validate_bundle(
         if not passed:
             errors.append(f"M5j readiness 门禁失败：{name}")
     if readiness_data.get("ocr_runtime_attested") is not False:
-        warnings.append("M5j readiness 未明确声明 OCR runtime attestation 为 false；人工核对报告来源")
+        warnings.append(
+            "M5j readiness 未明确声明 OCR runtime attestation 为 false；人工核对报告来源"
+        )
 
     cohort_ids = {row["cohort_id"] for row in registry_rows if row["cohort_id"]}
     if len(cohort_ids) != 1 or any(not row["cohort_id"] for row in registry_rows):
@@ -361,9 +403,15 @@ def validate_bundle(
             errors.append(f"{sku}: 缺少本地授权证据引用")
         if row["logo_authorization_status"] not in {"AUTHORIZED", "NOT_APPLICABLE"}:
             errors.append(f"{sku}: Logo 授权状态无效")
-        if prepared_item.get("logo_sha256") is None and row["logo_authorization_status"] != "NOT_APPLICABLE":
+        if (
+            prepared_item.get("logo_sha256") is None
+            and row["logo_authorization_status"] != "NOT_APPLICABLE"
+        ):
             errors.append(f"{sku}: M5g 未使用 Logo，registry 应标 NOT_APPLICABLE")
-        if prepared_item.get("logo_sha256") is not None and row["logo_authorization_status"] != "AUTHORIZED":
+        if (
+            prepared_item.get("logo_sha256") is not None
+            and row["logo_authorization_status"] != "AUTHORIZED"
+        ):
             errors.append(f"{sku}: M5g 使用了 Logo，但 registry 未标 AUTHORIZED")
         if row["source_image_sha256"] != journal_item.get("product_sha256"):
             errors.append(f"{sku}: registry 源图 SHA-256 与 M5g journal 不一致")
@@ -373,7 +421,12 @@ def validate_bundle(
             errors.append(f"{sku}: distinct_sku_verified 必须是 YES")
         if row["duplicate_source_image_reviewed"] != "YES":
             errors.append(f"{sku}: duplicate_source_image_reviewed 必须是 YES")
-        for field in ("product_category", "product_family_id", "variant_or_packaging_condition", "reviewer_alias"):
+        for field in (
+            "product_category",
+            "product_family_id",
+            "variant_or_packaging_condition",
+            "reviewer_alias",
+        ):
             if not row[field]:
                 errors.append(f"{sku}: registry 字段 {field} 不能为空")
 
@@ -388,7 +441,8 @@ def validate_bundle(
 
     source_hashes = [
         record.get("product_sha256", "")
-        for record in journal_rows.values() if isinstance(record, dict)
+        for record in journal_rows.values()
+        if isinstance(record, dict)
     ]
     if len(set(source_hashes)) < len(source_hashes):
         warnings.append("不同 SKU 存在重复源图 SHA-256；已保留样本，但需在最终汇总中报告")
@@ -434,7 +488,9 @@ def validate_bundle(
                 if native_record["version"] != row["source_version"]:
                     errors.append(f"{sku}/{variant}: source_version 与 M5j native manifest 不一致")
                 if native_record["native_image_sha256"] != row["output_image_sha256"]:
-                    errors.append(f"{sku}/{variant}: 评审图片 SHA-256 与 M5j native_image_sha256 不一致")
+                    errors.append(
+                        f"{sku}/{variant}: 评审图片 SHA-256 与 M5j native_image_sha256 不一致"
+                    )
 
         poster_id = row["poster_id"]
         try:
@@ -463,10 +519,9 @@ def validate_bundle(
 
         for field in FIELD_LABELS:
             value = row[field]
-            na_allowed = (
-                (field == "subtitle" and not str(spec.get("subtitle") or "").strip())
-                or (field in {"original_price", "original_price_position"}
-                    and spec.get("original_price") in (None, ""))
+            na_allowed = (field == "subtitle" and not str(spec.get("subtitle") or "").strip()) or (
+                field in {"original_price", "original_price_position"}
+                and spec.get("original_price") in (None, "")
             )
             if value == "N/A" and na_allowed:
                 continue
@@ -486,8 +541,7 @@ def validate_bundle(
         if field_overall_mismatch:
             field_overall_mismatch_count += 1
             message = (
-                f"{sku}/{variant}: overall_accept={row['overall_accept']} "
-                "与字段标签派生状态不一致"
+                f"{sku}/{variant}: overall_accept={row['overall_accept']} 与字段标签派生状态不一致"
             )
             if row["overall_accept"] == "PASS":
                 errors.append(message + "；字段含 FAIL/UNVERIFIED，禁止 overall PASS")
@@ -501,7 +555,9 @@ def validate_bundle(
             missing_output_count += 1
             if row["overall_accept"] != "UNVERIFIED":
                 errors.append(f"{sku}/{variant}: 缺失输出必须标记 overall_accept=UNVERIFIED")
-            if not any(code in row["overall_reason"] for code in ("OUTPUT_MISSING", "EXPORT_FAILED")):
+            if not any(
+                code in row["overall_reason"] for code in ("OUTPUT_MISSING", "EXPORT_FAILED")
+            ):
                 errors.append(f"{sku}/{variant}: 缺失输出必须记录 OUTPUT_MISSING 或 EXPORT_FAILED")
             errors.append(f"{sku}/{variant}: 预期输出缺失，保留在分母并阻塞 M6 验收")
             continue
@@ -551,10 +607,13 @@ def validate_bundle(
                 errors.append(f"{sku}/{variant}: 缺少必需的评审行")
 
     overall_counts = {
-        variant: dict(Counter(
-            row["overall_accept"] for row in review_rows
-            if row["variant_id"] == variant and row["overall_accept"] in LABELS
-        ))
+        variant: dict(
+            Counter(
+                row["overall_accept"]
+                for row in review_rows
+                if row["variant_id"] == variant and row["overall_accept"] in LABELS
+            )
+        )
         for variant in VARIANTS
     }
     for variant in VARIANTS:
@@ -580,8 +639,10 @@ def validate_bundle(
     else:
         try:
             checked = verify_ocr_capture(
-                Path(ocr_evidence), source_review_rows,
-                cohort_id=cohort_id, reviews_sha256=source_reviews_sha,
+                Path(ocr_evidence),
+                source_review_rows,
+                cohort_id=cohort_id,
+                reviews_sha256=source_reviews_sha,
             )
             capture_status = checked["status"]
             capture_observation_count = checked["observation_count"]
@@ -590,8 +651,7 @@ def validate_bundle(
             capture_sha = checked["evidence_sha256"]
             if capture_unlocated_lines:
                 warnings.append(
-                    f"OCR 有 {capture_unlocated_lines} 条文字缺少可信检测框；"
-                    "位置正确性不能据此判断"
+                    f"OCR 有 {capture_unlocated_lines} 条文字缺少可信检测框；位置正确性不能据此判断"
                 )
             warnings.append(
                 "OCR capture 与评审快照一致，但模型执行声明/指纹不构成独立运行证明；"
@@ -624,16 +684,21 @@ def validate_bundle(
         "missing_output_count": missing_output_count,
         "field_overall_mismatch_count": field_overall_mismatch_count,
         "distinct_source_image_sha256_count": len(set(source_hashes)),
-        "product_category_count": len({row["product_category"] for row in registry_rows if row["product_category"]}),
-        "product_family_count": len({row["product_family_id"] for row in registry_rows if row["product_family_id"]}),
+        "product_category_count": len(
+            {row["product_category"] for row in registry_rows if row["product_category"]}
+        ),
+        "product_family_count": len(
+            {row["product_family_id"] for row in registry_rows if row["product_family_id"]}
+        ),
         "manual_overall_counts": overall_counts,
         "input_sha256": {
             "manifest": manifest_sha,
             "batch_journal": journal_sha,
             "cohort_registry": registry_sha,
             "output_reviews": reviews_sha,
-            **({"ocr_source_reviews": source_reviews_sha}
-               if ocr_source_reviews is not None else {}),
+            **(
+                {"ocr_source_reviews": source_reviews_sha} if ocr_source_reviews is not None else {}
+            ),
             "m5j_native_manifest": native_manifest_sha,
             "m5j_readiness": readiness_sha,
             **({"ocr_capture": capture_sha} if capture_sha is not None else {}),
@@ -655,7 +720,9 @@ def _safe_report_destination(output: Path, inputs: tuple[Path, ...]) -> Path:
     destination = output.expanduser().resolve()
     for source in inputs:
         if destination == Path(source).expanduser().resolve():
-            raise M6ValidationError("报告输出路径不能覆盖 manifest、registry、journal、reviews 或 readiness 输入")
+            raise M6ValidationError(
+                "报告输出路径不能覆盖 manifest、registry、journal、reviews 或 readiness 输入"
+            )
     if destination.exists():
         raise M6ValidationError("报告输出文件已存在；请使用新路径以保留此前的证据记录")
     return destination
@@ -684,9 +751,7 @@ def _publish_report(destination: Path, payload: bytes) -> None:
             os.fsync(handle.fileno())
         os.link(temporary, destination, follow_symlinks=False)
     except FileExistsError as exc:
-        raise M6ValidationError(
-            "报告输出文件已存在；禁止覆盖此前或其他进程发布的 M6 证据"
-        ) from exc
+        raise M6ValidationError("报告输出文件已存在；禁止覆盖此前或其他进程发布的 M6 证据") from exc
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -698,24 +763,49 @@ def main() -> int:
     )
     parser.add_argument("--manifest", type=Path, required=True, help="Frozen M5g CSV")
     parser.add_argument("--registry", type=Path, required=True, help="Local M6 cohort registry CSV")
-    parser.add_argument("--journal", type=Path, required=True, help="Completed M5g batch_import_results.json")
+    parser.add_argument(
+        "--journal", type=Path, required=True, help="Completed M5g batch_import_results.json"
+    )
     parser.add_argument("--reviews", type=Path, required=True, help="Local M6 output review CSV")
-    parser.add_argument("--native-manifest", type=Path, required=True,
-                        help="M5j native_trial_manifest.csv; binds reviewed PNG to OCR/review evidence")
-    parser.add_argument("--readiness", type=Path, required=True, help="M5j native_trial_readiness.json")
-    parser.add_argument("--ocr-evidence", type=Path, default=None,
-                        help="Optional M6 PaddleOCR capture JSON, validated against frozen reviews")
-    parser.add_argument("--require-ocr-evidence", action="store_true",
-                        help="BLOCKED unless a complete matching declared-real OCR capture is supplied")
-    parser.add_argument("--ocr-source-reviews", type=Path, default=None,
-                        help="Original frozen OCR-bound CSV, when --reviews is edited")
+    parser.add_argument(
+        "--native-manifest",
+        type=Path,
+        required=True,
+        help="M5j native_trial_manifest.csv; binds reviewed PNG to OCR/review evidence",
+    )
+    parser.add_argument(
+        "--readiness", type=Path, required=True, help="M5j native_trial_readiness.json"
+    )
+    parser.add_argument(
+        "--ocr-evidence",
+        type=Path,
+        default=None,
+        help="Optional M6 PaddleOCR capture JSON, validated against frozen reviews",
+    )
+    parser.add_argument(
+        "--require-ocr-evidence",
+        action="store_true",
+        help="BLOCKED unless a complete matching declared-real OCR capture is supplied",
+    )
+    parser.add_argument(
+        "--ocr-source-reviews",
+        type=Path,
+        default=None,
+        help="Original frozen OCR-bound CSV, when --reviews is edited",
+    )
     parser.add_argument("--output", type=Path, required=True, help="Local JSON report destination")
     args = parser.parse_args()
     try:
         destination = _safe_report_destination(
             args.output,
-            (args.manifest, args.registry, args.journal, args.reviews,
-             args.native_manifest, args.readiness)
+            (
+                args.manifest,
+                args.registry,
+                args.journal,
+                args.reviews,
+                args.native_manifest,
+                args.readiness,
+            )
             + ((args.ocr_evidence,) if args.ocr_evidence else ())
             + ((args.ocr_source_reviews,) if args.ocr_source_reviews else ()),
         )
@@ -723,8 +813,12 @@ def main() -> int:
         parser.error(str(exc))
     try:
         report = validate_bundle(
-            args.manifest, args.registry, args.journal, args.reviews,
-            args.native_manifest, args.readiness,
+            args.manifest,
+            args.registry,
+            args.journal,
+            args.reviews,
+            args.native_manifest,
+            args.readiness,
             ocr_evidence=args.ocr_evidence,
             require_ocr_evidence=args.require_ocr_evidence,
             ocr_source_reviews=args.ocr_source_reviews,

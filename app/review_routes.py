@@ -1,11 +1,12 @@
 """M2b API: durable review run, reload, explicit approval/rejection."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, model_validator
 
 from app.brief_compiler import BriefCompilerError, BriefRequest
-from app.review_service import ReviewNotFound, ReviewConflict, create_run, get_run, decide_run
+from app.review_service import ReviewConflict, ReviewNotFound, create_run, decide_run, get_run
 from app.schemas import PosterSpec
 
 router = APIRouter(prefix="/api/briefs/runs", tags=["brief-review"])

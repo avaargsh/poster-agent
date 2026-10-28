@@ -1,4 +1,5 @@
 """M3c human-review endpoints (local-only, without authentication)."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Response

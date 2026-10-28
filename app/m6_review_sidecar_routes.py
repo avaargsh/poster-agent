@@ -4,6 +4,7 @@ This endpoint does not save decisions or change the frozen OCR-bound CSV.
 A successfully validated file is an operator assertion, NOT independent human
 attestation, an OCR runtime attestation, or quality / publishing approval.
 """
+
 from __future__ import annotations
 
 import csv
@@ -20,11 +21,20 @@ from .m6_overlay_routes import _package
 
 router = APIRouter(prefix="/api/batches", tags=["m6-review-sidecar"])
 
-CHECK_NAMES = frozenset((
-    "sku_integrity", "text_legibility", "title", "subtitle", "price",
-    "original_price", "price_position", "original_price_position", "cta",
-    "composition",
-))
+CHECK_NAMES = frozenset(
+    (
+        "sku_integrity",
+        "text_legibility",
+        "title",
+        "subtitle",
+        "price",
+        "original_price",
+        "price_position",
+        "original_price_position",
+        "cta",
+        "composition",
+    )
+)
 SHA = re.compile(r"[a-f0-9]{64}\Z")
 MAX_REQUEST_BYTES = 256 * 1024
 
@@ -36,7 +46,8 @@ class ReviewDecision(BaseModel):
     variant_id: Literal["square", "feed_4x5_native"]
     reviewer_alias: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     checks: dict[str, Literal["PASS", "FAIL", "N/A"]] = Field(
-        min_length=10, max_length=10,
+        min_length=10,
+        max_length=10,
     )
     overall_accept: Literal["PASS", "FAIL"]
     overall_reason: str = Field(max_length=500)
@@ -67,7 +78,8 @@ class RestoredDecision(BaseModel):
     image_sha256: str = Field(min_length=64, max_length=64)
     reviewer_alias: str = Field(min_length=2, max_length=64)
     checks: dict[str, Literal["PASS", "FAIL", "N/A"]] = Field(
-        min_length=10, max_length=10,
+        min_length=10,
+        max_length=10,
     )
     manual_overall_label: Literal["PASS", "FAIL"]
     overall_reason: str = Field(max_length=500)
@@ -126,10 +138,15 @@ def _validate_decisions(submitted: ReviewSidecarRequest) -> None:
 def _canonical_sidecar(package, submitted: ReviewSidecarRequest) -> dict:
     """One shared verification path for new exports and imported sidecars."""
     from scripts.capture_m6_paddle_ocr import (
-        MAX_PNG_BYTES, OCREvidenceError, _identities, _read_regular, _review_rows,
+        MAX_PNG_BYTES,
+        OCREvidenceError,
+        _identities,
+        _read_regular,
+        _review_rows,
     )
     from scripts.verify_m6_ocr_capture import (
-        OCRCaptureEvidenceError, verify_ocr_capture,
+        OCRCaptureEvidenceError,
+        verify_ocr_capture,
     )
 
     _validate_decisions(submitted)
@@ -140,7 +157,9 @@ def _canonical_sidecar(package, submitted: ReviewSidecarRequest) -> dict:
             raise OCREvidenceError("冻结人工审核 CSV 已变更")
         verified = verify_ocr_capture(
             package / "m6_paddle_ocr_evidence.json",
-            rows, cohort_id=cohort, reviews_sha256=reviews_sha,
+            rows,
+            cohort_id=cohort,
+            reviews_sha256=reviews_sha,
         )
         if verified["evidence_sha256"] != submitted.ocr_capture_sha256:
             raise OCREvidenceError("PaddleOCR 证据版本已变更")
@@ -153,18 +172,20 @@ def _canonical_sidecar(package, submitted: ReviewSidecarRequest) -> dict:
             image = _read_regular(package / row["output_image_path"], MAX_PNG_BYTES)
             if hashlib.sha256(image).hexdigest() != row["output_image_sha256"]:
                 raise OCREvidenceError("对应海报原图已变化")
-            output.append({
-                "sku_id": decision.sku_id,
-                "variant_id": decision.variant_id,
-                "poster_id": row["poster_id"],
-                "image_sha256": row["output_image_sha256"],
-                "reviewer_alias": decision.reviewer_alias,
-                "checks": dict(decision.checks),
-                "manual_overall_label": decision.overall_accept,
-                "overall_reason": decision.overall_reason.strip(),
-                # The server cannot prove the actual time of human inspection.
-                "reviewed_at_utc": None,
-            })
+            output.append(
+                {
+                    "sku_id": decision.sku_id,
+                    "variant_id": decision.variant_id,
+                    "poster_id": row["poster_id"],
+                    "image_sha256": row["output_image_sha256"],
+                    "reviewer_alias": decision.reviewer_alias,
+                    "checks": dict(decision.checks),
+                    "manual_overall_label": decision.overall_accept,
+                    "overall_reason": decision.overall_reason.strip(),
+                    # The server cannot prove the actual time of human inspection.
+                    "reviewed_at_utc": None,
+                }
+            )
     except HTTPException:
         raise
     except (OSError, ValueError, OCREvidenceError, OCRCaptureEvidenceError) as exc:
@@ -195,9 +216,7 @@ async def export_m6_review_sidecar(batch_id: str, request: Request):
     """Return an operator-asserted JSON draft; never persist human data."""
     package = _package(batch_id)
     try:
-        submitted = ReviewSidecarRequest.model_validate_json(
-            await _read_bounded_json(request)
-        )
+        submitted = ReviewSidecarRequest.model_validate_json(await _read_bounded_json(request))
     except ValidationError as exc:
         raise _invalid("JSON 结构或字段不符合 M6 审核协议") from exc
     return _canonical_sidecar(package, submitted)
@@ -211,20 +230,23 @@ def validate_saved_sidecar(package, raw: bytes) -> dict:
     """
     try:
         saved = RestoredSidecar.model_validate_json(raw)
-        submitted = ReviewSidecarRequest.model_validate({
-            "reviews_csv_sha256": saved.reviews_csv_sha256,
-            "ocr_capture_sha256": saved.ocr_capture_sha256,
-            "decisions": [
-                {
-                    "sku_id": d.sku_id,
-                    "variant_id": d.variant_id,
-                    "reviewer_alias": d.reviewer_alias,
-                    "checks": d.checks,
-                    "overall_accept": d.manual_overall_label,
-                    "overall_reason": d.overall_reason,
-                } for d in saved.decisions
-            ],
-        })
+        submitted = ReviewSidecarRequest.model_validate(
+            {
+                "reviews_csv_sha256": saved.reviews_csv_sha256,
+                "ocr_capture_sha256": saved.ocr_capture_sha256,
+                "decisions": [
+                    {
+                        "sku_id": d.sku_id,
+                        "variant_id": d.variant_id,
+                        "reviewer_alias": d.reviewer_alias,
+                        "checks": d.checks,
+                        "overall_accept": d.manual_overall_label,
+                        "overall_reason": d.overall_reason,
+                    }
+                    for d in saved.decisions
+                ],
+            }
+        )
     except ValidationError as exc:
         raise _invalid("导入 JSON 不符合先前导出的侧车格式") from exc
     canonical = _canonical_sidecar(package, submitted)
@@ -278,9 +300,7 @@ async def export_m6_review_worksheet(batch_id: str, request: Request):
     if source_sha != canonical["reviews_csv_sha256"]:
         raise _unavailable("生成 CSV 期间冻结审核表已变更")
 
-    decisions = {
-        (d["sku_id"], d["variant_id"]): d for d in canonical["decisions"]
-    }
+    decisions = {(d["sku_id"], d["variant_id"]): d for d in canonical["decisions"]}
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=REVIEW_FIELDS, lineterminator="\n")
     writer.writeheader()
@@ -291,12 +311,14 @@ async def export_m6_review_worksheet(batch_id: str, request: Request):
         # The frozen file may contain older labels. Only freshly validated
         # sidecar decisions carry forward; every other judgment resets.
         row.update({field: "UNVERIFIED" for field in FIELD_LABELS})
-        row.update({
-            "reviewer_alias": "",
-            "overall_accept": "UNVERIFIED",
-            "overall_reason": "NOT_REVIEWED",
-            "reviewed_at_utc": "",
-        })
+        row.update(
+            {
+                "reviewer_alias": "",
+                "overall_accept": "UNVERIFIED",
+                "overall_reason": "NOT_REVIEWED",
+                "reviewed_at_utc": "",
+            }
+        )
         if decision:
             row.update(decision["checks"])
             reason = decision["overall_reason"]
@@ -306,11 +328,13 @@ async def export_m6_review_worksheet(batch_id: str, request: Request):
                 ("\t", "\r", "\n")
             ):
                 reason = "'" + reason
-            row.update({
-                "reviewer_alias": decision["reviewer_alias"],
-                "overall_accept": decision["manual_overall_label"],
-                "overall_reason": reason,
-            })
+            row.update(
+                {
+                    "reviewer_alias": decision["reviewer_alias"],
+                    "overall_accept": decision["manual_overall_label"],
+                    "overall_reason": reason,
+                }
+            )
         writer.writerow(row)
     payload = ("\ufeff" + stream.getvalue()).encode("utf-8")
     if len(payload) > 2_000_000:

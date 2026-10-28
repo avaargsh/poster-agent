@@ -1,4 +1,5 @@
 """Actual rendered PNG fixture tests. Real OCR is optional and NOT run by CI."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,8 +7,8 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from app.ocr_provider import OCRUnavailable
 
+from app.ocr_provider import OCRUnavailable
 from evals.image_fixtures import ImageManifest, generate_fixture_set
 from evals.image_runner import evaluate_image_manifest
 
@@ -23,7 +24,8 @@ def test_20_actual_png_files_and_label_integrity(tmp_path):
         assert image.startswith(b"\x89PNG\r\n\x1a\n")
         assert hashlib.sha256(image).hexdigest() == case.image_sha256
         assert case.truth_defects == [
-            name for name in manifest.target_fields
+            name
+            for name in manifest.target_fields
             if getattr(case.rendered_spec, name) != getattr(manifest.expected_spec, name)
         ]
 
@@ -49,18 +51,29 @@ def test_paddle_mode_uses_image_file_and_evaluator_with_mocked_ocr(tmp_path, mon
     manifest_file = generate_fixture_set(tmp_path / "images")
     manifest = ImageManifest.model_validate_json(manifest_file.read_bytes())
     called = []
+
     def fake_recognize(path):
         assert path.is_file()
         assert path.suffix == ".png"
         called.append(path.name)
         fixture = next(f for f in manifest.fixtures if f.image_file == path.name)
         spec = fixture.rendered_spec
-        return [{"text": s, "score": 0.99} for s in
-                (spec.title, "¥" + str(spec.price).rstrip("0").rstrip(".") if "." in str(spec.price) else "¥"+str(spec.price), spec.cta)]
+        return [
+            {"text": s, "score": 0.99}
+            for s in (
+                spec.title,
+                "¥" + str(spec.price).rstrip("0").rstrip(".")
+                if "." in str(spec.price)
+                else "¥" + str(spec.price),
+                spec.cta,
+            )
+        ]
+
     monkeypatch.setattr("evals.image_runner.recognize", fake_recognize)
     report = evaluate_image_manifest(manifest_file, tmp_path / "paddle_run", "paddle")
     assert len(called) == 20
     import json
+
     evidence = tmp_path / "paddle_run/ocr_observations.jsonl"
     assert evidence.is_file()
     observations = [json.loads(line) for line in evidence.read_text().splitlines()]
@@ -77,8 +90,10 @@ def test_paddle_mode_uses_image_file_and_evaluator_with_mocked_ocr(tmp_path, mon
 
 def test_paddle_absent_raises_instead_of_fabricating_accuracy(tmp_path, monkeypatch):
     manifest = generate_fixture_set(tmp_path / "images")
+
     def absent(path):
         raise OCRUnavailable("not installed")
+
     monkeypatch.setattr("evals.image_runner.recognize", absent)
     with pytest.raises(RuntimeError, match="未生成任何真实 OCR 指标"):
         evaluate_image_manifest(manifest, tmp_path / "missing_ocr", "paddle")

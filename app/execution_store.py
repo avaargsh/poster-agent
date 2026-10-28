@@ -5,6 +5,7 @@
 同一个 Key 对应不同输入：拒绝覆盖。
 本模块只存执行元信息，不存 API Key、Prompt、商品图或用户身份。
 """
+
 from __future__ import annotations
 
 import json
@@ -134,7 +135,7 @@ def _positive_env_limit(name: str, default: int, maximum: int) -> int:
 def _event(conn: sqlite3.Connection, key: str, name: str) -> None:
     conn.execute(
         "INSERT INTO execution_events(idempotency_key,event_type,occurred_at) VALUES(?,?,?)",
-        (key, name, _time())
+        (key, name, _time()),
     )
 
 
@@ -169,7 +170,7 @@ def begin(
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT request_hash,status,result_json FROM poster_executions WHERE idempotency_key=?",
-            (key,)
+            (key,),
         ).fetchone()
         if row:
             if row["request_hash"] != request_hash:
@@ -213,7 +214,7 @@ def begin(
         now = _time()
         conn.execute(
             "INSERT INTO poster_executions VALUES(?,?,'RUNNING',NULL,?,?)",
-            (key, request_hash, now, now)
+            (key, request_hash, now, now),
         )
         if paid:
             conn.execute(
@@ -231,7 +232,7 @@ def finish(key: str, result: dict) -> None:
         cursor = conn.execute(
             "UPDATE poster_executions SET status='COMPLETED',result_json=?,updated_at=? "
             "WHERE idempotency_key=? AND status='RUNNING'",
-            (json.dumps(result, ensure_ascii=False), _time(), key)
+            (json.dumps(result, ensure_ascii=False), _time(), key),
         )
         if cursor.rowcount != 1:
             raise ExecutionConflict("任务状态已改变，不能重复完成")
@@ -244,7 +245,8 @@ def mark_unknown(key: str) -> None:
         conn.execute("BEGIN IMMEDIATE")
         cursor = conn.execute(
             "UPDATE poster_executions SET status='UNKNOWN',updated_at=? "
-            "WHERE idempotency_key=? AND status='RUNNING'", (_time(), key)
+            "WHERE idempotency_key=? AND status='RUNNING'",
+            (_time(), key),
         )
         if cursor.rowcount:
             _event(conn, key, "RESULT_UNKNOWN")
@@ -255,13 +257,15 @@ def get(key: str) -> dict:
     with _connect() as conn:
         row = conn.execute(
             "SELECT idempotency_key,status,result_json,started_at,updated_at "
-            "FROM poster_executions WHERE idempotency_key=?", (key,)
+            "FROM poster_executions WHERE idempotency_key=?",
+            (key,),
         ).fetchone()
         if not row:
             raise LookupError("执行记录不存在")
         event_rows = conn.execute(
             "SELECT event_type,occurred_at FROM execution_events "
-            "WHERE idempotency_key=? ORDER BY event_id LIMIT 100", (key,)
+            "WHERE idempotency_key=? ORDER BY event_id LIMIT 100",
+            (key,),
         ).fetchall()
         return {
             "idempotency_key": row["idempotency_key"],
@@ -302,7 +306,8 @@ def reconcile_unknown(key: str) -> dict:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT idempotency_key,request_hash,status FROM poster_executions "
-            "WHERE idempotency_key=?", (key,),
+            "WHERE idempotency_key=?",
+            (key,),
         ).fetchone()
         if row is None:
             raise LookupError("执行记录不存在")
@@ -321,8 +326,7 @@ def recover_incomplete() -> int:
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
-            "SELECT idempotency_key,request_hash FROM poster_executions "
-            "WHERE status='RUNNING'"
+            "SELECT idempotency_key,request_hash FROM poster_executions WHERE status='RUNNING'"
         ).fetchall()
         for row in rows:
             if _complete_from_artifact(conn, row):
@@ -330,15 +334,14 @@ def recover_incomplete() -> int:
             key = row["idempotency_key"]
             conn.execute(
                 "UPDATE poster_executions SET status='UNKNOWN',updated_at=? "
-                "WHERE idempotency_key=? AND status='RUNNING'", (_time(), key),
+                "WHERE idempotency_key=? AND status='RUNNING'",
+                (_time(), key),
             )
             _event(conn, key, "RECOVERED_AS_UNKNOWN")
         return len(rows)
 
 
-def list_recent_page(
-    limit: int = 20, offset: int = 0, status: str | None = None
-) -> dict[str, Any]:
+def list_recent_page(limit: int = 20, offset: int = 0, status: str | None = None) -> dict[str, Any]:
     """Page local execution summaries without exposing request data or full results.
 
     Offset paging is intentional for this single-user demo. New completions

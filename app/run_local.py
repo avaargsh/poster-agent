@@ -4,6 +4,7 @@ This guard applies to the project's documented launcher. Running Uvicorn
 directly can bypass it, so raw Uvicorn and proxy/container exposure remain
 unsupported until authentication and resource authorization are implemented.
 """
+
 from __future__ import annotations
 
 import argparse

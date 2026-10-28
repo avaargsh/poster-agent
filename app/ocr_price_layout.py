@@ -7,6 +7,7 @@ Do not infer geometry when boxes are absent. The result then is UNVERIFIED.
 This is a template-specific *additional* acceptance check; it does not alter
 the original source-of-truth PosterSpec or OCR text-level field checks.
 """
+
 from __future__ import annotations
 
 import math
@@ -35,10 +36,9 @@ def square_price_zones(spec: PosterSpec) -> dict[str, tuple[int, int, int, int]]
     dx = spec.layer_layout.price_dx
     dy = spec.layer_layout.price_dy
     base = SQUARE_PRICE_ZONES[spec.layout_id]
-    return {
-        name: (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
-        for name, (x1, y1, x2, y2) in base.items()
-    }
+    return {name: (x1 + dx, y1 + dy, x2 + dx, y2 + dy) for name, (x1, y1, x2, y2) in base.items()}
+
+
 PRICE_TOKEN = re.compile(r"[¥￥]\s*([0-9][0-9.,．]*)")
 MIN_SCORE = 0.40
 
@@ -46,8 +46,9 @@ MIN_SCORE = 0.40
 def _center(box, layout_size: tuple[int, int] = LAYOUT_SIZE) -> tuple[float, float] | None:
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
-    if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)
-           for x in box):
+    if any(
+        isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in box
+    ):
         return None
     x1, y1, x2, y2 = (float(v) for v in box)
     if not (0 <= x1 < x2 <= layout_size[0] and 0 <= y1 < y2 <= layout_size[1]):
@@ -70,7 +71,9 @@ def _amount(value: str) -> Decimal | None:
         return None
 
 
-def _tokens(lines: list[dict], layout_size: tuple[int, int] = LAYOUT_SIZE) -> tuple[list[dict], int]:
+def _tokens(
+    lines: list[dict], layout_size: tuple[int, int] = LAYOUT_SIZE
+) -> tuple[list[dict], int]:
     """Return high-confidence price tokens and count ambiguous observations."""
     observations: list[dict] = []
     uncertain = 0
@@ -81,25 +84,32 @@ def _tokens(lines: list[dict], layout_size: tuple[int, int] = LAYOUT_SIZE) -> tu
             parsed = _amount(match.group(1))
             score = line.get("score")
             center = _center(line.get("bbox"), layout_size)
-            trusted_score = (not isinstance(score, bool)
-                             and isinstance(score, (int, float))
-                             and math.isfinite(score)
-                             and MIN_SCORE <= score <= 1.0)
+            trusted_score = (
+                not isinstance(score, bool)
+                and isinstance(score, (int, float))
+                and math.isfinite(score)
+                and MIN_SCORE <= score <= 1.0
+            )
             if parsed is None or not trusted_score or center is None:
                 uncertain += 1
                 continue
-            observations.append({
-                "amount": parsed,
-                "text": raw[:160],
-                "bbox": list(line["bbox"]),
-                "center": center,
-                "score": score,
-            })
+            observations.append(
+                {
+                    "amount": parsed,
+                    "text": raw[:160],
+                    "bbox": list(line["bbox"]),
+                    "center": center,
+                    "score": score,
+                }
+            )
     return observations, uncertain
 
 
 def assess_price_zones(
-    spec: PosterSpec, ocr_status: str, lines: list[dict], *,
+    spec: PosterSpec,
+    ocr_status: str,
+    lines: list[dict],
+    *,
     zones: dict[str, tuple[int, int, int, int]] | None = None,
     layout_size: tuple[int, int] = LAYOUT_SIZE,
 ) -> list[dict]:
@@ -115,9 +125,11 @@ def assess_price_zones(
         if expected is None:
             continue
         zone = zones[field]
-        located = [o for o in observations
-                   if zone[0] <= o["center"][0] <= zone[2]
-                   and zone[1] <= o["center"][1] < zone[3]]
+        located = [
+            o
+            for o in observations
+            if zone[0] <= o["center"][0] <= zone[2] and zone[1] <= o["center"][1] < zone[3]
+        ]
         conflicting = [o for o in located if o["amount"] != expected]
         correct = [o for o in located if o["amount"] == expected]
         outside = [o for o in observations if o["amount"] == expected and o not in located]
@@ -125,7 +137,10 @@ def assess_price_zones(
         if ocr_status != "OK":
             status, reason = "UNVERIFIED", "未执行 OCR 或 OCR 不可用，无法判断价格所在区域"
         elif conflicting:
-            status, reason = "FAIL", "价格区域识别到与规格不一致的金额（即使同时出现正确金额也阻断）"
+            status, reason = (
+                "FAIL",
+                "价格区域识别到与规格不一致的金额（即使同时出现正确金额也阻断）",
+            )
         elif correct and uncertain == 0:
             status, reason = "PASS", "OCR 识别到匹配金额，且坐标在预期模板区域内"
         elif correct:
@@ -137,21 +152,23 @@ def assess_price_zones(
         else:
             status, reason = "UNVERIFIED", "没有足够的带坐标金额证据核对该价格区域"
 
-        checks.append({
-            "name": "ocr_" + field + "_position",
-            "status": status,
-            "detail": reason,
-            "evidence": {
-                "expected": "¥" + price_text(expected),
-                "zone_xyxy": list(zone),
-                "template_size": list(layout_size),
-                "located_amounts": [str(o["amount"]) for o in located],
-                "outside_expected_count": len(outside),
-                "unlocated_or_low_confidence_currency_tokens": uncertain,
-                "located_lines": [
-                    {"text": o["text"], "bbox": o["bbox"], "score": o["score"]}
-                    for o in located[:12]
-                ],
-            },
-        })
+        checks.append(
+            {
+                "name": "ocr_" + field + "_position",
+                "status": status,
+                "detail": reason,
+                "evidence": {
+                    "expected": "¥" + price_text(expected),
+                    "zone_xyxy": list(zone),
+                    "template_size": list(layout_size),
+                    "located_amounts": [str(o["amount"]) for o in located],
+                    "outside_expected_count": len(outside),
+                    "unlocated_or_low_confidence_currency_tokens": uncertain,
+                    "located_lines": [
+                        {"text": o["text"], "bbox": o["bbox"], "score": o["score"]}
+                        for o in located[:12]
+                    ],
+                },
+            }
+        )
     return checks

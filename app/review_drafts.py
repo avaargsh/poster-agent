@@ -1,4 +1,5 @@
 """Mutable, source-bound progress; isolated from append-only review records."""
+
 from __future__ import annotations
 
 import hashlib
@@ -52,8 +53,12 @@ def _source(poster_id: str, version: int, variant: ReviewVariant, reviewer: str)
     else:
         context = native_human_reviews.context(poster_id, version, reviewer, variant=variant)
     identity = {
-        "poster_id": poster_id, "version": version, "variant": variant, "reviewer": reviewer,
-        "image_sha256": context["image_sha256"], "spec_sha256": context["spec_sha256"],
+        "poster_id": poster_id,
+        "version": version,
+        "variant": variant,
+        "reviewer": reviewer,
+        "image_sha256": context["image_sha256"],
+        "spec_sha256": context["spec_sha256"],
         "source_image_sha256": context.get("source_image_sha256"),
         "asset_sha256": context.get("asset_sha256"),
         # A later formal submission starts a fresh progress namespace. Older
@@ -69,7 +74,9 @@ def _source(poster_id: str, version: int, variant: ReviewVariant, reviewer: str)
 
 def _read(path: Path, source: str, allowed: set[str]) -> _StoredDraft | None:
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -91,12 +98,17 @@ def _read(path: Path, source: str, allowed: set[str]) -> _StoredDraft | None:
 
 def _response(context, source, record):
     return {
-        "schema_version": "review-draft-1", "status": "DRAFT",
-        "source_sha256": source, "revision": record.revision if record else 0,
+        "schema_version": "review-draft-1",
+        "status": "DRAFT",
+        "source_sha256": source,
+        "revision": record.revision if record else 0,
         "saved_at": record.saved_at.isoformat() if record else None,
-        "fields": {key: value.model_dump() for key, value in record.fields.items()} if record else {},
+        "fields": {key: value.model_dump() for key, value in record.fields.items()}
+        if record
+        else {},
         "fields_to_review": context["fields_to_review"],
-        "image_sha256": context["image_sha256"], "spec_sha256": context["spec_sha256"],
+        "image_sha256": context["image_sha256"],
+        "spec_sha256": context["spec_sha256"],
         "base_review_id": (context.get("existing_review") or {}).get("review_id"),
         "automatically_accepted": False,
     }
@@ -108,11 +120,15 @@ def load(poster_id: str, version: int, variant: ReviewVariant, reviewer: str) ->
         return _response(context, source, _read(path, source, set(context["fields_to_review"])))
 
 
-def save(poster_id: str, version: int, variant: ReviewVariant, reviewer: str, payload: SaveDraft) -> dict:
+def save(
+    poster_id: str, version: int, variant: ReviewVariant, reviewer: str, payload: SaveDraft
+) -> dict:
     with storage.LOCK:
         context, source, path = _source(poster_id, version, variant, reviewer)
         if source != payload.source_sha256:
-            raise DraftConflict("图片、审核员或正式审核已变化，请重新载入；当前输入不会覆盖已保存进度")
+            raise DraftConflict(
+                "图片、审核员或正式审核已变化，请重新载入；当前输入不会覆盖已保存进度"
+            )
         allowed = set(context["fields_to_review"])
         if not set(payload.fields) <= allowed:
             raise ValueError("草稿含当前版式不适用的审核字段")
@@ -124,7 +140,11 @@ def save(poster_id: str, version: int, variant: ReviewVariant, reviewer: str, pa
             return _response(context, source, previous)
         if payload.expected_revision != revision:
             raise DraftConflict("另一个页面已更新这份进度；当前输入已保留，请先载入已保存版本")
-        record = _StoredDraft(source_sha256=source, revision=revision + 1,
-                              saved_at=datetime.now(timezone.utc), fields=payload.fields)
+        record = _StoredDraft(
+            source_sha256=source,
+            revision=revision + 1,
+            saved_at=datetime.now(timezone.utc),
+            fields=payload.fields,
+        )
         storage._atomic_json(path, record.model_dump(mode="json"))
         return _response(context, source, record)

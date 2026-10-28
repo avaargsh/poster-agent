@@ -5,6 +5,7 @@ quietly invent a different meaning for READY/OCR_STALE/REVIEW_UNSURE. The
 browser navigates to the existing review controls; there is no new reviewer
 or acceptance database.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -12,7 +13,7 @@ from collections import Counter
 from fastapi import APIRouter, HTTPException, Query
 
 from app import storage
-from app.native_acceptance import NativeVariant, VARIANT
+from app.native_acceptance import VARIANT, NativeVariant
 from evals.native_trial import audit_trial
 
 router = APIRouter(prefix="/api/trials", tags=["local-trial-queue"])
@@ -66,26 +67,30 @@ def local_native_review_queue(
             title = "规格无法读取"
             status = "SOURCE_INVALID"
             action = "原始海报规格或元数据不可读取"
-        result.append({
-            "poster_id": pid, "version": row["version"],
-            "title": title, "status": status, "action": action,
-            "definite_labels": row["definite_labels"],
-            "unsure_labels": row["unsure_labels"],
-            "ocr_text_labels": row["ocr_text_labels"],
-            "native_image_url": (
-                f"/api/posters/{pid}/versions/{row['version']}"
-                f"/exports/{variant}"
-            ),
-            "poster_url": f"/api/posters/{pid}",
-        })
-    result.sort(key=lambda x: (
-        PRIORITY.get(x["status"], 99), x["poster_id"]
-    ))
+        result.append(
+            {
+                "poster_id": pid,
+                "version": row["version"],
+                "title": title,
+                "status": status,
+                "action": action,
+                "definite_labels": row["definite_labels"],
+                "unsure_labels": row["unsure_labels"],
+                "ocr_text_labels": row["ocr_text_labels"],
+                "native_image_url": (
+                    f"/api/posters/{pid}/versions/{row['version']}/exports/{variant}"
+                ),
+                "poster_url": f"/api/posters/{pid}",
+            }
+        )
+    result.sort(key=lambda x: (PRIORITY.get(x["status"], 99), x["poster_id"]))
     counts = Counter(item["status"] for item in result)
     return {
         "reviewer": reviewer,
         "variant_id": variant,
-        "read_only": True, "runs_ocr": False, "automatically_approved": False,
+        "read_only": True,
+        "runs_ocr": False,
+        "automatically_approved": False,
         "total_posters": len(result),
         "total_versions_in_cohort": summary["total_versions"],
         "latest_status_counts": dict(sorted(counts.items())),

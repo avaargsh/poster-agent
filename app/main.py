@@ -1,56 +1,66 @@
 """M1 REST API + 极简页面。仅适合本地或可信环境使用。"""
+
 from __future__ import annotations
+
 import asyncio
-import io
-from ipaddress import ip_address
-from urllib.parse import urlsplit
-import json
 import hashlib
+import io
+import json
 import logging
+import warnings
 from contextlib import asynccontextmanager
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal
-import warnings
+from urllib.parse import urlsplit
+
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Request, Query
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
-from . import storage, execution_store, worker_lock
+
+from . import execution_store, storage, worker_lock
+from .acceptance_routes import router as acceptance_router
+from .batch_import_routes import router as batch_import_router
+from .brief_routes import router as brief_router
+from .campaign_presets import router as campaign_presets_router
+from .channel_export_routes import router as channel_export_router
+from .cli_batch_status_routes import router as cli_batch_status_router
+from .color_management import InvalidColorProfile, normalize_upload_color
 from .compositor import compose, local_background, validate_square_layout
 from .cutout_service import (
-    CutoutExecutionError, CutoutRejected, CutoutUnavailable,
-    local_preview, png_sha256, verify_candidate,
+    CutoutExecutionError,
+    CutoutRejected,
+    CutoutUnavailable,
+    local_preview,
+    png_sha256,
+    verify_candidate,
 )
-from .layout_collision import repair_square_layout
-from .color_management import InvalidColorProfile, normalize_upload_color
-from .image_provider import generate_ai_background, ImageProviderError
-from .schemas import PosterSpec, PosterEdit
-from .review_routes import router as review_router
-from .review_service import ReviewNotFound, get_run
-from .brief_routes import router as brief_router
-from .acceptance_routes import router as acceptance_router
 from .human_review_routes import router as human_review_router
-from .channel_export_routes import router as channel_export_router
+from .image_provider import ImageProviderError, generate_ai_background
+from .layout_collision import repair_square_layout
+from .m6_batch_package_routes import router as m6_batch_package_router
+from .m6_cutout_review_routes import router as m6_cutout_review_router
+from .m6_ocr_capture_routes import router as m6_ocr_capture_router
+from .m6_overlay_routes import router as m6_overlay_router
+from .m6_package_download_routes import router as m6_package_download_router
+from .m6_review_progress_routes import router as m6_review_progress_router
+from .m6_review_sidecar_routes import router as m6_review_sidecar_router
 from .native_acceptance_routes import router as native_acceptance_router
 from .native_human_review_routes import router as native_human_review_router
-from .trial_queue_routes import router as trial_queue_router
-from .batch_import_routes import router as batch_import_router
-from .campaign_presets import router as campaign_presets_router
-from .cli_batch_status_routes import router as cli_batch_status_router
-from .m6_review_progress_routes import router as m6_review_progress_router
-from .m6_batch_package_routes import router as m6_batch_package_router
-from .m6_package_download_routes import router as m6_package_download_router
-from .m6_cutout_review_routes import router as m6_cutout_review_router
-from .m6_overlay_routes import router as m6_overlay_router
-from .m6_review_sidecar_routes import router as m6_review_sidecar_router
 from .review_draft_routes import router as review_draft_router
-from .m6_ocr_capture_routes import router as m6_ocr_capture_router
+from .review_routes import router as review_router
+from .review_service import ReviewNotFound, get_run
+from .schemas import PosterEdit, PosterSpec
+from .trial_queue_routes import router as trial_queue_router
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Claim exclusive ownership before inspecting abandoned RUNNING tasks.
@@ -61,8 +71,9 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"),
-          name="static")
+app.mount(
+    "/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static"
+)
 
 
 def _is_loopback_peer(host: str | None) -> bool:
@@ -143,11 +154,7 @@ async def enforce_local_only_network_boundary(request: Request, call_next):
     if not _is_loopback_peer(peer_host):
         return JSONResponse(
             status_code=403,
-            content={
-                "detail": (
-                    "Poster Agent 仅允许本机直连；网络共享和反向代理部署未受支持"
-                )
-            },
+            content={"detail": ("Poster Agent 仅允许本机直连；网络共享和反向代理部署未受支持")},
         )
 
     test_client = peer_host == "testclient"
@@ -174,6 +181,8 @@ async def enforce_local_only_network_boundary(request: Request, call_next):
             content={"detail": "Origin 与本机页面不一致；已拒绝跨源请求"},
         )
     return await call_next(request)
+
+
 app.include_router(brief_router)
 app.include_router(review_router)
 app.include_router(acceptance_router)
@@ -218,8 +227,15 @@ async def read_upload(upload: UploadFile, *, required: bool = True) -> Image.Ima
                 if image.format not in {"PNG", "JPEG", "WEBP"}:
                     raise ValueError("格式不支持")
                 width, height = image.size
-                if width > MAX_IMAGE_EDGE or height > MAX_IMAGE_EDGE or width * height > MAX_DECODED_PIXELS:
-                    raise HTTPException(status_code=413, detail="图片像素或边长超限（最多 1600 万像素，单边最多 8192）")
+                if (
+                    width > MAX_IMAGE_EDGE
+                    or height > MAX_IMAGE_EDGE
+                    or width * height > MAX_DECODED_PIXELS
+                ):
+                    raise HTTPException(
+                        status_code=413,
+                        detail="图片像素或边长超限（最多 1600 万像素，单边最多 8192）",
+                    )
                 if width < 64 or height < 64:
                     raise ValueError("图片太小")
                 image.load()
@@ -236,12 +252,16 @@ async def read_upload(upload: UploadFile, *, required: bool = True) -> Image.Ima
     except InvalidColorProfile as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="请上传有效的 PNG/JPG/WEBP 图片（尺寸至少 64×64）") from exc
+        raise HTTPException(
+            status_code=422, detail="请上传有效的 PNG/JPG/WEBP 图片（尺寸至少 64×64）"
+        ) from exc
 
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return (Path(__file__).resolve().parent / "templates" / "index.html").read_text(encoding="utf-8")
+    return (Path(__file__).resolve().parent / "templates" / "index.html").read_text(
+        encoding="utf-8"
+    )
 
 
 @app.get("/health")
@@ -249,8 +269,12 @@ async def health():
     return {"ok": True, "version": "0.3.2"}
 
 
-def _fingerprint(spec: PosterSpec, product: Image.Image, logo: Image.Image | None,
-                 cutout: Image.Image | None = None) -> str:
+def _fingerprint(
+    spec: PosterSpec,
+    product: Image.Image,
+    logo: Image.Image | None,
+    cutout: Image.Image | None = None,
+) -> str:
     """Hash normalized input pixels and fields, not arbitrary file paths."""
     digest = hashlib.sha256()
     fields = spec.model_dump(mode="json")
@@ -330,9 +354,13 @@ async def preview_product_cutout(product: UploadFile = File(...)):
     except CutoutExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return Response(
-        content=result, media_type="image/png",
-        headers={"Cache-Control": "no-store", "X-Cutout-Model": "u2netp",
-                 "X-Cutout-Sha256": png_sha256(result)},
+        content=result,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Cutout-Model": "u2netp",
+            "X-Cutout-Sha256": png_sha256(result),
+        },
     )
 
 
@@ -376,14 +404,24 @@ async def create_poster(
     if not isinstance(offsets, dict):
         raise HTTPException(status_code=422, detail="图层参数必须是 JSON 对象")
     try:
-        spec = PosterSpec(title=title, price=price, subtitle=subtitle, style=style,
-                          original_price=original_price.strip() or None, cta=cta,
-                          background_mode=background_mode, layout_id=layout_id,
-                          product_align=product_align, product_scale=product_scale,
-                          product_source_mode=product_source_mode,
-                          layer_layout=offsets)
+        spec = PosterSpec(
+            title=title,
+            price=price,
+            subtitle=subtitle,
+            style=style,
+            original_price=original_price.strip() or None,
+            cta=cta,
+            background_mode=background_mode,
+            layout_id=layout_id,
+            product_align=product_align,
+            product_scale=product_scale,
+            product_source_mode=product_source_mode,
+            layer_layout=offsets,
+        )
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_context=False, include_input=False)) from exc
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_context=False, include_input=False)
+        ) from exc
     # Fail fast for paid AI requests before reading or decoding uploaded files.
     # A stable key lets the ledger prevent accidental duplicate provider calls.
     if spec.background_mode == "ai" and not idempotency_key:
@@ -415,9 +453,13 @@ async def create_poster(
         try:
             confirmed = PosterSpec.model_validate(review["confirmed_spec"])
         except ValidationError as exc:
-            raise HTTPException(status_code=409, detail="审批规格格式不兼容，请重新编译确认") from exc
+            raise HTTPException(
+                status_code=409, detail="审批规格格式不兼容，请重新编译确认"
+            ) from exc
         if confirmed.model_dump(mode="json") != spec.model_dump(mode="json"):
-            raise HTTPException(status_code=409, detail="当前字段与已确认的规格不一致，请重新编译并确认")
+            raise HTTPException(
+                status_code=409, detail="当前字段与已确认的规格不一致，请重新编译并确认"
+            )
     sku = await read_upload(product)
     brand_logo = await read_upload(logo) if logo is not None and logo.filename else None
     has_cutout = product_cutout is not None and bool(product_cutout.filename)
@@ -443,7 +485,11 @@ async def create_poster(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Record the same normalized hash in SQLite and the completed disk receipt.
-    request_hash = _fingerprint(spec, sku, brand_logo, cutout_candidate) if idempotency_key is not None else None
+    request_hash = (
+        _fingerprint(spec, sku, brand_logo, cutout_candidate)
+        if idempotency_key is not None
+        else None
+    )
     # Claim BEFORE calling a paid model. Local-background requests retain the
     # legacy optional-key behavior; AI requests above cannot proceed without a key.
     if idempotency_key is not None:
@@ -471,11 +517,17 @@ async def create_poster(
             background = await generate_ai_background(spec.style)
         else:
             background = local_background(spec.style)
-        rendered = compose(spec, cutout_candidate if cutout_candidate is not None else sku,
-                           brand_logo, background)
+        rendered = compose(
+            spec, cutout_candidate if cutout_candidate is not None else sku, brand_logo, background
+        )
         result = storage.create(
-            spec, sku, brand_logo, background, rendered,
-            idempotency_key=idempotency_key, request_hash=request_hash,
+            spec,
+            sku,
+            brand_logo,
+            background,
+            rendered,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
             product_cutout=cutout_candidate,
         )
         if idempotency_key is not None:
@@ -497,7 +549,9 @@ async def create_poster(
         if idempotency_key is not None:
             execution_store.mark_unknown(idempotency_key)
         logger.exception("poster creation failure")
-        raise HTTPException(status_code=500, detail="海报生成异常，可能存在未知结果，请查询执行记录") from None
+        raise HTTPException(
+            status_code=500, detail="海报生成异常，可能存在未知结果，请查询执行记录"
+        ) from None
 
 
 @app.get("/api/posters/{poster_id}")
@@ -533,7 +587,9 @@ async def revise_poster(poster_id: str, edit: PosterEdit):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_context=False, include_input=False)) from exc
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_context=False, include_input=False)
+        ) from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

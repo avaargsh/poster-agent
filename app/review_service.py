@@ -3,6 +3,7 @@
 Deliberately single-process. Multi-worker production requires a transactional DB,
 explicit ownership and authorization, and per-task locking across workers.
 """
+
 from __future__ import annotations
 
 import os
@@ -102,7 +103,12 @@ def decide_run(run_id: str, approved: bool, spec: PosterSpec | None) -> dict:
                     return before
                 raise ReviewConflict("该审核任务已经结束，不能覆盖原有确认结果")
             graph.invoke(
-                Command(resume={"approved": approved, "spec": spec.model_dump(mode="json") if spec else None}),
+                Command(
+                    resume={
+                        "approved": approved,
+                        "spec": spec.model_dump(mode="json") if spec else None,
+                    }
+                ),
                 config(run_id),
             )
             result = _view(run_id, graph)

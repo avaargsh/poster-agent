@@ -3,6 +3,7 @@
 This is a conservative hygiene gate, NOT a full security/secret scanner and
 NOT evidence that a private repository has already been released publicly.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,9 +33,7 @@ SENSITIVE_TOKEN = re.compile(
     r"|github_pat_[A-Za-z0-9_]{40,}"
     r"|sk-[A-Za-z0-9]{32,}"
 )
-TEXT_SUFFIXES = frozenset({
-    ".py", ".md", ".toml", ".txt", ".yaml", ".yml", ".json", ".csv", ".sh"
-})
+TEXT_SUFFIXES = frozenset({".py", ".md", ".toml", ".txt", ".yaml", ".yml", ".json", ".csv", ".sh"})
 MAX_INSPECT_BYTES = 1_000_000
 
 
@@ -42,12 +41,14 @@ def tracked_files(repo: Path) -> list[str]:
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo), "ls-files", "-z", "--cached"],
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
         )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
         raise ValueError("无法从 Git 索引读取受版本控制的文件") from exc
-    return [p.decode("utf-8", errors="surrogateescape")
-            for p in proc.stdout.split(b"\x00") if p]
+    return [p.decode("utf-8", errors="surrogateescape") for p in proc.stdout.split(b"\x00") if p]
 
 
 def _sensitive_path(filename: str) -> bool:
@@ -62,16 +63,32 @@ def _sensitive_path(filename: str) -> bool:
         return True
     if basename in ("id_rsa", "id_ed25519", "credentials.json", "service-account.json"):
         return True
-    if p.suffix.lower() in {".pem", ".p12", ".pfx", ".key", ".sqlite",
-                            ".sqlite3", ".db", ".db-journal"}:
+    if p.suffix.lower() in {
+        ".pem",
+        ".p12",
+        ".pfx",
+        ".key",
+        ".sqlite",
+        ".sqlite3",
+        ".db",
+        ".db-journal",
+    }:
         return True
-    if any(part in {".venv", ".venv-ocr", ".pytest_cache", ".ruff_cache",
-                    "__pycache__", ".git"} for part in p.parts):
+    if any(
+        part in {".venv", ".venv-ocr", ".pytest_cache", ".ruff_cache", "__pycache__", ".git"}
+        for part in p.parts
+    ):
         return True
     if lower.startswith("data/") and not lower.startswith("data/examples/"):
         return True
     if lower.startswith("data/examples/") and p.suffix.lower() in {
-        ".png", ".jpg", ".jpeg", ".webp", ".pdf", ".csv", ".sqlite3"
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".pdf",
+        ".csv",
+        ".sqlite3",
     }:
         # Runtime-created images are not distributable fixture assets.
         return True
@@ -89,8 +106,10 @@ def inspect_repository(root: Path, files: Iterable[str]) -> dict:
             blockers.append(f"缺少开源维护文件：{filename}")
 
     # The owner, not this script, must explicitly choose a legal license.
-    if not any(name in names and (root / name).is_file()
-               for name in ("LICENSE", "LICENSE.md", "LICENSE.txt")):
+    if not any(
+        name in names and (root / name).is_file()
+        for name in ("LICENSE", "LICENSE.md", "LICENSE.txt")
+    ):
         blockers.append("缺少 LICENSE：必须由仓库所有者确认授权和许可证")
     if not any(name.startswith("tests/") and name.endswith(".py") for name in names):
         blockers.append("未跟踪任何自动化测试")
@@ -121,11 +140,13 @@ def inspect_repository(root: Path, files: Iterable[str]) -> dict:
         if SENSITIVE_TOKEN.search(payload):
             blockers.append(f"疑似提交高可信度密钥材料：{name}（请人工确认）")
 
-    warnings.extend([
-        "发布前仍需仓库所有者核实代码/文档/样本知识产权及依赖许可证。",
-        "高可信度模式扫描并非完整的凭据检测；仍需人工审查和平台密钥扫描。",
-        "此脚本不会检测 Git 历史、GitHub 仓库可见性或远程安全设置。",
-    ])
+    warnings.extend(
+        [
+            "发布前仍需仓库所有者核实代码/文档/样本知识产权及依赖许可证。",
+            "高可信度模式扫描并非完整的凭据检测；仍需人工审查和平台密钥扫描。",
+            "此脚本不会检测 Git 历史、GitHub 仓库可见性或远程安全设置。",
+        ]
+    )
     return {
         "schema_version": "m5k-1",
         "public_release_ready": not blockers,
@@ -141,8 +162,11 @@ def inspect_repository(root: Path, files: Iterable[str]) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Offline release readiness check")
     parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--strict-public", action="store_true",
-                        help="Fail unless ALL public-release blockers are resolved")
+    parser.add_argument(
+        "--strict-public",
+        action="store_true",
+        help="Fail unless ALL public-release blockers are resolved",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
     try:
@@ -153,9 +177,9 @@ def main() -> int:
     # Always fail CI for tracked sensitive paths or key-like material; only the
     # missing LICENSE/documentation blockers are advisory before release.
     critical = any(
-        msg.startswith("存在疑似敏感文件") or
-        msg.startswith("疑似提交高可信度密钥材料") or
-        msg.startswith("跟踪的符号链接")
+        msg.startswith("存在疑似敏感文件")
+        or msg.startswith("疑似提交高可信度密钥材料")
+        or msg.startswith("跟踪的符号链接")
         for msg in report["blockers"]
     )
     if critical or (args.strict_public and not report["public_release_ready"]):

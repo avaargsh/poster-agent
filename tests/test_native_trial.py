@@ -2,10 +2,11 @@
 
 No customer images, no OCR model downloads and no network inference.
 """
+
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,9 +25,14 @@ def _poster(tmp_path, monkeypatch, product_bytes):
     response = client.post(
         "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷促销", "price": "199",
-              "original_price": "399", "subtitle": "限时福利",
-              "cta": "立即购买", "background_mode": "local"},
+        data={
+            "title": "电动牙刷促销",
+            "price": "199",
+            "original_price": "399",
+            "subtitle": "限时福利",
+            "cta": "立即购买",
+            "background_mode": "local",
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
@@ -56,6 +62,7 @@ def _review(pid, version=1, reviewer=REVIEWER, unsure=()):
 
 def _ocr(path):
     from PIL import Image
+
     with Image.open(path) as img:
         assert img.size == (1080, 1350)
     return [
@@ -94,7 +101,9 @@ def test_empty_data_returns_honest_audit_without_model_inference(tmp_path, monke
 
 
 def test_no_human_review_or_missing_ocr_stays_unscorable(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     result, rows = audit_trial(REVIEWER)
@@ -114,7 +123,9 @@ def test_no_human_review_or_missing_ocr_stays_unscorable(
 
 
 def test_one_command_scores_only_explicitly_and_counts_unique_sku(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
@@ -123,9 +134,10 @@ def test_one_command_scores_only_explicitly_and_counts_unique_sku(
     rev = client.post(f"/api/posters/{pid}/revisions", json={"price": "189"})
     assert rev.status_code == 201, rev.text
     _review(pid, 2)
+
     def _ocr_v2(path):
-        return [{**line, "text": line["text"].replace("¥199", "¥189")}
-                for line in _ocr(path)]
+        return [{**line, "text": line["text"].replace("¥199", "¥189")} for line in _ocr(path)]
+
     monkeypatch.setattr("app.native_acceptance.recognize", _ocr_v2)
     resp = client.post(
         f"/api/posters/{pid}/versions/2/exports/feed_4x5_native/acceptance",
@@ -150,16 +162,19 @@ def test_one_command_scores_only_explicitly_and_counts_unique_sku(
     assert scored["ocr_text_labels"] == 10
     assert scored["metrics"]["confusion"]["TN"] == 10
     assert scored["ready_distinct_product_sha256_count"] == 1
-    assert hashlib.sha256(
-        (destination / "native_trial_labels.csv").read_bytes()
-    ).hexdigest() == scored["label_csv_sha256"]
+    assert (
+        hashlib.sha256((destination / "native_trial_labels.csv").read_bytes()).hexdigest()
+        == scored["label_csv_sha256"]
+    )
     assert (destination / "native_real_summary.json").exists()
     assert (destination / "native_real_cases.csv").exists()
     assert storage.view(pid)["versions"] == [1, 2]
 
 
 def test_a_review_from_other_operator_does_not_count_for_selected_reviewer(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid, reviewer="someone-else")
@@ -170,7 +185,9 @@ def test_a_review_from_other_operator_does_not_count_for_selected_reviewer(
 
 
 def test_stale_ocr_is_blocked_even_when_human_review_still_valid(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
@@ -187,11 +204,14 @@ def test_stale_ocr_is_blocked_even_when_human_review_still_valid(
 
 
 def test_failed_ocr_and_missing_price_check_get_distinct_actions(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
     from app.ocr_provider import OCRUnavailable
+
     monkeypatch.setattr(
         "app.native_acceptance.recognize",
         lambda _: (_ for _ in ()).throw(OCRUnavailable("no engine")),
@@ -212,12 +232,20 @@ def test_failed_ocr_and_missing_price_check_get_distinct_actions(
 
 
 def test_all_unsure_does_not_create_denominator_or_score(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     all_fields = [
-        "sku_integrity", "text_legibility", "composition",
-        "title", "price", "cta", "subtitle", "original_price",
+        "sku_integrity",
+        "text_legibility",
+        "composition",
+        "title",
+        "price",
+        "cta",
+        "subtitle",
+        "original_price",
     ]
     _review(pid, unsure=all_fields)
     _run_ocr(pid, monkeypatch)
@@ -234,7 +262,9 @@ def test_invalid_reviewer_rejected_without_data_access(tmp_path, monkeypatch):
 
 
 def test_new_audit_archives_prior_success_instead_of_reusing_stale_metrics(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
@@ -253,11 +283,15 @@ def test_new_audit_archives_prior_success_instead_of_reusing_stale_metrics(
     assert not (output / "native_real_summary.json").exists()
     assert not (output / "native_real_cases.csv").exists()
     assert not (output / "native_trial_labels.csv").exists()
-    assert (output / fresh["previous_score_archive"] / "native_real_summary.json").read_bytes() == saved
+    assert (
+        output / fresh["previous_score_archive"] / "native_real_summary.json"
+    ).read_bytes() == saved
 
 
 def test_new_blocked_score_does_not_leave_old_metrics_current(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
@@ -281,17 +315,22 @@ def test_new_blocked_score_does_not_leave_old_metrics_current(
 
 
 def test_failed_scorer_does_not_publish_partial_files(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
     _run_ocr(pid, monkeypatch)
     output = tmp_path / "trial"
+
     def corrupt_score(*args, **kwargs):
         from pathlib import Path
+
         stage = Path(args[1])
         (stage / "native_real_summary.json").write_text('{"fake": true}')
         raise OSError("simulated disk or report error")
+
     monkeypatch.setattr("evals.native_real_reports.evaluate_native_reports", corrupt_score)
     with pytest.raises(OSError, match="simulated"):
         run_trial(REVIEWER, output, score=True)
@@ -302,14 +341,15 @@ def test_failed_scorer_does_not_publish_partial_files(
 
 
 def test_mocked_plain_list_ocr_is_explicitly_unrecorded(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
     _run_ocr(pid, monkeypatch)
     report = client.get(
-        f"/api/posters/{pid}/versions/1/exports/feed_4x5_native/acceptance"
-        "?ocr_mode=paddle"
+        f"/api/posters/{pid}/versions/1/exports/feed_4x5_native/acceptance?ocr_mode=paddle"
     ).json()
     assert report["ocr_runtime"] is None
     assert report["ocr_runtime_evidence"] == "UNRECORDED"
@@ -324,7 +364,9 @@ def test_mocked_plain_list_ocr_is_explicitly_unrecorded(
 
 
 def test_focus_trial_can_score_own_evidence_without_classic_reuse(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT
 
@@ -339,8 +381,7 @@ def test_focus_trial_can_score_own_evidence_without_classic_reuse(
         "spec_sha256": info["spec_sha256"],
         "asset_sha256": info["asset_sha256"],
         "fields": {
-            field: {"judgment": "correct", "reason": ""}
-            for field in info["fields_to_review"]
+            field: {"judgment": "correct", "reason": ""} for field in info["fields_to_review"]
         },
     }
     assert client.post(review_url, json=data).status_code == 201
@@ -360,27 +401,24 @@ def test_focus_trial_can_score_own_evidence_without_classic_reuse(
     assert focus_state["ocr_runtime_attested"] is False
 
     destination = tmp_path / "focus-trial"
-    result = run_trial(
-        REVIEWER, destination, score=True, variant=focus
-    )
+    result = run_trial(REVIEWER, destination, score=True, variant=focus)
     assert result["variant_id"] == focus
     assert result["poster_versions"] == 1
     assert result["ocr_engine_execution"] == "saved_report_only"
-    readiness = json.loads(
-        (destination / "native_trial_readiness.json").read_text()
-    )
+    readiness = json.loads((destination / "native_trial_readiness.json").read_text())
     assert readiness["variant_id"] == focus
     assert readiness["latest_score_status"] == "SCORED"
     assert (destination / "native_real_cases.csv").is_file()
     assert (destination / "native_trial_labels.csv").is_file()
     assert not (
-        storage.poster_dir(pid) / "versions"
-        / "v1.feed_4x5_native.acceptance.paddle.json"
+        storage.poster_dir(pid) / "versions" / "v1.feed_4x5_native.acceptance.paddle.json"
     ).exists()
 
 
 def test_focus_audit_does_not_score_if_evidence_missing(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT
 
@@ -388,12 +426,12 @@ def test_focus_audit_does_not_score_if_evidence_missing(
     destination = tmp_path / "focus-missing"
     with pytest.raises(ValueError, match="未完成"):
         run_trial(
-            REVIEWER, destination, score=True,
+            REVIEWER,
+            destination,
+            score=True,
             variant=PRODUCT_FOCUS_VARIANT,
         )
-    readiness = json.loads(
-        (destination / "native_trial_readiness.json").read_text()
-    )
+    readiness = json.loads((destination / "native_trial_readiness.json").read_text())
     assert readiness["variant_id"] == PRODUCT_FOCUS_VARIANT
     assert readiness["can_score"] is False
     assert readiness["latest_score_status"] == "BLOCKED"
@@ -401,51 +439,67 @@ def test_focus_audit_does_not_score_if_evidence_missing(
 
 
 def test_cli_variant_selection_preserves_classic_default_and_focus_metadata(
-    tmp_path, monkeypatch, capsys,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ):
     import sys
+
     from scripts import native_trial as cli
 
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "empty-posters"))
     focus_dir = tmp_path / "focus-cli"
-    monkeypatch.setattr(sys, "argv", [
-        "native_trial", "--reviewer", REVIEWER,
-        "--variant", "feed_4x5_native_product_focus",
-        "--output-dir", str(focus_dir),
-    ])
-    assert cli.main() == 0
-    focus = json.loads(
-        (focus_dir / "native_trial_readiness.json").read_text()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "native_trial",
+            "--reviewer",
+            REVIEWER,
+            "--variant",
+            "feed_4x5_native_product_focus",
+            "--output-dir",
+            str(focus_dir),
+        ],
     )
+    assert cli.main() == 0
+    focus = json.loads((focus_dir / "native_trial_readiness.json").read_text())
     assert focus["variant_id"] == "feed_4x5_native_product_focus"
     assert focus["latest_score_status"] == "AUDIT_ONLY"
     assert focus["model_invoked"] is False
 
     classic_dir = tmp_path / "classic-cli"
-    monkeypatch.setattr(sys, "argv", [
-        "native_trial", "--reviewer", REVIEWER,
-        "--output-dir", str(classic_dir),
-    ])
-    assert cli.main() == 0
-    classic = json.loads(
-        (classic_dir / "native_trial_readiness.json").read_text()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "native_trial",
+            "--reviewer",
+            REVIEWER,
+            "--output-dir",
+            str(classic_dir),
+        ],
     )
+    assert cli.main() == 0
+    classic = json.loads((classic_dir / "native_trial_readiness.json").read_text())
     assert classic["variant_id"] == "feed_4x5_native"
     assert not (focus_dir / "native_real_summary.json").exists()
     assert not (classic_dir / "native_real_summary.json").exists()
-
 
 
 def _eval_files_snapshot(output_dir):
     """Include history and manifests: a rejected reuse must mutate nothing."""
     return {
         str(path.relative_to(output_dir)): path.read_bytes()
-        for path in output_dir.rglob("*") if path.is_file()
+        for path in output_dir.rglob("*")
+        if path.is_file()
     }
 
 
 def test_reusing_classic_score_directory_for_focus_preserves_all_evidence(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT
 
@@ -467,7 +521,9 @@ def test_reusing_classic_score_directory_for_focus_preserves_all_evidence(
 
 
 def test_reusing_score_directory_for_another_reviewer_does_not_archive(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _poster(tmp_path, monkeypatch, product_bytes)
     _review(pid)
@@ -482,7 +538,8 @@ def test_reusing_score_directory_for_another_reviewer_does_not_archive(
 
 
 def test_unclear_eval_directory_identity_fails_closed_before_any_write(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "empty-posters"))
     output = tmp_path / "trial"
@@ -503,7 +560,8 @@ def test_unclear_eval_directory_identity_fails_closed_before_any_write(
 
 
 def test_distinct_variant_directories_remain_independent(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from app.native_acceptance import PRODUCT_FOCUS_VARIANT, VARIANT
 
@@ -514,8 +572,13 @@ def test_distinct_variant_directories_remain_independent(
     focus_result = run_trial(REVIEWER, focus, variant=PRODUCT_FOCUS_VARIANT)
     assert classic_result["variant_id"] == VARIANT
     assert focus_result["variant_id"] == PRODUCT_FOCUS_VARIANT
-    assert json.loads((classic / "native_trial_readiness.json").read_text())["variant_id"] == VARIANT
-    assert json.loads((focus / "native_trial_readiness.json").read_text())["variant_id"] == PRODUCT_FOCUS_VARIANT
+    assert (
+        json.loads((classic / "native_trial_readiness.json").read_text())["variant_id"] == VARIANT
+    )
+    assert (
+        json.loads((focus / "native_trial_readiness.json").read_text())["variant_id"]
+        == PRODUCT_FOCUS_VARIANT
+    )
     assert not (classic / "native_real_summary.json").exists()
     assert not (focus / "native_real_summary.json").exists()
 
@@ -533,7 +596,8 @@ def _synthetic_batch_scope(journal_digest: str = "a", manifest_digest: str = "b"
 
 
 def test_same_variant_reviewer_new_batch_cannot_reuse_trial_directory(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "missing-posters"))
     output = tmp_path / "cohort-a"
@@ -560,7 +624,8 @@ def test_same_variant_reviewer_new_batch_cannot_reuse_trial_directory(
 
 
 def test_unscoped_and_scoped_audits_cannot_share_output_directory(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "missing-posters"))
     scope = _synthetic_batch_scope()
@@ -581,7 +646,8 @@ def test_unscoped_and_scoped_audits_cannot_share_output_directory(
 
 
 def test_invalid_prior_batch_provenance_fails_closed_without_mutating_files(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "missing-posters"))
     output = tmp_path / "batch"
@@ -597,9 +663,7 @@ def test_invalid_prior_batch_provenance_fails_closed_without_mutating_files(
         {"scope_mode": "unrecognized_scope"},
     ):
         corrupted = {**baseline, **change}
-        readiness_file.write_text(
-            json.dumps(corrupted, ensure_ascii=False), encoding="utf-8"
-        )
+        readiness_file.write_text(json.dumps(corrupted, ensure_ascii=False), encoding="utf-8")
         before = _eval_files_snapshot(output)
         with pytest.raises(ValueError, match="批次.*独立目录"):
             run_trial(REVIEWER, output, batch_scope=scope)

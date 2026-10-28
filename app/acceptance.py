@@ -3,6 +3,7 @@
 Scope is intentionally narrow: no VLM judge, SKU fidelity model, logo-location
 verification or ad-law certification. An unverified signal cannot be PASS.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,10 +17,10 @@ from typing import Literal
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app.ocr_provider import OCRExecutionError, OCRUnavailable, recognize
-from app.ocr_price_layout import assess_price_zones
-from app.schemas import PosterSpec, price_text
 from app import storage
+from app.ocr_price_layout import assess_price_zones
+from app.ocr_provider import OCRExecutionError, OCRUnavailable, recognize
+from app.schemas import PosterSpec, price_text
 
 Status = Literal["PASS", "FAIL", "UNVERIFIED"]
 OcrMode = Literal["none", "paddle"]
@@ -63,7 +64,9 @@ def _has_text(texts: list[str], expected: str) -> bool:
         # A matching price must be a complete amount: ¥199 must not match
         # ¥1990 or ¥199.90 (one more digit or a fractional extension).
         escaped = re.escape(target)
-        return any(re.search(r"(?<![0-9])" + escaped + r"(?![0-9.,．])", _norm(line)) for line in texts)
+        return any(
+            re.search(r"(?<![0-9])" + escaped + r"(?![0-9.,．])", _norm(line)) for line in texts
+        )
     return any(target == _norm(line) or target in _norm(line) for line in texts)
 
 
@@ -82,17 +85,26 @@ def _field_checks(spec: PosterSpec, ocr_status: str, lines: list[dict]) -> list[
     out: list[Check] = []
     for field, value in expected.items():
         if ocr_status != "OK":
-            out.append(Check(name="ocr_" + field, status="UNVERIFIED",
-                             detail="尚无可靠的真实 OCR 结果，不能判定文字正确",
-                             evidence={"expected": value}))
+            out.append(
+                Check(
+                    name="ocr_" + field,
+                    status="UNVERIFIED",
+                    detail="尚无可靠的真实 OCR 结果，不能判定文字正确",
+                    evidence={"expected": value},
+                )
+            )
         else:
             matched = _has_text(texts, value)
-            out.append(Check(
-                name="ocr_" + field,
-                status="PASS" if matched else "FAIL",
-                detail="OCR 文本匹配" if matched else "OCR 未匹配到期望文本，需人工复核是否识别误差",
-                evidence={"expected": value, "observed": texts[:35], "ocr_lines": lines[:35]},
-            ))
+            out.append(
+                Check(
+                    name="ocr_" + field,
+                    status="PASS" if matched else "FAIL",
+                    detail="OCR 文本匹配"
+                    if matched
+                    else "OCR 未匹配到期望文本，需人工复核是否识别误差",
+                    evidence={"expected": value, "observed": texts[:35], "ocr_lines": lines[:35]},
+                )
+            )
     return out
 
 
@@ -110,36 +122,55 @@ def _brand_terms() -> list[str] | None:
 
 def _rule_checks(spec: PosterSpec, image: Image.Image, logo_present: bool) -> list[Check]:
     checks: list[Check] = []
-    checks.append(Check(
-        name="image_dimensions",
-        status="PASS" if image.size == EXPECTED_SIZE else "FAIL",
-        detail="导出像素尺寸检查（不代表视觉构图合格）",
-        evidence={"expected": list(EXPECTED_SIZE), "actual": list(image.size)},
-    ))
-    checks.append(Check(
-        name="source_price",
-        status="PASS",
-        detail="PosterSpec 价格经过 Pydantic 校验；不代表图片 OCR 已核对",
-        evidence={"price": price_text(spec.price), "original_price":
-                  price_text(spec.original_price) if spec.original_price is not None else None},
-    ))
-    checks.append(Check(
-        name="logo_asset_present",
-        status="PASS" if logo_present else "UNVERIFIED",
-        detail="仅验证上传的 Logo 原始素材是否存在；并未验证图片上的 Logo 位置、清晰度",
-        evidence={"source_logo_present": logo_present},
-    ))
+    checks.append(
+        Check(
+            name="image_dimensions",
+            status="PASS" if image.size == EXPECTED_SIZE else "FAIL",
+            detail="导出像素尺寸检查（不代表视觉构图合格）",
+            evidence={"expected": list(EXPECTED_SIZE), "actual": list(image.size)},
+        )
+    )
+    checks.append(
+        Check(
+            name="source_price",
+            status="PASS",
+            detail="PosterSpec 价格经过 Pydantic 校验；不代表图片 OCR 已核对",
+            evidence={
+                "price": price_text(spec.price),
+                "original_price": price_text(spec.original_price)
+                if spec.original_price is not None
+                else None,
+            },
+        )
+    )
+    checks.append(
+        Check(
+            name="logo_asset_present",
+            status="PASS" if logo_present else "UNVERIFIED",
+            detail="仅验证上传的 Logo 原始素材是否存在；并未验证图片上的 Logo 位置、清晰度",
+            evidence={"source_logo_present": logo_present},
+        )
+    )
     terms = _brand_terms()
     if terms is None:
-        checks.append(Check(name="forbidden_terms_in_spec", status="UNVERIFIED",
-                            detail="未配置品牌词表，不能声称品牌合规"))
+        checks.append(
+            Check(
+                name="forbidden_terms_in_spec",
+                status="UNVERIFIED",
+                detail="未配置品牌词表，不能声称品牌合规",
+            )
+        )
     else:
         copy = "\n".join((spec.title, spec.subtitle, spec.cta))
         hits = [t for t in terms if t in copy]
-        checks.append(Check(name="forbidden_terms_in_spec",
-                            status="FAIL" if hits else "PASS",
-                            detail="只检查结构化文案，不是全面广告合规审查",
-                            evidence={"violations": hits}))
+        checks.append(
+            Check(
+                name="forbidden_terms_in_spec",
+                status="FAIL" if hits else "PASS",
+                detail="只检查结构化文案，不是全面广告合规审查",
+                evidence={"violations": hits},
+            )
+        )
     return checks
 
 
@@ -168,17 +199,21 @@ def evaluate(poster_id: str, version: int, mode: OcrMode) -> dict:
     # Keep existing OCR text checks for compatibility, but require additional
     # spatial evidence before calling the whole gate PASS. A correct number
     # at the wrong place (or with no bbox) is not proof of a correct price.
-    checks = (_rule_checks(spec, image, logo_present)
-              + _field_checks(spec, ocr_status, lines)
-              + [Check.model_validate(result) for result in
-                 assess_price_zones(spec, ocr_status, lines)])
+    checks = (
+        _rule_checks(spec, image, logo_present)
+        + _field_checks(spec, ocr_status, lines)
+        + [Check.model_validate(result) for result in assess_price_zones(spec, ocr_status, lines)]
+    )
     states = {c.status for c in checks}
     overall = "FAIL" if "FAIL" in states else "INCOMPLETE" if "UNVERIFIED" in states else "PASS"
     report = AcceptanceReport(
-        poster_id=poster_id, version=version,
+        poster_id=poster_id,
+        version=version,
         image_sha256=hashlib.sha256(png).hexdigest(),
         spec_sha256=hashlib.sha256(raw_spec).hexdigest(),
-        ocr_mode=mode, ocr_status=ocr_status, checks=checks,
+        ocr_mode=mode,
+        ocr_status=ocr_status,
+        checks=checks,
         auto_checks=overall,
         verdict="BLOCKED" if overall == "FAIL" else "REVIEW_REQUIRED",
         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),

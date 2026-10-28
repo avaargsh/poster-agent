@@ -5,13 +5,13 @@ It rejects all NOT_RUN / UNAVAILABLE / ERROR states, missing runtime versions,
 missing OCR boxes and mismatched image digests. The GitHub workflow and logs
 provide external evidence that the real model process was launched.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import math
-import platform
 from pathlib import Path
 
 from evals.image_fixtures import ImageManifest
@@ -41,8 +41,10 @@ def _sha256(raw: bytes) -> str:
 def _valid_bbox(box: object) -> bool:
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return False
-    if any(isinstance(value, bool) or not isinstance(value, (int, float))
-           or not math.isfinite(value) for value in box):
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        for value in box
+    ):
         return False
     x1, y1, x2, y2 = box
     return x1 < x2 and y1 < y2 and x1 >= 0 and y1 >= 0
@@ -55,9 +57,13 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         raise EvidenceInvalid("不是成功的真实推理记录：mode=inference 且 status=OK 才可验收")
     if probe.get("model_invocation_completed") is not True:
         raise EvidenceInvalid("模型调用没有完成")
-    if not environment.get("paddlepaddle_distribution") or not environment.get("paddleocr_distribution"):
+    if not environment.get("paddlepaddle_distribution") or not environment.get(
+        "paddleocr_distribution"
+    ):
         raise EvidenceInvalid("缺少 PaddlePaddle/PaddleOCR 已安装版本证据")
-    if not environment.get("paddle_module_detected") or not environment.get("paddleocr_module_detected"):
+    if not environment.get("paddle_module_detected") or not environment.get(
+        "paddleocr_module_detected"
+    ):
         raise EvidenceInvalid("缺少推理依赖的模块检测结果")
     if expected_platform is not None and environment.get("platform") != expected_platform:
         raise EvidenceInvalid("记录的平台与要求的平台不一致")
@@ -103,7 +109,10 @@ def verify_batch(batch_dir: Path) -> dict:
         raise EvidenceInvalid("数据集类型与程序渲染 PNG 测试不匹配")
     if report.get("manifest_sha256") != _sha256(manifest_path.read_bytes()):
         raise EvidenceInvalid("批量报告与 manifest 摘要不一致")
-    if len(manifest.fixtures) != EXPECTED_FIXTURES or report.get("fixture_count") != EXPECTED_FIXTURES:
+    if (
+        len(manifest.fixtures) != EXPECTED_FIXTURES
+        or report.get("fixture_count") != EXPECTED_FIXTURES
+    ):
         raise EvidenceInvalid("批量 PNG 样本数量不足")
     lines = observations_file.read_text(encoding="utf-8").splitlines()
     if len(lines) != EXPECTED_FIXTURES:
@@ -156,7 +165,9 @@ def main() -> int:
         "benchmark": verify_batch(args.benchmark_dir) if args.benchmark_dir else None,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0
 

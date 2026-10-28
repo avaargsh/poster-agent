@@ -1,17 +1,16 @@
 """M4c acceptance of the actual 4:5 native pixels (OCR calls mocked in CI)."""
+
 from __future__ import annotations
 
 import hashlib
-import io
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import storage
 from app.main import app
-from app.ocr_provider import OCRUnavailable
 from app.native_acceptance import NATIVE_ZONES, PRODUCT_FOCUS_ZONES
+from app.ocr_provider import OCRUnavailable
 
 client = TestClient(app)
 
@@ -19,12 +18,18 @@ client = TestClient(app)
 def _create(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     monkeypatch.delenv("POSTER_BRAND_RULES_FILE", raising=False)
-    response = client.post("/api/posters",
+    response = client.post(
+        "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
         data={
-            "title": "电动牙刷促销", "price": "199", "original_price": "399",
-            "subtitle": "限时福利", "cta": "立即购买", "background_mode": "local",
-        })
+            "title": "电动牙刷促销",
+            "price": "199",
+            "original_price": "399",
+            "subtitle": "限时福利",
+            "cta": "立即购买",
+            "background_mode": "local",
+        },
+    )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
 
@@ -38,11 +43,11 @@ def _ocr(_path):
         assert picture.format == "PNG"
         assert picture.size == (1080, 1350)
     return [
-        {"text": "电动牙刷促销", "score": .99, "bbox": [68, 285, 410, 345]},
-        {"text": "限时福利", "score": .99, "bbox": [68, 360, 245, 392]},
-        {"text": "¥199", "score": .99, "bbox": [65, 886, 291, 975]},
-        {"text": "原价 ¥399", "score": .99, "bbox": [69, 1025, 319, 1065]},
-        {"text": "立即购买", "score": .99, "bbox": [88, 1115, 365, 1158]},
+        {"text": "电动牙刷促销", "score": 0.99, "bbox": [68, 285, 410, 345]},
+        {"text": "限时福利", "score": 0.99, "bbox": [68, 360, 245, 392]},
+        {"text": "¥199", "score": 0.99, "bbox": [65, 886, 291, 975]},
+        {"text": "原价 ¥399", "score": 0.99, "bbox": [69, 1025, 319, 1065]},
+        {"text": "立即购买", "score": 0.99, "bbox": [88, 1115, 365, 1158]},
     ]
 
 
@@ -72,7 +77,9 @@ def test_offline_native_gate_refuses_to_inherit_square_pass(tmp_path, monkeypatc
     assert storage.view(pid)["versions"] == [1]
 
 
-def test_paddle_mode_reads_real_native_pixels_and_checks_prices(tmp_path, monkeypatch, product_bytes):
+def test_paddle_mode_reads_real_native_pixels_and_checks_prices(
+    tmp_path, monkeypatch, product_bytes
+):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     monkeypatch.setattr("app.native_acceptance.recognize", _ocr)
     response = client.post(_endpoint(pid), json={"ocr_mode": "paddle"})
@@ -89,8 +96,10 @@ def test_paddle_mode_reads_real_native_pixels_and_checks_prices(tmp_path, monkey
     # Missing optional brand policy or source logo remains unverified,
     # even when OCR succeeded.
     assert report["verdict"] == "REVIEW_REQUIRED"
+
     def must_not_rerun(_):
         raise AssertionError("Reading saved report may not re-run OCR")
+
     monkeypatch.setattr("app.native_acceptance.recognize", must_not_rerun)
     fetched = client.get(_endpoint(pid) + "?ocr_mode=paddle")
     assert fetched.status_code == 200
@@ -98,14 +107,18 @@ def test_paddle_mode_reads_real_native_pixels_and_checks_prices(tmp_path, monkey
 
 
 def test_swapped_prices_are_blocked_in_native_not_square_coordinates(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
+
     def swapped(path):
         rows = _ocr(path)
         rows[2]["text"] = "¥399"
         rows[3]["text"] = "原价 ¥199"
         return rows
+
     monkeypatch.setattr("app.native_acceptance.recognize", swapped)
     report = client.post(_endpoint(pid), json={"ocr_mode": "paddle"}).json()
     checks = _by_name(report)
@@ -119,8 +132,10 @@ def test_swapped_prices_are_blocked_in_native_not_square_coordinates(
 
 def test_real_ocr_unavailable_never_passes(tmp_path, monkeypatch, product_bytes):
     pid = _create(tmp_path, monkeypatch, product_bytes)
+
     def unavailable(_):
         raise OCRUnavailable("not installed")
+
     monkeypatch.setattr("app.native_acceptance.recognize", unavailable)
     report = client.post(_endpoint(pid), json={"ocr_mode": "paddle"}).json()
     assert report["ocr_status"] == "UNAVAILABLE"
@@ -134,8 +149,10 @@ def test_quality_report_hashes_and_version_isolation(tmp_path, monkeypatch, prod
     source_spec = storage.poster_dir(pid) / "versions" / "v1.json"
     original_spec = source_spec.read_bytes()
     before_meta = (storage.poster_dir(pid) / "meta.json").read_bytes()
-    monkeypatch.setattr("app.main.generate_ai_background",
-                        lambda *args: (_ for _ in ()).throw(AssertionError("paid model called")))
+    monkeypatch.setattr(
+        "app.main.generate_ai_background",
+        lambda *args: (_ for _ in ()).throw(AssertionError("paid model called")),
+    )
     response = client.post(_endpoint(pid), json={"ocr_mode": "none"})
     assert response.status_code == 200
     report = response.json()
@@ -151,7 +168,9 @@ def test_quality_report_hashes_and_version_isolation(tmp_path, monkeypatch, prod
     assert client.get(_endpoint(pid, 2)).status_code == 404
     v2 = client.post(_endpoint(pid, 2), json={"ocr_mode": "none"}).json()
     assert v2["native_image_sha256"] != report["native_image_sha256"]
-    assert client.get(_endpoint(pid, 1)).json()["native_image_sha256"] == report["native_image_sha256"]
+    assert (
+        client.get(_endpoint(pid, 1)).json()["native_image_sha256"] == report["native_image_sha256"]
+    )
 
 
 def test_stale_spec_and_asset_are_not_accepted(tmp_path, monkeypatch, product_bytes):
@@ -173,7 +192,7 @@ def test_stale_spec_and_asset_are_not_accepted(tmp_path, monkeypatch, product_by
 def test_invalid_mode_or_version_rejected(tmp_path, monkeypatch, product_bytes):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     assert client.post(_endpoint(pid), json={"ocr_mode": "invented"}).status_code == 422
-    assert client.get(_endpoint(pid)+"?ocr_mode=bad").status_code == 422
+    assert client.get(_endpoint(pid) + "?ocr_mode=bad").status_code == 422
     assert client.get(_endpoint(pid, 99)).status_code == 404
     assert client.post(_endpoint(pid, 99), json={"ocr_mode": "none"}).status_code == 404
 
@@ -190,16 +209,18 @@ def _product_focus_ocr(path):
         assert picture.format == "PNG"
         assert picture.size == (1080, 1350)
     return [
-        {"text": "电动牙刷促销", "score": .99, "bbox": [68, 786, 410, 840]},
-        {"text": "限时福利", "score": .99, "bbox": [68, 910, 245, 940]},
-        {"text": "¥199", "score": .99, "bbox": [65, 1010, 291, 1085]},
-        {"text": "原价 ¥399", "score": .99, "bbox": [69, 1134, 319, 1165]},
-        {"text": "立即购买", "score": .99, "bbox": [650, 1138, 940, 1185]},
+        {"text": "电动牙刷促销", "score": 0.99, "bbox": [68, 786, 410, 840]},
+        {"text": "限时福利", "score": 0.99, "bbox": [68, 910, 245, 940]},
+        {"text": "¥199", "score": 0.99, "bbox": [65, 1010, 291, 1085]},
+        {"text": "原价 ¥399", "score": 0.99, "bbox": [69, 1134, 319, 1165]},
+        {"text": "立即购买", "score": 0.99, "bbox": [650, 1138, 940, 1185]},
     ]
 
 
 def test_product_focus_acceptance_is_independent_and_hash_bound(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     url = _variant_endpoint(pid)
@@ -213,9 +234,7 @@ def test_product_focus_acceptance_is_independent_and_hash_bound(
     assert report["inherits_square_acceptance"] is False
     assert report["requires_human_review"] is True
 
-    export = client.get(
-        f"/api/posters/{pid}/versions/1/exports/{PRODUCT_FOCUS}"
-    )
+    export = client.get(f"/api/posters/{pid}/versions/1/exports/{PRODUCT_FOCUS}")
     assert export.status_code == 200
     assert export.headers["x-layout-template"] == "product_focus"
     assert report["native_image_sha256"] == hashlib.sha256(export.content).hexdigest()
@@ -229,7 +248,9 @@ def test_product_focus_acceptance_is_independent_and_hash_bound(
 
 
 def test_product_focus_ocr_checks_use_product_focus_price_coordinates(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
     monkeypatch.setattr("app.native_acceptance.recognize", _product_focus_ocr)
@@ -246,10 +267,15 @@ def test_product_focus_ocr_checks_use_product_focus_price_coordinates(
 
 
 def test_native_acceptance_rejects_unknown_layout_variant(
-    tmp_path, monkeypatch, product_bytes,
+    tmp_path,
+    monkeypatch,
+    product_bytes,
 ):
     pid = _create(tmp_path, monkeypatch, product_bytes)
-    assert client.post(
-        _variant_endpoint(pid, variant="feed_4x5_native_fake"),
-        json={"ocr_mode": "none"},
-    ).status_code == 422
+    assert (
+        client.post(
+            _variant_endpoint(pid, variant="feed_4x5_native_fake"),
+            json={"ocr_mode": "none"},
+        ).status_code
+        == 422
+    )

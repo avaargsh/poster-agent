@@ -4,6 +4,7 @@ Requires already-installed PaddleOCR/PaddlePaddle and caller-supplied local
 detection/recognition model directories. Does not enforce OS network isolation.
 No synthetic results can be passed through the CLI. Never sets quality PASS.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,17 +37,39 @@ VARIANTS = {
 }
 # Exact M6 output worksheet schema: fail closed on drift.
 REVIEW_FIELDS = (
-    "cohort_id", "sku_id", "poster_id", "source_version", "variant_id",
-    "output_image_path", "source_product_sha256", "request_sha256",
-    "spec_sha256", "output_image_sha256", "source_square_image_sha256",
-    "reviewer_alias", "sku_integrity", "text_legibility", "title",
-    "subtitle", "price", "original_price", "price_position",
-    "original_price_position", "cta", "composition", "overall_accept",
-    "overall_reason", "reviewed_at_utc",
+    "cohort_id",
+    "sku_id",
+    "poster_id",
+    "source_version",
+    "variant_id",
+    "output_image_path",
+    "source_product_sha256",
+    "request_sha256",
+    "spec_sha256",
+    "output_image_sha256",
+    "source_square_image_sha256",
+    "reviewer_alias",
+    "sku_integrity",
+    "text_legibility",
+    "title",
+    "subtitle",
+    "price",
+    "original_price",
+    "price_position",
+    "original_price_position",
+    "cta",
+    "composition",
+    "overall_accept",
+    "overall_reason",
+    "reviewed_at_utc",
 )
 IDENTITY_COLUMNS = (
-    "poster_id", "source_version", "source_product_sha256",
-    "request_sha256", "spec_sha256", "source_square_image_sha256",
+    "poster_id",
+    "source_version",
+    "source_product_sha256",
+    "request_sha256",
+    "spec_sha256",
+    "source_square_image_sha256",
 )
 
 
@@ -126,7 +149,8 @@ def _identities(rows: list[dict[str, str]]):
             raise OCREvidenceError("source_version 不合法")
         if any(
             not SHA_PATTERN.fullmatch(row[field])
-            for field in IDENTITY_COLUMNS if field.endswith("_sha256")
+            for field in IDENTITY_COLUMNS
+            if field.endswith("_sha256")
         ):
             raise OCREvidenceError("来源 SHA-256 不合法")
         identity = tuple(row[field] for field in IDENTITY_COLUMNS)
@@ -135,9 +159,11 @@ def _identities(rows: list[dict[str, str]]):
         pinned[sku] = identity
     if not 1 <= len(pinned) <= 100 or len(seen) != 2 * len(pinned):
         raise OCREvidenceError("缺少完整的 SKU×方形/4:5 版式对")
-    return next(iter(cohorts)), sorted(
-        rows, key=lambda row: (row["sku_id"], row["variant_id"])
-    ), len(pinned)
+    return (
+        next(iter(cohorts)),
+        sorted(rows, key=lambda row: (row["sku_id"], row["variant_id"])),
+        len(pinned),
+    )
 
 
 def _model_fingerprint(directory: Path) -> dict[str, Any]:
@@ -192,7 +218,9 @@ def _rgb_snapshot(raw: bytes, size: tuple[int, int]):
 
 
 def _ocr_lines(
-    result: Any, *, size: tuple[int, int] = (1024, 1024),
+    result: Any,
+    *,
+    size: tuple[int, int] = (1024, 1024),
 ) -> list[dict[str, Any]]:
     """Preserve PaddleOCR text, confidence and optional pixel-space boxes.
 
@@ -210,14 +238,19 @@ def _ocr_lines(
             data = _json_dict(page)
             texts, scores = data["rec_texts"], data["rec_scores"]
             boxes = data.get("rec_boxes")
-            if (len(texts) != len(scores) or
-                (boxes is not None and len(texts) != len(boxes)) or
-                len(lines) + len(texts) > 2000):
+            if (
+                len(texts) != len(scores)
+                or (boxes is not None and len(texts) != len(boxes))
+                or len(lines) + len(texts) > 2000
+            ):
                 raise OCREvidenceError("OCR 文本/置信度/检测框数量不一致或超限")
             for index, (text, value) in enumerate(zip(texts, scores)):
                 confidence = float(value)
-                if (not isinstance(text, str) or
-                    not math.isfinite(confidence) or not 0 <= confidence <= 1):
+                if (
+                    not isinstance(text, str)
+                    or not math.isfinite(confidence)
+                    or not 0 <= confidence <= 1
+                ):
                     raise OCREvidenceError("OCR 置信度或文本不合法")
 
                 bbox = None
@@ -225,8 +258,11 @@ def _ocr_lines(
                     raw_box = boxes[index]
                     if hasattr(raw_box, "tolist"):
                         raw_box = raw_box.tolist()
-                    if (not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4 or
-                        any(isinstance(v, (bool, str, bytes)) for v in raw_box)):
+                    if (
+                        not isinstance(raw_box, (list, tuple))
+                        or len(raw_box) != 4
+                        or any(isinstance(v, (bool, str, bytes)) for v in raw_box)
+                    ):
                         raise OCREvidenceError("OCR 检测框坐标无效")
                     coords = [float(v) for v in raw_box]
                     if any(not math.isfinite(v) or not v.is_integer() for v in coords):
@@ -236,13 +272,21 @@ def _ocr_lines(
                         raise OCREvidenceError("OCR 检测框坐标超出图片边界或顺序无效")
                     bbox = [x1, y1, x2, y2]
                 lines.append({"text": text, "confidence": confidence, "bbox": bbox})
-    except (OCRExecutionError, KeyError, TypeError, AttributeError, ValueError, OverflowError) as exc:
+    except (
+        OCRExecutionError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        ValueError,
+        OverflowError,
+    ) as exc:
         if isinstance(exc, OCREvidenceError):
             raise
         raise OCREvidenceError(
             "PaddleOCR 结果结构或检测框不兼容；需要 3.x rec_texts/rec_scores/rec_boxes"
         ) from exc
     return lines
+
 
 def _preflight_frozen_images(package: Path, rows: list[dict[str, str]]) -> None:
     """Fail fast across the entire frozen cohort before loading the OCR engine.
@@ -253,9 +297,7 @@ def _preflight_frozen_images(package: Path, rows: list[dict[str, str]]) -> None:
     for row in rows:
         raw = _read_regular(package / row["output_image_path"], MAX_PNG_BYTES)
         if _sha(raw) != row["output_image_sha256"]:
-            raise OCREvidenceError(
-                f"PNG 已被修改：{row['sku_id']}/{row['variant_id']}"
-            )
+            raise OCREvidenceError(f"PNG 已被修改：{row['sku_id']}/{row['variant_id']}")
         try:
             with Image.open(io.BytesIO(raw)) as image:
                 if image.format != "PNG" or image.size != VARIANTS[row["variant_id"]][0]:
@@ -288,7 +330,10 @@ def capture(
     csv_sha, original_rows = _review_rows(package)
     cohort, rows, sku_count = _identities(original_rows)
     _preflight_frozen_images(package, rows)
-    det_dir, rec_dir = Path(detection_model_dir).expanduser(), Path(recognition_model_dir).expanduser()
+    det_dir, rec_dir = (
+        Path(detection_model_dir).expanduser(),
+        Path(recognition_model_dir).expanduser(),
+    )
     det_digest = _model_fingerprint(det_dir)
     rec_digest = _model_fingerprint(rec_dir)
     if device not in {"cpu", "gpu", "gpu:0"}:
@@ -297,6 +342,7 @@ def capture(
     if real:
         try:
             from paddleocr import PaddleOCR
+
             paddleocr_version = importlib.metadata.version("paddleocr")
             paddle_version = importlib.metadata.version("paddlepaddle")
         except (ImportError, importlib.metadata.PackageNotFoundError) as exc:
@@ -326,15 +372,17 @@ def capture(
             raise OCREvidenceError(f"PNG 已被修改：{row['sku_id']}/{row['variant_id']}")
         snapshot = _rgb_snapshot(data, VARIANTS[row["variant_id"]][0])
         recognized = _ocr_lines(engine.predict(snapshot), size=VARIANTS[row["variant_id"]][0])
-        observations.append({
-            "sku_id": row["sku_id"],
-            "variant_id": row["variant_id"],
-            "poster_id": row["poster_id"],
-            "image_sha256": digest,
-            "recognized_lines": recognized,
-            "recognized_line_count": len(recognized),
-            "status": "CAPTURED_REVIEW_REQUIRED",
-        })
+        observations.append(
+            {
+                "sku_id": row["sku_id"],
+                "variant_id": row["variant_id"],
+                "poster_id": row["poster_id"],
+                "image_sha256": digest,
+                "recognized_lines": recognized,
+                "recognized_line_count": len(recognized),
+                "status": "CAPTURED_REVIEW_REQUIRED",
+            }
+        )
         if progress is not None:
             # Report only completed predictions. Never publish partial OCR JSON.
             progress(len(observations), len(rows))
@@ -347,11 +395,13 @@ def capture(
         "captured_variant_count": len(observations),
         "positioned_line_count": sum(
             line["bbox"] is not None
-            for observation in observations for line in observation["recognized_lines"]
+            for observation in observations
+            for line in observation["recognized_lines"]
         ),
         "unlocated_line_count": sum(
             line["bbox"] is None
-            for observation in observations for line in observation["recognized_lines"]
+            for observation in observations
+            for line in observation["recognized_lines"]
         ),
         "min_20_real_skus_proven": False,
         "source_authorizations_verified": False,
@@ -372,7 +422,9 @@ def capture(
     # Build a complete UTF-8 payload BEFORE publishing evidence. The hard link
     # is atomic and no-clobber: partial output or conflicting attempts never
     # overwrite an existing reviewer artifact.
-    payload = (json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    payload = (json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode(
+        "utf-8"
+    )
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -403,11 +455,20 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (OCREvidenceError, OSError, ValueError) as exc:
         parser.exit(2, f"M6 OCR 采集失败：{exc}\n")
-    print(json.dumps({
-        key: report[key] for key in (
-            "cohort_id", "sku_count", "captured_variant_count", "automatically_accepted"
+    print(
+        json.dumps(
+            {
+                key: report[key]
+                for key in (
+                    "cohort_id",
+                    "sku_count",
+                    "captured_variant_count",
+                    "automatically_accepted",
+                )
+            },
+            ensure_ascii=False,
         )
-    }, ensure_ascii=False))
+    )
     return 0
 
 

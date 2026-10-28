@@ -3,10 +3,12 @@
 The rembg CLI is stubbed at the external process boundary in CI; this does not
 attest real ONNX segmentation accuracy. Product rendering itself is real Pillow.
 """
+
 from __future__ import annotations
-from io import BytesIO
+
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -35,9 +37,11 @@ def png(size=(180, 200), *, alpha=False):
 def test_default_create_still_uses_original_and_no_cutout_asset(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     original = png()
-    response = client.post("/api/posters",
+    response = client.post(
+        "/api/posters",
         data={"title": "测试商品", "price": "100"},
-        files={"product": ("product.png", original, "image/png")})
+        files={"product": ("product.png", original, "image/png")},
+    )
     assert response.status_code == 201, response.text
     record = response.json()
     assert record["spec"]["product_source_mode"] == "original"
@@ -50,12 +54,14 @@ def test_default_create_still_uses_original_and_no_cutout_asset(tmp_path, monkey
 def test_selected_cutout_preserves_original_and_revision_can_switch(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     original, cutout = png(), png(alpha=True)
-    response = client.post("/api/posters",
+    response = client.post(
+        "/api/posters",
         data={"title": "测试商品", "price": "100", "product_source_mode": "cutout"},
         files={
             "product": ("source.png", original, "image/png"),
             "product_cutout": ("removed.png", cutout, "image/png"),
-        })
+        },
+    )
     assert response.status_code == 201, response.text
     record = response.json()
     pid = record["poster_id"]
@@ -68,8 +74,10 @@ def test_selected_cutout_preserves_original_and_revision_can_switch(tmp_path, mo
     with Image.open(assets / "product_cutout.png") as saved:
         assert saved.getpixel((0, 0))[3] == 0
     old_png = client.get(record["image_url"]).content
-    switched = client.post(f"/api/posters/{pid}/revisions",
-        json={"expected_version": 1, "product_source_mode": "original"})
+    switched = client.post(
+        f"/api/posters/{pid}/revisions",
+        json={"expected_version": 1, "product_source_mode": "original"},
+    )
     assert switched.status_code == 201, switched.text
     v2 = switched.json()
     assert v2["version"] == 2
@@ -81,8 +89,13 @@ def test_selected_cutout_preserves_original_and_revision_can_switch(tmp_path, mo
     v2_native = client.get(f"/api/posters/{pid}/versions/2/exports/feed_4x5_native")
     assert v1_native.status_code == 200 and v2_native.status_code == 200
     assert v1_native.content != v2_native.content
-    assert client.post(f"/api/posters/{pid}/revisions",
-        json={"expected_version": 1, "product_source_mode": "cutout"}).status_code == 409
+    assert (
+        client.post(
+            f"/api/posters/{pid}/revisions",
+            json={"expected_version": 1, "product_source_mode": "cutout"},
+        ).status_code
+        == 409
+    )
 
 
 def test_invalid_cutout_rejected_before_any_persistence(tmp_path, monkeypatch):
@@ -90,17 +103,22 @@ def test_invalid_cutout_rejected_before_any_persistence(tmp_path, monkeypatch):
     original = png()
     attempts = [
         ({"product_source_mode": "cutout"}, {}),
-        ({"product_source_mode": "original"}, {
-            "product_cutout": ("cutout.png", png(alpha=True), "image/png")}),
-        ({"product_source_mode": "cutout"}, {
-            "product_cutout": ("cutout.png", png(), "image/png")}),
-        ({"product_source_mode": "cutout"}, {
-            "product_cutout": ("cutout.png", png(size=(100, 100), alpha=True), "image/png")}),
+        (
+            {"product_source_mode": "original"},
+            {"product_cutout": ("cutout.png", png(alpha=True), "image/png")},
+        ),
+        ({"product_source_mode": "cutout"}, {"product_cutout": ("cutout.png", png(), "image/png")}),
+        (
+            {"product_source_mode": "cutout"},
+            {"product_cutout": ("cutout.png", png(size=(100, 100), alpha=True), "image/png")},
+        ),
     ]
     for data, other in attempts:
-        r = client.post("/api/posters",
+        r = client.post(
+            "/api/posters",
             data={"title": "测试商品", "price": "100", **data},
-            files={"product": ("source.png", original, "image/png"), **other})
+            files={"product": ("source.png", original, "image/png"), **other},
+        )
         assert r.status_code == 422, r.text
     assert not storage.root().exists()
 
@@ -108,24 +126,25 @@ def test_invalid_cutout_rejected_before_any_persistence(tmp_path, monkeypatch):
 def test_preview_fails_closed_without_explicit_local_model(tmp_path, monkeypatch):
     monkeypatch.delenv("POSTER_CUTOUT_REMBG_HOME", raising=False)
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
-    r = client.post("/api/product-cutouts/preview", files={
-        "product": ("test.png", png(), "image/png")
-    })
+    r = client.post(
+        "/api/product-cutouts/preview", files={"product": ("test.png", png(), "image/png")}
+    )
     assert r.status_code == 503
     assert not storage.root().exists()
 
 
 def test_preview_uses_local_cli_with_preloaded_weight_and_validates_png(tmp_path, monkeypatch):
     from app import cutout_service
+
     home = tmp_path / "rembg"
     model = home / "models" / "u2netp" / "u2netp.onnx"
     model.parent.mkdir(parents=True)
     model.write_bytes(b"pretend-model-for-offline-stub")
     monkeypatch.setenv("POSTER_CUTOUT_REMBG_HOME", str(home))
-    monkeypatch.setenv("POSTER_CUTOUT_MODEL_SHA256", hashlib.sha256(
-        model.read_bytes()).hexdigest())
+    monkeypatch.setenv("POSTER_CUTOUT_MODEL_SHA256", hashlib.sha256(model.read_bytes()).hexdigest())
     monkeypatch.setattr(cutout_service.shutil, "which", lambda name: "/usr/bin/rembg")
     runs = []
+
     def fake_run(argv, *, env, timeout, capture_output, check):
         assert argv[0] == "/usr/bin/rembg"
         assert argv[1:4] == ["i", "-m", "u2netp"]
@@ -137,9 +156,11 @@ def test_preview_uses_local_cli_with_preloaded_weight_and_validates_png(tmp_path
         Path(argv[-1]).write_bytes(png(alpha=True))
         runs.append(argv)
         return CompletedProcess(argv, 0, b"", b"")
+
     monkeypatch.setattr(cutout_service.subprocess, "run", fake_run)
-    response = client.post("/api/product-cutouts/preview", files={
-        "product": ("product.png", png(), "image/png")})
+    response = client.post(
+        "/api/product-cutouts/preview", files={"product": ("product.png", png(), "image/png")}
+    )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "image/png"
     assert response.headers["cache-control"] == "no-store"
@@ -154,8 +175,10 @@ def test_preview_uses_local_cli_with_preloaded_weight_and_validates_png(tmp_path
 def test_ui_contains_explicit_preview_comparison_and_mode_selection():
     html = client.get("/").text
     for marker in (
-        'id="cutoutPreviewButton"', 'id="cutoutOriginalPreview"',
-        'id="cutoutResultPreview"', 'id="acceptCutout"',
+        'id="cutoutPreviewButton"',
+        'id="cutoutOriginalPreview"',
+        'id="cutoutResultPreview"',
+        'id="acceptCutout"',
         'id="editProductSourceMode"',
     ):
         assert marker in html
@@ -163,9 +186,9 @@ def test_ui_contains_explicit_preview_comparison_and_mode_selection():
     assert "body.append('product_cutout'" in html
 
 
-
 def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path, monkeypatch):
     import csv
+
     from scripts import real_sku_batch
 
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
@@ -176,15 +199,26 @@ def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path
     (folder / "cutout.png").write_bytes(png(alpha=True))
     path = folder / "products.csv"
     with path.open("w", encoding="utf-8", newline="") as out:
-        rows = csv.DictWriter(out, fieldnames=[
-            "sku_id", "product_image", "product_cutout_image", "title", "price",
-        ])
+        rows = csv.DictWriter(
+            out,
+            fieldnames=[
+                "sku_id",
+                "product_image",
+                "product_cutout_image",
+                "title",
+                "price",
+            ],
+        )
         rows.writeheader()
-        rows.writerow({
-            "sku_id": "sku-01", "product_image": "source.png",
-            "product_cutout_image": "cutout.png",
-            "title": "智能好物", "price": "99",
-        })
+        rows.writerow(
+            {
+                "sku_id": "sku-01",
+                "product_image": "source.png",
+                "product_cutout_image": "cutout.png",
+                "title": "智能好物",
+                "price": "99",
+            }
+        )
     sha, prepared = real_sku_batch.preflight(path)
     assert len(sha) == 64
     assert prepared[0]["data"]["product_source_mode"] == "cutout"
@@ -200,8 +234,10 @@ def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path
     assert len(list(storage.root().iterdir())) == 1
     # The saved cutout is part of the batch integrity attestation.
     from app.batch_artifact_integrity import (
-        BatchArtifactIntegrityError, verify_batch_artifact,
+        BatchArtifactIntegrityError,
+        verify_batch_artifact,
     )
+
     ledger = json.loads((output / "batch_import_results.json").read_text())
     verify_batch_artifact(ident, ledger["rows"]["sku-01"])
     asset = storage.poster_dir(ident) / "assets" / "product_cutout.png"
@@ -219,6 +255,7 @@ def test_batch_accepts_only_explicit_cutout_and_reuses_published_poster(tmp_path
 
 def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkeypatch):
     import csv
+
     from scripts import real_sku_batch
 
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
@@ -228,14 +265,26 @@ def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkey
     (folder / "cutout.png").write_bytes(png())
     path = folder / "products.csv"
     with path.open("w", encoding="utf-8", newline="") as out:
-        writer = csv.DictWriter(out, fieldnames=[
-            "sku_id", "product_image", "product_cutout_image", "title", "price",
-        ])
+        writer = csv.DictWriter(
+            out,
+            fieldnames=[
+                "sku_id",
+                "product_image",
+                "product_cutout_image",
+                "title",
+                "price",
+            ],
+        )
         writer.writeheader()
-        writer.writerow({
-            "sku_id": "sku-01", "product_image": "source.png",
-            "product_cutout_image": "cutout.png", "title": "好物", "price": "99",
-        })
+        writer.writerow(
+            {
+                "sku_id": "sku-01",
+                "product_image": "source.png",
+                "product_cutout_image": "cutout.png",
+                "title": "好物",
+                "price": "99",
+            }
+        )
     try:
         real_sku_batch.preflight(path)
     except real_sku_batch.BatchError:
@@ -245,9 +294,9 @@ def test_batch_rejects_opaque_cutout_before_creating_any_poster(tmp_path, monkey
     assert not storage.root().exists()
 
 
-
 def test_invalid_local_model_digest_never_invokes_rembg(tmp_path, monkeypatch):
     from app import cutout_service
+
     home = tmp_path / "rembg"
     model = home / "models" / "u2netp" / "u2netp.onnx"
     model.parent.mkdir(parents=True)
@@ -256,20 +305,21 @@ def test_invalid_local_model_digest_never_invokes_rembg(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_CUTOUT_MODEL_SHA256", "0" * 64)
     monkeypatch.setattr(cutout_service.shutil, "which", lambda _: "/usr/bin/rembg")
     monkeypatch.setattr(
-        cutout_service.subprocess, "run",
-        lambda *a, **kw: (_ for _ in ()).throw(
-            AssertionError("Unpinned model was executed")),
+        cutout_service.subprocess,
+        "run",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("Unpinned model was executed")),
     )
-    result = client.post("/api/product-cutouts/preview",
-        files={"product": ("source.png", png(), "image/png")})
+    result = client.post(
+        "/api/product-cutouts/preview", files={"product": ("source.png", png(), "image/png")}
+    )
     assert result.status_code == 503
     assert "SHA-256" in result.text
-
 
 
 def test_original_mode_idempotency_fingerprint_matches_pre_cutout_contract():
     from app.main import _fingerprint
     from app.schemas import PosterSpec
+
     spec = PosterSpec(title="旧海报", price="99")
     product = Image.new("RGBA", (120, 150), (60, 100, 180, 255))
     legacy_spec = spec.model_dump(mode="json")

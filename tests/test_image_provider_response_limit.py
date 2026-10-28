@@ -18,9 +18,7 @@ def _mock_client(monkeypatch, handler):
     monkeypatch.setattr(
         image_provider.httpx,
         "AsyncClient",
-        lambda *args, **kwargs: original(
-            *args, transport=httpx.MockTransport(handler), **kwargs
-        ),
+        lambda *args, **kwargs: original(*args, transport=httpx.MockTransport(handler), **kwargs),
     )
 
 
@@ -67,8 +65,7 @@ def test_response_size_limit_applies_to_json_metadata_not_only_image_bytes(monke
         calls.append(request.method)
         return httpx.Response(
             200,
-            json={"data": [{"url": "https://safe.aliyuncs.com/demo.png"}],
-                  "padding": "A" * 500},
+            json={"data": [{"url": "https://safe.aliyuncs.com/demo.png"}], "padding": "A" * 500},
         )
 
     _mock_client(monkeypatch, handler)

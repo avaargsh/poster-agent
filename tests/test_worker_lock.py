@@ -53,7 +53,6 @@ def test_shared_execution_db_rejected_even_with_different_storage(tmp_path, monk
                 pytest.fail("shared execution ledger must remain exclusive")
 
 
-
 def test_shared_checkpoint_rejected_when_other_storage_paths_differ(tmp_path, monkeypatch):
     _configure(monkeypatch, tmp_path)
 
@@ -68,9 +67,7 @@ def test_shared_checkpoint_rejected_when_other_storage_paths_differ(tmp_path, mo
 def test_independent_python_process_cannot_acquire_live_worker_lock(tmp_path, monkeypatch):
     _configure(monkeypatch, tmp_path)
     code = (
-        "from app.worker_lock import single_worker\n"
-        "with single_worker():\n"
-        "    print('acquired')\n"
+        "from app.worker_lock import single_worker\nwith single_worker():\n    print('acquired')\n"
     )
 
     def run_competitor():
@@ -114,9 +111,11 @@ def test_startup_recovery_failure_releases_worker_lock(tmp_path, monkeypatch):
     _configure(monkeypatch, tmp_path)
 
     with monkeypatch.context() as patch:
-        patch.setattr(execution_store, "recover_incomplete", lambda: (_ for _ in ()).throw(
-            RuntimeError("simulated startup recovery failure")
-        ))
+        patch.setattr(
+            execution_store,
+            "recover_incomplete",
+            lambda: (_ for _ in ()).throw(RuntimeError("simulated startup recovery failure")),
+        )
         with pytest.raises(RuntimeError, match="simulated startup recovery failure"):
             with TestClient(app):
                 pass

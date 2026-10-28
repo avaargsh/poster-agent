@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.brief_compiler import BriefRequest, BriefCompilerError, compile_brief
+from app.brief_compiler import BriefCompilerError, BriefRequest, compile_brief
 
 
 def compile_demo(brief: str):
@@ -42,17 +42,23 @@ def test_qwen_without_key_fails_cleanly(monkeypatch):
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.delenv("QWEN_CHAT_ENDPOINT", raising=False)
     with pytest.raises(BriefCompilerError, match="API_KEY"):
-        asyncio.run(compile_brief(BriefRequest(brief="我要做一张双十一商品海报，活动价199元", compiler="qwen")))
+        asyncio.run(
+            compile_brief(
+                BriefRequest(brief="我要做一张双十一商品海报，活动价199元", compiler="qwen")
+            )
+        )
 
 
 def test_qwen_json_object_schema_mock(monkeypatch):
     async def fake_qwen(brief):
-        return {"title": "双十一限时优惠", "price": 888,
-                "original_price": 666, "style": "科技蓝"}
+        return {"title": "双十一限时优惠", "price": 888, "original_price": 666, "style": "科技蓝"}
+
     monkeypatch.setattr("app.brief_compiler._qwen_extract", fake_qwen)
-    result = asyncio.run(compile_brief(BriefRequest(
-        brief="制作活动海报，活动价199元，原价399元，蓝色科技风", compiler="qwen"
-    )))
+    result = asyncio.run(
+        compile_brief(
+            BriefRequest(brief="制作活动海报，活动价199元，原价399元，蓝色科技风", compiler="qwen")
+        )
+    )
     # 价格以 Brief 原文明确字段为准，不信任模型自报。
     assert result.fields.price == 199
     assert result.fields.original_price == 399

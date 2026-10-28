@@ -1,4 +1,5 @@
 """Boundary validation and read-only contract for CLI batch status."""
+
 from __future__ import annotations
 
 import json
@@ -33,10 +34,11 @@ def test_cli_batch_status_is_read_only_and_reports_partial_progress(tmp_path, mo
     assert missing.status_code == 200
     assert missing.json()["available"] is False
 
-    state = _state(rows={
-        "sku-one": {"poster_id": "b" * 32, "version": 1,
-                    "request_sha256": "c" * 64},
-    })
+    state = _state(
+        rows={
+            "sku-one": {"poster_id": "b" * 32, "version": 1, "request_sha256": "c" * 64},
+        }
+    )
     journal.write_text(json.dumps(state), encoding="utf-8")
     partial = client.get("/api/cli-batches/status")
     assert partial.status_code == 200, partial.text
@@ -57,10 +59,12 @@ def test_cli_batch_status_requires_completion_flag_and_every_sku(tmp_path, monke
     routes = import_module("app.cli_batch_status_routes")
     journal = tmp_path / "batch_import_results.json"
     monkeypatch.setattr(routes, "JOURNAL_PATH", journal)
-    state = _state(rows={
-        "sku-one": {"poster_id": "b" * 32, "version": 1},
-        "sku-two": {"poster_id": "c" * 32, "version": 1},
-    })
+    state = _state(
+        rows={
+            "sku-one": {"poster_id": "b" * 32, "version": 1},
+            "sku-two": {"poster_id": "c" * 32, "version": 1},
+        }
+    )
     journal.write_text(json.dumps(state), encoding="utf-8")
     assert client.get("/api/cli-batches/status").json()["completed"] is False
 

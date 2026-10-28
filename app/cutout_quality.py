@@ -4,6 +4,7 @@ Machine metrics are triage signals, never automatic product quality PASS.
 Operator-approved / genuine ONNX inference provenance is NOT inferred from a
 saved transparent PNG. A saved mask may have been externally supplied.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,15 +14,31 @@ from PIL import Image, ImageDraw, ImageOps
 
 SCHEMA = "m6-cutout-evidence-1"
 REVIEW_FIELDS = (
-    "cohort_id", "sku_id", "poster_id", "source_version",
-    "source_product_sha256", "cutout_sha256",
-    "comparison_image_path", "comparison_image_sha256",
-    "foreground_fraction", "soft_alpha_fraction", "edge_touch_fraction",
-    "component_count", "retained_rgb_mae",
-    "machine_risks", "candidate_origin", "model_sha256", "model_runtime_attested",
-    "quality_state", "subject_integrity_review", "edge_artifact_review",
-    "brand_mark_review", "reviewer_alias", "human_accept",
-    "reviewer_notes", "reviewed_at_utc",
+    "cohort_id",
+    "sku_id",
+    "poster_id",
+    "source_version",
+    "source_product_sha256",
+    "cutout_sha256",
+    "comparison_image_path",
+    "comparison_image_sha256",
+    "foreground_fraction",
+    "soft_alpha_fraction",
+    "edge_touch_fraction",
+    "component_count",
+    "retained_rgb_mae",
+    "machine_risks",
+    "candidate_origin",
+    "model_sha256",
+    "model_runtime_attested",
+    "quality_state",
+    "subject_integrity_review",
+    "edge_artifact_review",
+    "brand_mark_review",
+    "reviewer_alias",
+    "human_accept",
+    "reviewer_notes",
+    "reviewed_at_utc",
 )
 
 
@@ -36,8 +53,7 @@ def _checkerboard(size: tuple[int, int]) -> Image.Image:
         for x in range(0, size[0], 16):
             if ((x // 16) + (y // 16)) % 2:
                 draw.rectangle(
-                    (x, y, min(x + 15, size[0] - 1),
-                     min(y + 15, size[1] - 1)),
+                    (x, y, min(x + 15, size[0] - 1), min(y + 15, size[1] - 1)),
                     fill="#bbbbbb",
                 )
     return result
@@ -50,10 +66,10 @@ def comparison_png(original: Image.Image, cutout: Image.Image) -> bytes:
     canvas = Image.new("RGB", (1024, 512), "white")
     for x, candidate in ((0, original), (512, cutout)):
         panel = _checkerboard((512, 512))
-        scaled = ImageOps.contain(candidate.convert("RGBA"), (480, 480),
-                                  method=Image.Resampling.LANCZOS)
-        panel.paste(scaled, ((512 - scaled.width) // 2,
-                             (512 - scaled.height) // 2), scaled)
+        scaled = ImageOps.contain(
+            candidate.convert("RGBA"), (480, 480), method=Image.Resampling.LANCZOS
+        )
+        panel.paste(scaled, ((512 - scaled.width) // 2, (512 - scaled.height) // 2), scaled)
         canvas.paste(panel, (x, 0))
     output = io.BytesIO()
     canvas.save(output, format="PNG", optimize=True)
@@ -96,8 +112,10 @@ def inspect_cutout(original: Image.Image, cutout: Image.Image) -> dict:
     source = original.convert("RGBA")
     subject = cutout.convert("RGBA")
     # Always sample to a bounded raster: 256px maximum edge, no heavy numpy.
-    sample = (max(1, round(original.width * min(1, 256 / max(original.size)))),
-              max(1, round(original.height * min(1, 256 / max(original.size)))))
+    sample = (
+        max(1, round(original.width * min(1, 256 / max(original.size)))),
+        max(1, round(original.height * min(1, 256 / max(original.size)))),
+    )
     src = source.resize(sample, Image.Resampling.BOX)
     fg = subject.resize(sample, Image.Resampling.BOX)
     alpha = fg.getchannel("A")
@@ -109,7 +127,8 @@ def inspect_cutout(original: Image.Image, cutout: Image.Image) -> dict:
     w, h = sample
     edge = [
         values[y * w + x]
-        for y in range(h) for x in range(w)
+        for y in range(h)
+        for x in range(w)
         if x < 2 or y < 2 or x >= w - 2 or y >= h - 2
     ]
     touches = sum(v > 127 for v in edge) / len(edge)
@@ -158,7 +177,10 @@ def inspect_cutout(original: Image.Image, cutout: Image.Image) -> dict:
 
 def evidence_from_pngs(original_raw: bytes, cutout_raw: bytes) -> tuple[dict, bytes]:
     """Calculate evidence from existing local artifacts, no model execution."""
-    with Image.open(io.BytesIO(original_raw)) as original, Image.open(io.BytesIO(cutout_raw)) as cutout:
+    with (
+        Image.open(io.BytesIO(original_raw)) as original,
+        Image.open(io.BytesIO(cutout_raw)) as cutout,
+    ):
         original.load()
         cutout.load()
         if original.format != "PNG" or cutout.format != "PNG":
@@ -166,6 +188,7 @@ def evidence_from_pngs(original_raw: bytes, cutout_raw: bytes) -> tuple[dict, by
         if cutout.mode != "RGBA":
             raise ValueError("抠图证据缺少透明通道")
         from .cutout_service import verify_candidate
+
         verify_candidate(original, cutout)
         metrics = inspect_cutout(original, cutout)
         picture = comparison_png(original, cutout)

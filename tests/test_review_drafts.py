@@ -1,4 +1,5 @@
 """Partial progress is durable, isolated, and never an official review."""
+
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -15,19 +16,28 @@ VARIANTS = ("square", "feed_4x5_native", "feed_4x5_native_product_focus")
 def poster(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
-    response = client.post("/api/posters", files={"product": ("sku.png", product_bytes, "image/png")},
-                           data={"title": "审核进度测试", "price": "199", "background_mode": "local"})
+    response = client.post(
+        "/api/posters",
+        files={"product": ("sku.png", product_bytes, "image/png")},
+        data={"title": "审核进度测试", "price": "199", "background_mode": "local"},
+    )
     assert response.status_code == 201, response.text
     return response.json()["poster_id"]
 
 
 def endpoint(pid, variant="square", reviewer="reviewer-a", version=1):
-    return f"/api/posters/{pid}/versions/{version}/review-draft?variant={variant}&reviewer={reviewer}"
+    return (
+        f"/api/posters/{pid}/versions/{version}/review-draft?variant={variant}&reviewer={reviewer}"
+    )
 
 
 def payload(info, **changes):
-    return {"source_sha256": info["source_sha256"], "expected_revision": info["revision"],
-            "fields": {"title": {"judgment": "", "reason": "只写了一部分，还未完成"}}, **changes}
+    return {
+        "source_sha256": info["source_sha256"],
+        "expected_revision": info["revision"],
+        "fields": {"title": {"judgment": "", "reason": "只写了一部分，还未完成"}},
+        **changes,
+    }
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -54,8 +64,11 @@ def test_partial_draft_survives_new_client_without_becoming_a_review(poster, var
 def test_reviewer_template_and_version_are_separate(poster):
     info = client.get(endpoint(poster)).json()
     assert client.put(endpoint(poster), json=payload(info)).status_code == 200
-    for variant, reviewer in [("square", "reviewer-b"), ("feed_4x5_native", "reviewer-a"),
-                              ("feed_4x5_native_product_focus", "reviewer-a")]:
+    for variant, reviewer in [
+        ("square", "reviewer-b"),
+        ("feed_4x5_native", "reviewer-a"),
+        ("feed_4x5_native_product_focus", "reviewer-a"),
+    ]:
         empty = client.get(endpoint(poster, variant, reviewer)).json()
         assert empty["revision"] == 0 and empty["fields"] == {}
     assert client.post(f"/api/posters/{poster}/revisions", json={"price": "189"}).status_code == 201
@@ -94,10 +107,17 @@ def test_official_submission_is_not_masked_by_an_older_draft(poster):
     assert client.put(url, json=payload(initial)).status_code == 200
     review_url = f"/api/posters/{poster}/versions/1/human-review"
     ctx = client.get(review_url).json()
-    submitted = client.post(review_url, json={
-        "reviewer": "reviewer-a", "image_sha256": ctx["image_sha256"], "spec_sha256": ctx["spec_sha256"],
-        "fields": {key: {"judgment": "correct", "reason": ""} for key in ctx["fields_to_review"]},
-    })
+    submitted = client.post(
+        review_url,
+        json={
+            "reviewer": "reviewer-a",
+            "image_sha256": ctx["image_sha256"],
+            "spec_sha256": ctx["spec_sha256"],
+            "fields": {
+                key: {"judgment": "correct", "reason": ""} for key in ctx["fields_to_review"]
+            },
+        },
+    )
     assert submitted.status_code == 201
     assert client.get(url).json()["fields"] == {}
     assert client.get(url).json()["revision"] == 0
@@ -107,7 +127,12 @@ def test_official_submission_is_not_masked_by_an_older_draft(poster):
 def test_invalid_fields_and_oversized_requests_are_rejected(poster):
     url = endpoint(poster)
     info = client.get(url).json()
-    assert client.put(url, json=payload(info, fields={"imaginary": {"judgment": "correct"}})).status_code == 422
+    assert (
+        client.put(
+            url, json=payload(info, fields={"imaginary": {"judgment": "correct"}})
+        ).status_code
+        == 422
+    )
     assert client.put(url, json=payload(info, expected_revision=True)).status_code == 422
     assert client.put(url, content=b"x" * 20_000).status_code == 413
     assert client.get(url).json()["revision"] == 0
@@ -126,8 +151,10 @@ def test_atomic_write_failure_preserves_previous_progress(poster, monkeypatch):
     url = endpoint(poster)
     assert client.put(url, json=payload(client.get(url).json())).status_code == 200
     before = client.get(url).json()
+
     def fail_replace(*args):
         raise OSError("simulated disk failure")
+
     with monkeypatch.context() as changes:
         changes.setattr(storage.os, "replace", fail_replace)
         response = client.put(url, json=payload(before, fields={"title": {"judgment": "correct"}}))
@@ -174,7 +201,10 @@ def test_api_documents_partial_progress_and_static_assets_stay_local_only():
     assert "" in field["properties"]["judgment"]["enum"]
     assert "$ref" not in str(schema)
     assert client.get("/static/review-drafts.js").status_code == 200
-    assert client.get("/static/review-drafts.js", headers={"Host": "untrusted.example"}).status_code == 403
+    assert (
+        client.get("/static/review-drafts.js", headers={"Host": "untrusted.example"}).status_code
+        == 403
+    )
 
 
 def test_browser_reload_replaces_removed_fields_with_formal_baseline():
@@ -183,10 +213,10 @@ def test_browser_reload_replaces_removed_fields_with_formal_baseline():
     import subprocess
     from pathlib import Path
 
-    node = shutil.which('node')
+    node = shutil.which("node")
     if not node:
-        pytest.skip('Node.js is needed to exercise the browser adapter')
-    script = r'''
+        pytest.skip("Node.js is needed to exercise the browser adapter")
+    script = r"""
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const html = fs.readFileSync('app/templates/index.html', 'utf8');
@@ -211,7 +241,12 @@ assert.equal(reason.value,'formal baseline');
 session.options.apply({title:{judgment:'unsure',reason:'new draft'}});
 assert.equal(judgment.value,'unsure');
 assert.equal(reason.value,'new draft');
-'''
-    result = subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=10)
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert result.returncode == 0, result.stderr

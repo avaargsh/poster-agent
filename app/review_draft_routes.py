@@ -1,10 +1,11 @@
 """Progress endpoints never submit labels or run an OCR/model provider."""
+
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
 from . import review_drafts
-from .human_annotations import AnnotationConflict, REVIEWER_PATTERN
+from .human_annotations import REVIEWER_PATTERN, AnnotationConflict
 from .native_human_reviews import NativeReviewConflict
 from .review_drafts import ReviewVariant
 
@@ -12,7 +13,9 @@ router = APIRouter(prefix="/api/posters", tags=["review-progress"])
 _save_schema = review_drafts.SaveDraft.model_json_schema()
 # Keep the bounded streaming parser while publishing its real Pydantic schema.
 # Inline the sole nested type so Swagger does not receive a dangling $ref.
-_save_schema["properties"]["fields"]["additionalProperties"] = _save_schema.pop("$defs")["DraftField"]
+_save_schema["properties"]["fields"]["additionalProperties"] = _save_schema.pop("$defs")[
+    "DraftField"
+]
 
 
 def _perform(operation, *args):
@@ -25,12 +28,16 @@ def _perform(operation, *args):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OSError as exc:
-        raise HTTPException(status_code=409, detail="无法读写本机审核进度，原有草稿已保留，请重试") from exc
+        raise HTTPException(
+            status_code=409, detail="无法读写本机审核进度，原有草稿已保留，请重试"
+        ) from exc
 
 
 @router.get("/{poster_id}/versions/{version}/review-draft")
 def read_draft(
-    poster_id: str, version: int, response: Response,
+    poster_id: str,
+    version: int,
+    response: Response,
     reviewer: str = Query(min_length=2, max_length=40, pattern=REVIEWER_PATTERN),
     variant: ReviewVariant = "square",
 ):
@@ -38,11 +45,20 @@ def read_draft(
     return _perform(review_drafts.load, poster_id, version, variant, reviewer)
 
 
-@router.put("/{poster_id}/versions/{version}/review-draft", openapi_extra={
-    "requestBody": {"required": True, "content": {"application/json": {"schema": _save_schema}}},
-})
+@router.put(
+    "/{poster_id}/versions/{version}/review-draft",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": _save_schema}},
+        },
+    },
+)
 async def save_draft(
-    poster_id: str, version: int, request: Request, response: Response,
+    poster_id: str,
+    version: int,
+    request: Request,
+    response: Response,
     reviewer: str = Query(min_length=2, max_length=40, pattern=REVIEWER_PATTERN),
     variant: ReviewVariant = "square",
 ):
@@ -57,5 +73,11 @@ async def save_draft(
         raise HTTPException(status_code=422, detail="审核草稿字段或版本不合法") from exc
     response.headers["Cache-Control"] = "no-store"
     return await run_in_threadpool(
-        _perform, review_drafts.save, poster_id, version, variant, reviewer, payload,
+        _perform,
+        review_drafts.save,
+        poster_id,
+        version,
+        variant,
+        reviewer,
+        payload,
     )

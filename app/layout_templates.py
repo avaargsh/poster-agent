@@ -3,6 +3,7 @@
 Copies *only* visual placement and layer offsets. Never transfers product
 images, title, price, logo asset, background, approval, or review claims.
 """
+
 from __future__ import annotations
 
 import csv
@@ -49,8 +50,11 @@ def embed_template(raw_csv: bytes, template: dict) -> bytes:
             raise ValueError("CSV 包含 NUL 字符")
         reader = csv.DictReader(io.StringIO(content, newline=""), strict=True)
         columns = reader.fieldnames
-        if (not columns or len(columns) != len(set(columns))
-                or not {"sku_id", "product_image", "title", "price"}.issubset(columns)):
+        if (
+            not columns
+            or len(columns) != len(set(columns))
+            or not {"sku_id", "product_image", "title", "price"}.issubset(columns)
+        ):
             raise ValueError("清单缺少必填列或表头存在重复列")
         records = list(reader)
         if not 1 <= len(records) <= MAX_ROWS:
@@ -68,9 +72,11 @@ def embed_template(raw_csv: bytes, template: dict) -> bytes:
             result = dict(row)
             for name in LAYOUT_FIELDS:
                 result[name] = (
-                    json.dumps(template[name], sort_keys=True,
-                               separators=(",", ":"), ensure_ascii=False)
-                    if name == "layer_layout" else template[name]
+                    json.dumps(
+                        template[name], sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                    )
+                    if name == "layer_layout"
+                    else template[name]
                 )
             writer.writerow(result)
         return output.getvalue().encode("utf-8-sig")

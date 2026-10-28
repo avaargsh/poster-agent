@@ -3,6 +3,7 @@
 This verifies the integrated API handoff and JavaScript syntax; no paid
 model, actual OCR, backend file browsing or new reviewer database.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ client = TestClient(app)
 
 def test_batch_journal_contract_matches_browser_filter(tmp_path, monkeypatch, product_bytes):
     from scripts import real_sku_batch as batch
+
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     input_dir = tmp_path / "real-skus"
@@ -26,8 +28,7 @@ def test_batch_journal_contract_matches_browser_filter(tmp_path, monkeypatch, pr
     (input_dir / "item.png").write_bytes(product_bytes)
     manifest = input_dir / "skus.csv"
     manifest.write_text(
-        "sku_id,product_image,title,price\n"
-        "sku-sample,item.png,电动牙刷,199\n", encoding="utf-8"
+        "sku_id,product_image,title,price\nsku-sample,item.png,电动牙刷,199\n", encoding="utf-8"
     )
     result = batch.run_batch(manifest, tmp_path / "results", apply=True)
     journal = json.loads((tmp_path / "results/batch_import_results.json").read_text())
@@ -79,7 +80,10 @@ def test_embedded_javascript_parses_under_node_if_installed(tmp_path):
     path = tmp_path / "poster-ui.js"
     path.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [node, "--check", str(path)], capture_output=True,
-        text=True, timeout=15, check=False,
+        [node, "--check", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
     )
     assert result.returncode == 0, result.stderr

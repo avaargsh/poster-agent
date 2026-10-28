@@ -1,17 +1,20 @@
 """Native 4:5 human annotations: isolated from legacy square image reviews."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app import native_human_reviews as reviews
-from app.native_acceptance import NativeVariant, PRODUCT_FOCUS_VARIANT, VARIANT
+from app.native_acceptance import PRODUCT_FOCUS_VARIANT, VARIANT, NativeVariant
 
 router = APIRouter(tags=["native-human-review"])
 
 
 @router.get("/api/posters/{poster_id}/versions/{version}/exports/{variant}/human-review")
 def review_context(
-    poster_id: str, version: int, variant: NativeVariant,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant,
     reviewer: str | None = Query(default=None),
 ):
     try:
@@ -24,9 +27,13 @@ def review_context(
         raise HTTPException(status_code=422, detail="无法读取当前原生版本") from exc
 
 
-@router.post("/api/posters/{poster_id}/versions/{version}/exports/{variant}/human-review", status_code=201)
+@router.post(
+    "/api/posters/{poster_id}/versions/{version}/exports/{variant}/human-review", status_code=201
+)
 def submit_review(
-    poster_id: str, version: int, variant: NativeVariant,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant,
     payload: reviews.NativeReviewSubmission,
 ):
     try:

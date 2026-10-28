@@ -4,6 +4,7 @@ No arbitrary filesystem browsing: entries are derived solely from the checked
 batch SKU set and the two fixed M6 variants. Original material never leaves
 the machine except through the operator's explicit loopback download request.
 """
+
 from __future__ import annotations
 
 import csv
@@ -78,8 +79,10 @@ def _read_review_rows(raw: bytes, expected: dict[str, str], cohort: str) -> list
             sku, variant = row["sku_id"], row["variant_id"]
             key = (sku, variant)
             if (
-                sku not in expected or variant not in _VARIANT_NAME
-                or key in identities or row["poster_id"] != expected[sku]
+                sku not in expected
+                or variant not in _VARIANT_NAME
+                or key in identities
+                or row["poster_id"] != expected[sku]
                 or row["cohort_id"] != cohort
             ):
                 raise _blocked("reviews CSV 包含不属于本批次的 SKU / 版式 / 海报")
@@ -87,9 +90,7 @@ def _read_review_rows(raw: bytes, expected: dict[str, str], cohort: str) -> list
             rows.append(row)
             if len(rows) > 2 * len(expected):
                 raise _blocked("reviews CSV 行数超出预期")
-        if identities != {
-            (sku, variant) for sku in expected for variant in _VARIANT_NAME
-        }:
+        if identities != {(sku, variant) for sku in expected for variant in _VARIANT_NAME}:
             raise _blocked("reviews CSV 缺少本批次必需的 SKU×版式记录")
         return rows
     except (UnicodeError, ValueError, csv.Error) as exc:
@@ -106,10 +107,7 @@ def _add_bounded_file(
 ) -> int:
     with _open_regular(local) as file:
         size = os.fstat(file.fileno()).st_size
-        if (
-            size <= 0 or size > limit
-            or total + size > MAX_TOTAL_UNCOMPRESSED_BYTES
-        ):
+        if size <= 0 or size > limit or total + size > MAX_TOTAL_UNCOMPRESSED_BYTES:
             raise _blocked("审核包文件过大或为空")
         digest = hashlib.sha256()
         consumed = 0
@@ -131,7 +129,9 @@ def _add_bounded_file(
 
 
 def _zip_contents(
-    archive: zipfile.ZipFile, folder: Path, expected: dict[str, str],
+    archive: zipfile.ZipFile,
+    folder: Path,
+    expected: dict[str, str],
 ) -> None:
     from scripts.validate_m6_cohort import MAX_REVIEWED_PNG_BYTES
 
@@ -174,16 +174,24 @@ def _zip_contents(
         if path != name or not _SHA256.fullmatch(digest):
             raise _blocked("图片路径不符或 SHA-256 不合法")
         total = _add_bounded_file(
-            archive, folder / name, name,
-            MAX_REVIEWED_PNG_BYTES, total, expected_sha256=digest,
+            archive,
+            folder / name,
+            name,
+            MAX_REVIEWED_PNG_BYTES,
+            total,
+            expected_sha256=digest,
         )
 
     # Cutout reports are an additive, separately governed M6 evidence channel.
     # Never package only part of the evidence or arbitrary local images.
     cutout_csv = folder / "m6_cutout_reviews.csv"
     cutout_json = folder / "m6_cutout_evidence.json"
-    if (cutout_csv.exists() or cutout_csv.is_symlink()
-            or cutout_json.exists() or cutout_json.is_symlink()):
+    if (
+        cutout_csv.exists()
+        or cutout_csv.is_symlink()
+        or cutout_json.exists()
+        or cutout_json.is_symlink()
+    ):
         if not cutout_csv.is_file() or not cutout_json.is_file():
             raise _blocked("抠图证据 JSON 与审核 CSV 必须同时存在")
         from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
@@ -193,10 +201,10 @@ def _zip_contents(
         )
         cutout_csv_raw = _bounded_bytes(cutout_csv, MAX_CSV_BYTES)
         cutout_json_raw = _bounded_bytes(cutout_json, MAX_CSV_BYTES)
-        if (hashlib.sha256(cutout_csv_raw).hexdigest()
-                != verified["reviews_csv_sha256"]
-                or hashlib.sha256(cutout_json_raw).hexdigest()
-                != verified["evidence_json_sha256"]):
+        if (
+            hashlib.sha256(cutout_csv_raw).hexdigest() != verified["reviews_csv_sha256"]
+            or hashlib.sha256(cutout_json_raw).hexdigest() != verified["evidence_json_sha256"]
+        ):
             raise _blocked("M6 抠图审核证据在验证后发生变化")
         total += len(cutout_csv_raw) + len(cutout_json_raw)
         if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
@@ -209,8 +217,11 @@ def _zip_contents(
             sku = row["sku_id"]
             name = f"images/{sku}-cutout-comparison.png"
             total = _add_bounded_file(
-                archive, folder / name, name,
-                MAX_REVIEWED_PNG_BYTES, total,
+                archive,
+                folder / name,
+                name,
+                MAX_REVIEWED_PNG_BYTES,
+                total,
                 expected_sha256=row["comparison_image_sha256"],
             )
 
@@ -226,7 +237,9 @@ def download_m6_package(batch_id: str):
     expected = {row["sku_id"]: row["poster_id"] for row in scope["rows"]}
     spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     try:
-        with zipfile.ZipFile(spool, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
+        with zipfile.ZipFile(
+            spool, "w", compression=zipfile.ZIP_STORED, allowZip64=False
+        ) as archive:
             _zip_contents(archive, folder, expected)
         spool.seek(0)
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as exc:

@@ -3,6 +3,7 @@
 Reuses M5c's actual reviewer context and M4c's verified report. This module
 does NOT run OCR, generate images with AI, or fabricate an accuracy metric.
 """
+
 from __future__ import annotations
 
 import csv
@@ -10,23 +11,29 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
-from collections import Counter
-from pathlib import Path
 
 from app import native_human_reviews as reviews
 from app import storage
 from app.human_annotations import REVIEWER_PATTERN, VALID_ID
 from app.native_acceptance import (
-    NATIVE_VARIANTS, VARIANT, NativeVariant, StaleNativeEvidence, verified_report,
+    NATIVE_VARIANTS,
+    VARIANT,
+    NativeVariant,
+    StaleNativeEvidence,
+    verified_report,
 )
 from evals.native_real_reports import OCR_FIELDS, _text_prediction
 
 
 def audit_trial(
-    reviewer: str, *, batch_scope: dict | None = None,
+    reviewer: str,
+    *,
+    batch_scope: dict | None = None,
     variant: NativeVariant = VARIANT,
 ) -> tuple[dict, list[dict]]:
     if variant not in NATIVE_VARIANTS:
@@ -64,11 +71,15 @@ def audit_trial(
                 if chosen is not None and version != latest:
                     continue
                 row = {
-                    "poster_id": poster.name, "version": version,
+                    "poster_id": poster.name,
+                    "version": version,
                     "sku_id": chosen[poster.name] if chosen is not None else "",
-                    "status": "", "definite_labels": 0,
-                    "ocr_text_labels": 0, "unsure_labels": 0,
-                    "product_sha256": "", "native_image_sha256": "",
+                    "status": "",
+                    "definite_labels": 0,
+                    "ocr_text_labels": 0,
+                    "unsure_labels": 0,
+                    "product_sha256": "",
+                    "native_image_sha256": "",
                     "action": "",
                 }
                 try:
@@ -80,20 +91,24 @@ def audit_trial(
                         row["status"] = "NEEDS_REVIEW"
                         row["action"] = "在网页人工审核当前原生 4:5 PNG"
                     else:
-                        reviewed = [selected["fields"][key]["judgment"]
-                                    for key in ctx["fields_to_review"]]
+                        reviewed = [
+                            selected["fields"][key]["judgment"] for key in ctx["fields_to_review"]
+                        ]
                         row["definite_labels"] = sum(x != "unsure" for x in reviewed)
                         row["unsure_labels"] = reviewed.count("unsure")
                         row["ocr_text_labels"] = sum(
                             selected["fields"][key]["judgment"] != "unsure"
-                            for key in ctx["fields_to_review"] if key in OCR_FIELDS
+                            for key in ctx["fields_to_review"]
+                            if key in OCR_FIELDS
                         )
                         if row["definite_labels"] == 0:
                             row["status"] = "REVIEW_UNSURE"
                             row["action"] = "人工复核不确定的字段；这些字段不参与评分"
                         else:
                             try:
-                                report = verified_report(poster.name, version, "paddle", variant=variant)
+                                report = verified_report(
+                                    poster.name, version, "paddle", variant=variant
+                                )
                             except FileNotFoundError:
                                 row["status"] = "OCR_MISSING"
                                 row["action"] = "对原生 4:5 图片手动执行 PaddleOCR 验收"
@@ -101,7 +116,10 @@ def audit_trial(
                                 row["status"] = "OCR_STALE"
                                 row["action"] = "素材/规格或报告变化，重新运行原生 PaddleOCR"
                             else:
-                                if report.get("ocr_status") != "OK" or report.get("ocr_mode") != "paddle":
+                                if (
+                                    report.get("ocr_status") != "OK"
+                                    or report.get("ocr_mode") != "paddle"
+                                ):
                                     row["status"] = "OCR_NOT_OK"
                                     row["action"] = "排查 OCR 引擎，成功执行后重测"
                                 elif report.get("image_dimensions") != [1080, 1350]:
@@ -119,7 +137,11 @@ def audit_trial(
                                                 raise ValueError("duplicate check")
                                             indexed[name] = check["status"]
                                         for field in ctx["fields_to_review"]:
-                                            if field in OCR_FIELDS and selected["fields"][field]["judgment"] != "unsure":
+                                            if (
+                                                field in OCR_FIELDS
+                                                and selected["fields"][field]["judgment"]
+                                                != "unsure"
+                                            ):
                                                 _text_prediction(field, indexed)
                                     except (KeyError, TypeError, ValueError):
                                         row["status"] = "OCR_CHECKS_INVALID"
@@ -128,16 +150,26 @@ def audit_trial(
                                         row["status"] = "READY"
                                         row["action"] = "本版式证据齐备，可单独运行对应版式离线评分"
                                         identifier = (poster.name, version)
-                                        if report.get("ocr_runtime_evidence") == "RECORDED" and isinstance(
+                                        if report.get(
+                                            "ocr_runtime_evidence"
+                                        ) == "RECORDED" and isinstance(
                                             report.get("ocr_runtime"), dict
                                         ):
                                             recorded.add(identifier)
                                         else:
                                             unrecorded.add(identifier)
-                except (reviews.NativeReviewConflict, FileNotFoundError, OSError, ValueError, KeyError, TypeError) as exc:
+                except (
+                    reviews.NativeReviewConflict,
+                    FileNotFoundError,
+                    OSError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                ) as exc:
                     # This path is a diagnostic, not evidence of valid inputs.
                     row["status"] = (
-                        "REVIEW_STALE" if isinstance(exc, reviews.NativeReviewConflict)
+                        "REVIEW_STALE"
+                        if isinstance(exc, reviews.NativeReviewConflict)
                         else "SOURCE_INVALID"
                     )
                     row["action"] = "检查图片、规格与最新人工审核的哈希或 JSON 完整性"
@@ -146,13 +178,20 @@ def audit_trial(
     if chosen is not None:
         present = {row["poster_id"] for row in rows}
         for pid in sorted(chosen.keys() - present):
-            rows.append({
-                "poster_id": pid, "version": 0, "sku_id": chosen[pid],
-                "status": "SOURCE_INVALID", "definite_labels": 0,
-                "ocr_text_labels": 0, "unsure_labels": 0,
-                "product_sha256": "", "native_image_sha256": "",
-                "action": "批次海报不存在、版本文件缺失或版本元数据不可用",
-            })
+            rows.append(
+                {
+                    "poster_id": pid,
+                    "version": 0,
+                    "sku_id": chosen[pid],
+                    "status": "SOURCE_INVALID",
+                    "definite_labels": 0,
+                    "ocr_text_labels": 0,
+                    "unsure_labels": 0,
+                    "product_sha256": "",
+                    "native_image_sha256": "",
+                    "action": "批次海报不存在、版本文件缺失或版本元数据不可用",
+                }
+            )
         rows.sort(key=lambda item: (item["sku_id"], item["version"]))
 
     counts = Counter(row["status"] for row in rows)
@@ -165,13 +204,16 @@ def audit_trial(
     )
     # Selected-variant labels and OCR are validated together by M5d.
     if chosen is not None:
-        can_score = can_score and len(rows) == len(chosen) and all(
-            row["status"] == "READY" for row in rows
+        can_score = (
+            can_score and len(rows) == len(chosen) and all(row["status"] == "READY" for row in rows)
         )
     summary = {
-        "schema_version": "1.0", "variant_id": variant,
-        "reviewer": reviewer, "source": "local_poster_versions",
-        "model_invoked": False, "ocr_inference_performed": False,
+        "schema_version": "1.0",
+        "variant_id": variant,
+        "reviewer": reviewer,
+        "source": "local_poster_versions",
+        "model_invoked": False,
+        "ocr_inference_performed": False,
         "total_versions": len(rows),
         "reviewed_versions_with_definite_labels": len(labeled),
         "ready_versions": len(ready),
@@ -192,27 +234,36 @@ def audit_trial(
         ),
     }
     if batch_scope is not None:
-        summary.update({
-            "scope_mode": batch_scope["scope_mode"],
-            "source_batch_journal_sha256": batch_scope["source_batch_journal_sha256"],
-            "source_manifest_sha256": batch_scope["source_manifest_sha256"],
-            "batch_sku_count": batch_scope["batch_sku_count"],
-            "batch_unique_raw_product_sha256_count": batch_scope[
-                "batch_unique_raw_product_sha256_count"
-            ],
-            "cohort_requires_all_skus_ready": True,
-            "warning": summary["warning"] +
-                " The local M5g journal is not a signed image-origin certificate.",
-        })
+        summary.update(
+            {
+                "scope_mode": batch_scope["scope_mode"],
+                "source_batch_journal_sha256": batch_scope["source_batch_journal_sha256"],
+                "source_manifest_sha256": batch_scope["source_manifest_sha256"],
+                "batch_sku_count": batch_scope["batch_sku_count"],
+                "batch_unique_raw_product_sha256_count": batch_scope[
+                    "batch_unique_raw_product_sha256_count"
+                ],
+                "cohort_requires_all_skus_ready": True,
+                "warning": summary["warning"]
+                + " The local M5g journal is not a signed image-origin certificate.",
+            }
+        )
     return summary, rows
 
 
 def save_trial_audit(output_dir: Path, summary: dict, rows: list[dict]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = [
-        "poster_id", "version", "sku_id", "status", "definite_labels",
-        "ocr_text_labels", "unsure_labels", "product_sha256",
-        "native_image_sha256", "action",
+        "poster_id",
+        "version",
+        "sku_id",
+        "status",
+        "definite_labels",
+        "ocr_text_labels",
+        "unsure_labels",
+        "product_sha256",
+        "native_image_sha256",
+        "action",
     ]
     manifest_path = output_dir / "native_trial_manifest.csv"
     with manifest_path.open("w", encoding="utf-8", newline="") as handle:
@@ -222,9 +273,7 @@ def save_trial_audit(output_dir: Path, summary: dict, rows: list[dict]) -> None:
 
     # Bind readiness to the exact manifest bytes from this audit run. Write
     # readiness last so an interrupted write cannot advertise a complete pair.
-    summary["native_trial_manifest_sha256"] = hashlib.sha256(
-        manifest_path.read_bytes()
-    ).hexdigest()
+    summary["native_trial_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     (output_dir / "native_trial_readiness.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -235,8 +284,7 @@ SCORE_FILES = ("native_real_summary.json", "native_real_cases.csv", "native_tria
 
 def _archive_previous_scores(output_dir: Path) -> str | None:
     """Preserve scored artifacts from an earlier run, never present as latest."""
-    existing = [output_dir / name for name in SCORE_FILES
-                if (output_dir / name).is_file()]
+    existing = [output_dir / name for name in SCORE_FILES if (output_dir / name).is_file()]
     if not existing:
         return None
     name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:12]
@@ -248,7 +296,9 @@ def _archive_previous_scores(output_dir: Path) -> str | None:
 
 
 def _verify_output_identity(
-    output_dir: Path, reviewer: str, variant: NativeVariant,
+    output_dir: Path,
+    reviewer: str,
+    variant: NativeVariant,
     batch_scope: dict | None = None,
 ) -> None:
     """Reject evaluation directory reuse across identities before any mutation.
@@ -289,27 +339,35 @@ def _verify_output_identity(
             for name in ("source_batch_journal_sha256", "source_manifest_sha256"):
                 previous_digest = prior.get(name)
                 requested_digest = batch_scope[name]
-                if (not isinstance(previous_digest, str)
-                        or not re.fullmatch(r"[a-f0-9]{64}", previous_digest)
-                        or previous_digest != requested_digest):
+                if (
+                    not isinstance(previous_digest, str)
+                    or not re.fullmatch(r"[a-f0-9]{64}", previous_digest)
+                    or previous_digest != requested_digest
+                ):
                     raise ValueError("评测目录已绑定其他批次或摘要无效；请使用独立目录")
-        elif any(name in prior for name in (
-            "source_batch_journal_sha256", "source_manifest_sha256"
-        )):
+        elif any(
+            name in prior for name in ("source_batch_journal_sha256", "source_manifest_sha256")
+        ):
             raise ValueError("评测目录批次来源不明；请使用独立目录")
         return
     # Do not infer a blank identity if existing evidence is present but its
     # readiness pointer is missing (e.g. a partially copied experiment).
     artifacts = (
-        "native_trial_manifest.csv", *SCORE_FILES, "history",
+        "native_trial_manifest.csv",
+        *SCORE_FILES,
+        "history",
     )
     if current.exists() or any((output_dir / name).exists() for name in artifacts):
         raise ValueError("评测目录存在来源不明的旧结果；请使用独立目录")
 
 
 def run_trial(
-    reviewer: str, output_dir: Path, *, score: bool = False,
-    batch_scope: dict | None = None, variant: NativeVariant = VARIANT,
+    reviewer: str,
+    output_dir: Path,
+    *,
+    score: bool = False,
+    batch_scope: dict | None = None,
+    variant: NativeVariant = VARIANT,
 ) -> dict:
     """Readiness is default; --score stages results and exposes them only on success.
 
@@ -338,8 +396,9 @@ def run_trial(
     from evals.native_real_reports import evaluate_native_reports
 
     try:
-        target_versions = ({row["poster_id"]: row["version"] for row in rows}
-                           if batch_scope is not None else None)
+        target_versions = (
+            {row["poster_id"]: row["version"] for row in rows} if batch_scope is not None else None
+        )
         csv_content, _meta = reviews.export(
             reviewer, target_versions=target_versions, variant=variant
         )
@@ -353,19 +412,21 @@ def run_trial(
                 "ready_distinct_product_sha256_count"
             ]
             if batch_scope is not None:
-                result.update({
-                    "scope_mode": batch_scope["scope_mode"],
-                    "source_batch_journal_sha256": batch_scope["source_batch_journal_sha256"],
-                    "source_manifest_sha256": batch_scope["source_manifest_sha256"],
-                    "batch_sku_count": batch_scope["batch_sku_count"],
-                    "batch_unique_raw_product_sha256_count": batch_scope[
-                        "batch_unique_raw_product_sha256_count"
-                    ],
-                    "scored_sku_to_poster_id": {
-                        row["sku_id"]: row["poster_id"] for row in rows
-                    },
-                    "cohort_requires_all_skus_ready": True,
-                })
+                result.update(
+                    {
+                        "scope_mode": batch_scope["scope_mode"],
+                        "source_batch_journal_sha256": batch_scope["source_batch_journal_sha256"],
+                        "source_manifest_sha256": batch_scope["source_manifest_sha256"],
+                        "batch_sku_count": batch_scope["batch_sku_count"],
+                        "batch_unique_raw_product_sha256_count": batch_scope[
+                            "batch_unique_raw_product_sha256_count"
+                        ],
+                        "scored_sku_to_poster_id": {
+                            row["sku_id"]: row["poster_id"] for row in rows
+                        },
+                        "cohort_requires_all_skus_ready": True,
+                    }
+                )
                 (staged / "native_real_summary.json").write_text(
                     json.dumps(result, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8",

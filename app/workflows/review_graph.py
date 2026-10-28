@@ -3,12 +3,13 @@
 The same LangGraph thread_id must be used for every invocation. No image generation
 happens inside this graph. The node containing interrupt has no external side effects.
 """
+
 from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict
 
-from langgraph.graph import START, END, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from app.brief_compiler import BriefRequest, compile_brief
@@ -35,11 +36,13 @@ def extract_node(state: ReviewState) -> dict:
 def approval_node(state: ReviewState) -> dict:
     # Important: no writes or payable API calls before interrupt, because the
     # interrupted node starts again from its beginning on resume.
-    decision = interrupt({
-        "action": "human_review",
-        "draft": state["draft"],
-        "message": "请核对标题、商品价格及营销文案。必须由运营人员明确确认。",
-    })
+    decision = interrupt(
+        {
+            "action": "human_review",
+            "draft": state["draft"],
+            "message": "请核对标题、商品价格及营销文案。必须由运营人员明确确认。",
+        }
+    )
     if not isinstance(decision, dict) or not decision.get("approved"):
         return {"status": "REJECTED", "confirmed_spec": None}
     spec = PosterSpec.model_validate(decision["spec"])

@@ -4,6 +4,7 @@ No OCR inference, price correctness decision, cloud call, or modification of
 source images. Creates one locally held ZIP after checking both the worksheet
 snapshot and its exact OCR capture. JSON declarations are not attestation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,10 +20,16 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.ocr_overlay import MAX_DRAWN_BOXES, OCR_BOX_COLOR, _valid_box
 from scripts.capture_m6_paddle_ocr import (
-    MAX_PNG_BYTES, OCREvidenceError, _identities, _read_regular, _review_rows,
+    MAX_PNG_BYTES,
+    OCREvidenceError,
+    _identities,
+    _read_regular,
+    _review_rows,
 )
 from scripts.verify_m6_ocr_capture import (
-    OCRCaptureEvidenceError, _read_snapshot, verify_ocr_capture,
+    OCRCaptureEvidenceError,
+    _read_snapshot,
+    verify_ocr_capture,
 )
 
 OUTPUT_NAME = "m6_ocr_review_overlays.zip"
@@ -78,13 +85,16 @@ def _annotate(
         drawn += 1
     draw.rectangle((0, 0, canvas.width, 62), fill=(9, 21, 34, 225))
     draw.text(
-        (12, 8), "M6 OCR VISUAL REFERENCE - HUMAN REVIEW REQUIRED",
-        font=font, fill=(255, 255, 255, 255),
+        (12, 8),
+        "M6 OCR VISUAL REFERENCE - HUMAN REVIEW REQUIRED",
+        font=font,
+        fill=(255, 255, 255, 255),
     )
     draw.text(
         (12, 36),
         f"bbox {drawn}/{len(lines)} | missing {unlocated} | limit {MAX_DRAWN_BOXES}",
-        font=font, fill=(255, 231, 163, 255),
+        font=font,
+        fill=(255, 231, 163, 255),
     )
     result = Image.alpha_composite(canvas, marks).convert("RGB")
     buffer = io.BytesIO()
@@ -110,7 +120,10 @@ def prepare_review_overlays(package_dir: Path) -> dict:
         cohort, rows, _ = _identities(original_rows)
         evidence_path = package / "m6_paddle_ocr_evidence.json"
         verified = verify_ocr_capture(
-            evidence_path, rows, cohort_id=cohort, reviews_sha256=reviews_sha,
+            evidence_path,
+            rows,
+            cohort_id=cohort,
+            reviews_sha256=reviews_sha,
         )
         document, evidence_sha = _read_snapshot(evidence_path)
         if evidence_sha != verified["evidence_sha256"]:
@@ -118,8 +131,7 @@ def prepare_review_overlays(package_dir: Path) -> dict:
     except (OCREvidenceError, OCRCaptureEvidenceError, OSError, ValueError) as exc:
         raise OverlayPreparationError(f"M6 OCR 证据前置核验失败：{exc}") from exc
 
-    by_key = {(item["sku_id"], item["variant_id"]): item
-              for item in document["observations"]}
+    by_key = {(item["sku_id"], item["variant_id"]): item for item in document["observations"]}
     manifest = {
         "schema_version": "m6-ocr-review-overlays-1",
         "cohort_id": cohort,
@@ -140,7 +152,10 @@ def prepare_review_overlays(package_dir: Path) -> dict:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            dir=package, prefix=".m6-overlays-", suffix=".tmp", delete=False,
+            dir=package,
+            prefix=".m6-overlays-",
+            suffix=".tmp",
+            delete=False,
         ) as temp:
             temporary = Path(temp.name)
             os.chmod(temporary, 0o600)
@@ -157,25 +172,33 @@ def prepare_review_overlays(package_dir: Path) -> dict:
                         )
                     observed = by_key[(row["sku_id"], variant)]
                     annotated, drawn, unlocated = _annotate(
-                        source_bytes, observed["recognized_lines"], size,
+                        source_bytes,
+                        observed["recognized_lines"],
+                        size,
                     )
                     total += len(annotated)
                     if total > MAX_OUTPUT_BYTES:
                         raise OverlayPreparationError("标注图片总量超出 512 MiB 上限")
                     zf.writestr(relative, annotated)
-                    manifest["items"].append({
-                        "sku_id": row["sku_id"],
-                        "variant_id": variant,
-                        "source_image_sha256": row["output_image_sha256"],
-                        "overlay_path": relative,
-                        "overlay_sha256": _sha(annotated),
-                        "bbox_drawn": drawn,
-                        "unlocated_line_count": unlocated,
-                        "undrawn_box_limit": max(
-                            0, sum(line.get("bbox") is not None
-                                   for line in observed["recognized_lines"]) - drawn
-                        ),
-                    })
+                    manifest["items"].append(
+                        {
+                            "sku_id": row["sku_id"],
+                            "variant_id": variant,
+                            "source_image_sha256": row["output_image_sha256"],
+                            "overlay_path": relative,
+                            "overlay_sha256": _sha(annotated),
+                            "bbox_drawn": drawn,
+                            "unlocated_line_count": unlocated,
+                            "undrawn_box_limit": max(
+                                0,
+                                sum(
+                                    line.get("bbox") is not None
+                                    for line in observed["recognized_lines"]
+                                )
+                                - drawn,
+                            ),
+                        }
+                    )
                 zf.writestr(
                     MANIFEST_NAME,
                     json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",

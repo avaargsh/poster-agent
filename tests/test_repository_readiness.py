@@ -3,6 +3,7 @@
 All fixtures are made-up paths and generated tokens; no real secrets or
 user/customer images are included in these tests.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -11,7 +12,10 @@ from pathlib import Path
 import pytest
 
 from scripts.check_repository_readiness import (
-    ESSENTIAL, _sensitive_path, inspect_repository, tracked_files,
+    ESSENTIAL,
+    _sensitive_path,
+    inspect_repository,
+    tracked_files,
 )
 
 
@@ -60,12 +64,22 @@ def test_authorized_license_and_safe_examples_pass_structural_checks(tmp_path):
     assert any("并非完整" in warning for warning in report["warnings"])
 
 
-@pytest.mark.parametrize("name", [
-    ".env", ".env.production", "private.pem", "id_ed25519",
-    "data/posters/0123456789abcdef.png", "data/eval_runs/labels.csv",
-    "data/real_trial/customer.png", "data/examples/customer.jpg",
-    "local.sqlite3", ".venv/pyvenv.cfg", "data/real_skus/batch.json",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env",
+        ".env.production",
+        "private.pem",
+        "id_ed25519",
+        "data/posters/0123456789abcdef.png",
+        "data/eval_runs/labels.csv",
+        "data/real_trial/customer.png",
+        "data/examples/customer.jpg",
+        "local.sqlite3",
+        ".venv/pyvenv.cfg",
+        "data/real_skus/batch.json",
+    ],
+)
 def test_private_material_is_always_a_release_blocker(tmp_path, name):
     names = _fixture_repo(tmp_path, license_present=True)
     f = tmp_path / name

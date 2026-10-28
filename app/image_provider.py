@@ -1,5 +1,7 @@
 """Qwen 图像生成功能：只生成背景，不生成价格或 Logo。"""
+
 from __future__ import annotations
+
 import base64
 import binascii
 import io
@@ -7,6 +9,7 @@ import json
 import os
 import warnings
 from urllib.parse import urlparse
+
 import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -27,11 +30,12 @@ def _allowed_provider_url(url: str) -> bool:
 
 
 def make_prompt(style: str) -> str:
-    return ("Square luxury ecommerce promotional visual BACKGROUND ONLY. "
-            "No text, no numbers, no logos, no product, no typography, no people. "
-            "Clear negative space and soft lighting, pleasant gradient, premium polished look. "
-            "Avoid busy details. Visual mood: " + style)
-
+    return (
+        "Square luxury ecommerce promotional visual BACKGROUND ONLY. "
+        "No text, no numbers, no logos, no product, no typography, no people. "
+        "Clear negative space and soft lighting, pleasant gradient, premium polished look. "
+        "Avoid busy details. Visual mood: " + style
+    )
 
 
 # Adapted from linbei0/EcomGen (MIT), packages/providers/src/openai-compatible.ts:
@@ -78,8 +82,12 @@ def _open_image(blob: bytes) -> Image.Image:
                     raise ImageProviderError("模型返回图片像素或边长超限")
                 image.load()
                 return ImageOps.exif_transpose(image).convert("RGB")
-    except (UnidentifiedImageError, OSError,
-            Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+    except (
+        UnidentifiedImageError,
+        OSError,
+        Image.DecompressionBombWarning,
+        Image.DecompressionBombError,
+    ) as exc:
         raise ImageProviderError("模型返回的图片无法安全解码") from exc
 
 
@@ -88,9 +96,13 @@ async def generate_ai_background(style: str) -> Image.Image:
     endpoint = os.getenv("QWEN_IMAGE_ENDPOINT", "")
     model = os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0")
     if not key or not endpoint:
-        raise ImageProviderError("AI 模式需要 DASHSCOPE_API_KEY 和 QWEN_IMAGE_ENDPOINT，参见 README")
+        raise ImageProviderError(
+            "AI 模式需要 DASHSCOPE_API_KEY 和 QWEN_IMAGE_ENDPOINT，参见 README"
+        )
     if not _allowed_provider_url(endpoint) or not endpoint.endswith("/images/generations"):
-        raise ImageProviderError("QWEN_IMAGE_ENDPOINT 必须是阿里云 HTTPS compatible-mode /images/generations 地址")
+        raise ImageProviderError(
+            "QWEN_IMAGE_ENDPOINT 必须是阿里云 HTTPS compatible-mode /images/generations 地址"
+        )
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {"model": model, "prompt": make_prompt(style), "size": "1024x1024", "n": 1}
     timeout = httpx.Timeout(300.0, connect=20.0)
@@ -133,6 +145,15 @@ async def generate_ai_background(style: str) -> Image.Image:
             return _open_image(blob)
     except ImageProviderError:
         raise
-    except (httpx.HTTPError, KeyError, IndexError, ValueError, UnidentifiedImageError, OSError) as exc:
+    except (
+        httpx.HTTPError,
+        KeyError,
+        IndexError,
+        ValueError,
+        UnidentifiedImageError,
+        OSError,
+    ) as exc:
         # 不回显完整异常、带签名的图片 URL 或 API 密钥
-        raise ImageProviderError("调用图像模型失败，请检查 API Key、Workspace 区域、模型名称和网络连接") from exc
+        raise ImageProviderError(
+            "调用图像模型失败，请检查 API Key、Workspace 区域、模型名称和网络连接"
+        ) from exc

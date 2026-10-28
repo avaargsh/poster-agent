@@ -1,4 +1,5 @@
 """Local web batch import: full-cohort preflight, progress, and safe resume."""
+
 from __future__ import annotations
 
 import csv
@@ -6,9 +7,9 @@ import io
 import json
 from importlib import import_module
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-import pytest
 
 from app import storage
 from app.main import app
@@ -25,8 +26,15 @@ def _png(color):
 def _csv(rows):
     stream = io.StringIO(newline="")
     fields = [
-        "sku_id", "product_image", "title", "price",
-        "original_price", "subtitle", "cta", "style", "logo_image",
+        "sku_id",
+        "product_image",
+        "title",
+        "price",
+        "original_price",
+        "subtitle",
+        "cta",
+        "style",
+        "logo_image",
     ]
     writer = csv.DictWriter(stream, fieldnames=fields)
     writer.writeheader()
@@ -37,15 +45,25 @@ def _csv(rows):
 def _rows():
     return [
         {
-            "sku_id": "sku-one", "product_image": "sku_one.png",
-            "title": "电动牙刷促销", "price": "199", "original_price": "399",
-            "subtitle": "限时福利", "cta": "立即购买", "style": "蓝色科技风",
+            "sku_id": "sku-one",
+            "product_image": "sku_one.png",
+            "title": "电动牙刷促销",
+            "price": "199",
+            "original_price": "399",
+            "subtitle": "限时福利",
+            "cta": "立即购买",
+            "style": "蓝色科技风",
             "logo_image": "logo.png",
         },
         {
-            "sku_id": "sku-two", "product_image": "sku_two.png",
-            "title": "智能生活好物", "price": "89", "original_price": "129",
-            "subtitle": "品质生活", "cta": "立即抢购", "style": "蓝色科技风",
+            "sku_id": "sku-two",
+            "product_image": "sku_two.png",
+            "title": "智能生活好物",
+            "price": "89",
+            "original_price": "129",
+            "subtitle": "品质生活",
+            "cta": "立即抢购",
+            "style": "蓝色科技风",
             "logo_image": "",
         },
     ]
@@ -62,17 +80,15 @@ def _upload_batch(monkeypatch, tmp_path, rows=None):
     }
     files = [
         ("manifest", ("real_skus.csv", _csv(rows or _rows()), "text/csv")),
-        *[
-            ("images", (name, data, "image/png"))
-            for name, data in images.items()
-        ],
+        *[("images", (name, data, "image/png")) for name, data in images.items()],
     ]
     response = client.post("/api/batches", files=files)
     return response
 
 
 def test_web_preflight_validates_entire_cohort_without_creating_posters(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     response = _upload_batch(monkeypatch, tmp_path)
     assert response.status_code == 201, response.text
@@ -91,7 +107,8 @@ def test_web_preflight_validates_entire_cohort_without_creating_posters(
 
 
 def test_web_apply_reports_progress_and_reuses_existing_m5g_journal(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     response = _upload_batch(monkeypatch, tmp_path)
     assert response.status_code == 201, response.text
@@ -160,12 +177,15 @@ def test_failed_web_batch_can_resume_without_duplicate_posters(monkeypatch, tmp_
     complete = client.get(f"/api/batches/{batch_id}").json()
     assert complete["status"] == "COMPLETED"
     assert complete["processed"] == 2
-    assert next(row for row in complete["rows"] if row["sku_id"] == "sku-one")["poster_id"] == first_id
+    assert (
+        next(row for row in complete["rows"] if row["sku_id"] == "sku-one")["poster_id"] == first_id
+    )
     assert len(list(storage.root().iterdir())) == 2
 
 
 def test_web_preflight_rejects_path_traversal_before_any_poster(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     rows = _rows()[:1]
     rows[0]["product_image"] = "../outside.png"
@@ -214,8 +234,12 @@ def test_web_batch_ui_exposes_explicit_preflight_apply_and_progress_controls():
     assert response.status_code == 200
     html = response.text
     for element in (
-        'id="batchManifest"', 'id="batchImages"', 'id="preflightBatch"',
-        'id="applyBatch"', 'id="batchProgress"', 'id="batchRows"',
+        'id="batchManifest"',
+        'id="batchImages"',
+        'id="preflightBatch"',
+        'id="applyBatch"',
+        'id="batchProgress"',
+        'id="batchRows"',
     ):
         assert element in html
     assert "/api/batches" in html
@@ -224,8 +248,10 @@ def test_web_batch_ui_exposes_explicit_preflight_apply_and_progress_controls():
     assert "只有点击生成后才开始处理" in html
     assert "不调用 Qwen 生图或 OCR" in html
 
+
 def test_batch_status_does_not_overwrite_completion_from_a_stale_running_snapshot(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     response = _upload_batch(monkeypatch, tmp_path)
     assert response.status_code == 201
@@ -252,10 +278,9 @@ def test_batch_status_does_not_overwrite_completion_from_a_stale_running_snapsho
     assert json.loads(status_path.read_text(encoding="utf-8"))["status"] == "COMPLETED"
 
 
-
-
 def test_web_batch_review_scope_rejects_unfinished_and_returns_exact_completed_cohort(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     staged = _upload_batch(monkeypatch, tmp_path)
     assert staged.status_code == 201, staged.text
@@ -287,13 +312,12 @@ def test_web_batch_review_scope_rejects_unfinished_and_returns_exact_completed_c
     reviewed_ids = {row["poster_id"] for row in body["rows"]}
     queue = client.get("/api/trials/review-queue?reviewer=local-operator")
     assert queue.status_code == 200
-    assert reviewed_ids.issubset({
-        item["poster_id"] for item in queue.json()["items"]
-    })
+    assert reviewed_ids.issubset({item["poster_id"] for item in queue.json()["items"]})
 
 
 def test_web_batch_review_scope_rejects_corrupt_or_inconsistent_journal(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     staged = _upload_batch(monkeypatch, tmp_path)
     assert staged.status_code == 201, staged.text
@@ -308,9 +332,9 @@ def test_web_batch_review_scope_rejects_corrupt_or_inconsistent_journal(
     del missing_row["rows"]["sku-two"]
     mismatches.append(missing_row)
     duplicate_poster = json.loads(json.dumps(original))
-    duplicate_poster["rows"]["sku-two"]["poster_id"] = (
-        duplicate_poster["rows"]["sku-one"]["poster_id"]
-    )
+    duplicate_poster["rows"]["sku-two"]["poster_id"] = duplicate_poster["rows"]["sku-one"][
+        "poster_id"
+    ]
     mismatches.append(duplicate_poster)
     changed_manifest = json.loads(json.dumps(original))
     changed_manifest["manifest_sha256"] = "f" * 64
@@ -342,7 +366,8 @@ def test_web_batch_handoff_ui_reuses_existing_review_queue():
 
 
 def test_web_batch_history_listing_filters_pages_without_exposing_inputs(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     first = _upload_batch(monkeypatch, tmp_path)
     second = _upload_batch(monkeypatch, tmp_path)
@@ -366,9 +391,8 @@ def test_web_batch_history_listing_filters_pages_without_exposing_inputs(
     assert [item["batch_id"] for item in page["items"]] == ids[::-1][:2]
     assert [item["status"] for item in page["items"]] == ["FAILED", "COMPLETED"]
     assert all(
-        set(item) == {
-            "batch_id", "status", "created_at", "updated_at", "processed", "total"
-        } for item in page["items"]
+        set(item) == {"batch_id", "status", "created_at", "updated_at", "processed", "total"}
+        for item in page["items"]
     )
     assert "sku-one" not in response.text
     assert "manifest_sha256" not in response.text
@@ -383,7 +407,8 @@ def test_web_batch_history_listing_filters_pages_without_exposing_inputs(
 
 
 def test_web_batch_history_skips_corrupt_and_symlinked_directories(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     first = _upload_batch(monkeypatch, tmp_path)
     assert first.status_code == 201
@@ -414,7 +439,8 @@ def test_web_batch_history_skips_corrupt_and_symlinked_directories(
 
 
 def test_web_batch_history_reports_abandoned_running_without_mutating_disk(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     response = _upload_batch(monkeypatch, tmp_path)
     assert response.status_code == 201
@@ -435,7 +461,8 @@ def test_web_batch_history_reports_abandoned_running_without_mutating_disk(
 
 
 def test_web_batch_history_validates_page_and_status_and_does_not_create_root(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.setenv("POSTER_BATCH_DIR", str(tmp_path / "not-created"))
     good = client.get("/api/batches")
@@ -444,8 +471,12 @@ def test_web_batch_history_validates_page_and_status_and_does_not_create_root(
     assert good.json()["has_more"] is False
     assert not (tmp_path / "not-created").exists()
     for params in (
-        "limit=0", "limit=51", "offset=-1", "offset=10001",
-        "status=UNKNOWN", "status=FAILED%27%20OR%201%3D1",
+        "limit=0",
+        "limit=51",
+        "offset=-1",
+        "offset=10001",
+        "status=UNKNOWN",
+        "status=FAILED%27%20OR%201%3D1",
     ):
         response = client.get("/api/batches?" + params)
         assert response.status_code == 422, (params, response.text)
@@ -456,9 +487,12 @@ def test_web_batch_history_ui_can_switch_to_older_batches_without_deletion():
     assert page.status_code == 200
     html = page.text
     for marker in (
-        'id="batchHistoryFilter"', 'id="refreshBatchHistory"',
-        'id="batchHistoryPrev"', 'id="batchHistoryNext"',
-        'id="batchHistoryItems"', 'id="batchHistoryInfo"',
+        'id="batchHistoryFilter"',
+        'id="refreshBatchHistory"',
+        'id="batchHistoryPrev"',
+        'id="batchHistoryNext"',
+        'id="batchHistoryItems"',
+        'id="batchHistoryInfo"',
     ):
         assert marker in html
     assert "function selectHistoricalBatch" in html
@@ -468,7 +502,8 @@ def test_web_batch_history_ui_can_switch_to_older_batches_without_deletion():
 
 
 def test_web_batch_review_scope_rejects_missing_corrupt_published_files(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     staged = _upload_batch(monkeypatch, tmp_path)
     assert staged.status_code == 201, staged.text
@@ -505,7 +540,8 @@ def test_web_batch_review_scope_rejects_missing_corrupt_published_files(
 
 
 def test_web_batch_review_scope_rejects_symlinked_image_and_missing_poster(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     staged = _upload_batch(monkeypatch, tmp_path)
     assert staged.status_code == 201
@@ -536,7 +572,8 @@ def test_web_batch_review_scope_rejects_symlinked_image_and_missing_poster(
 
 
 def test_web_batch_review_scope_rejects_mismatched_or_invalid_v1_spec(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     staged = _upload_batch(monkeypatch, tmp_path)
     batch_id = staged.json()["batch_id"]
@@ -560,7 +597,8 @@ def test_web_batch_review_scope_rejects_mismatched_or_invalid_v1_spec(
 
 
 def test_web_m6_package_requires_complete_batch_and_explicit_apply(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     uploaded = _upload_batch(monkeypatch, tmp_path)
     assert uploaded.status_code == 201
@@ -597,7 +635,8 @@ def test_web_m6_package_requires_complete_batch_and_explicit_apply(
     with (target / "m6_output_reviews.csv").open(encoding="utf-8") as handle:
         reviews = list(csv.DictReader(handle))
     assert {row["variant_id"] for row in reviews} == {
-        "square", "feed_4x5_native",
+        "square",
+        "feed_4x5_native",
     }
     assert len(reviews) == 4
     assert all(row["overall_accept"] == "UNVERIFIED" for row in reviews)
@@ -611,7 +650,8 @@ def test_web_m6_package_requires_complete_batch_and_explicit_apply(
 
 
 def test_web_m6_package_rejects_tampered_origin_and_symlink_output(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     uploaded = _upload_batch(monkeypatch, tmp_path)
     batch_id = uploaded.json()["batch_id"]
@@ -640,14 +680,17 @@ def test_web_m6_package_ui_is_explicit_and_restores_completed_batch():
     page = client.get("/")
     assert page.status_code == 200
     for marker in (
-        'id="prepareM6Package"', 'id="m6PackageStatus"',
-        "/m6-package", "relative_directory",
+        'id="prepareM6Package"',
+        'id="m6PackageStatus"',
+        "/m6-package",
+        "relative_directory",
     ):
         assert marker in page.text
 
 
 def test_web_m6_review_package_zip_download_includes_only_expected_files(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import hashlib
     import zipfile
@@ -666,15 +709,20 @@ def test_web_m6_review_package_zip_download_includes_only_expected_files(
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         names = set(archive.namelist())
         assert names == {
-            "m6_preparation.json", "m6_cohort_registry.csv", "m6_output_reviews.csv",
-            "m6_cutout_reviews.csv", "m6_cutout_evidence.json",
-            "images/sku-one-square.png", "images/sku-one-native-4x5.png",
-            "images/sku-two-square.png", "images/sku-two-native-4x5.png",
+            "m6_preparation.json",
+            "m6_cohort_registry.csv",
+            "m6_output_reviews.csv",
+            "m6_cutout_reviews.csv",
+            "m6_cutout_evidence.json",
+            "images/sku-one-square.png",
+            "images/sku-one-native-4x5.png",
+            "images/sku-two-square.png",
+            "images/sku-two-native-4x5.png",
         }
         assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
-        assert archive.read("m6_output_reviews.csv") == (
-            folder / "m6_output_reviews.csv"
-        ).read_bytes()
+        assert (
+            archive.read("m6_output_reviews.csv") == (folder / "m6_output_reviews.csv").read_bytes()
+        )
         with io.StringIO(archive.read("m6_output_reviews.csv").decode("utf-8")) as handle:
             rows = list(csv.DictReader(handle))
         for row in rows:
@@ -685,7 +733,8 @@ def test_web_m6_review_package_zip_download_includes_only_expected_files(
 
 
 def test_web_m6_zip_refuses_unprepared_batch_without_creating_files(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     uploaded = _upload_batch(monkeypatch, tmp_path)
     batch_id = uploaded.json()["batch_id"]
@@ -697,7 +746,8 @@ def test_web_m6_zip_refuses_unprepared_batch_without_creating_files(
 
 
 def test_web_m6_zip_refuses_tampered_png_without_leaking_file(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     uploaded = _upload_batch(monkeypatch, tmp_path)
     batch_id = uploaded.json()["batch_id"]
@@ -713,7 +763,8 @@ def test_web_m6_zip_refuses_tampered_png_without_leaking_file(
 
 
 def test_web_m6_zip_rejects_symlink_and_csv_path_traversal(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     uploaded = _upload_batch(monkeypatch, tmp_path)
     batch_id = uploaded.json()["batch_id"]
@@ -733,9 +784,7 @@ def test_web_m6_zip_rejects_symlink_and_csv_path_traversal(
 
     csv_path = folder / "m6_output_reviews.csv"
     original_csv = csv_path.read_bytes()
-    csv_path.write_bytes(original_csv.replace(
-        b"images/sku-one-square.png", b"../outside.png"
-    ))
+    csv_path.write_bytes(original_csv.replace(b"images/sku-one-square.png", b"../outside.png"))
     assert client.get(endpoint).status_code == 409
     csv_path.write_bytes(original_csv)
 
@@ -757,18 +806,20 @@ def _seed_m6_ocr_capture_for_web(package):
     rows = list(csv.DictReader(io.StringIO(reviews_raw.decode("utf-8"))))
     observations = []
     for row in rows:
-        observations.append({
-            "sku_id": row["sku_id"],
-            "variant_id": row["variant_id"],
-            "poster_id": row["poster_id"],
-            "image_sha256": row["output_image_sha256"],
-            "recognized_line_count": 2,
-            "recognized_lines": [
-                {"text": "¥129", "confidence": 0.95, "bbox": [65, 668, 200, 724]},
-                {"text": "Headline", "confidence": 0.82, "bbox": None},
-            ],
-            "status": "CAPTURED_REVIEW_REQUIRED",
-        })
+        observations.append(
+            {
+                "sku_id": row["sku_id"],
+                "variant_id": row["variant_id"],
+                "poster_id": row["poster_id"],
+                "image_sha256": row["output_image_sha256"],
+                "recognized_line_count": 2,
+                "recognized_lines": [
+                    {"text": "¥129", "confidence": 0.95, "bbox": [65, 668, 200, 724]},
+                    {"text": "Headline", "confidence": 0.82, "bbox": None},
+                ],
+                "status": "CAPTURED_REVIEW_REQUIRED",
+            }
+        )
     document = {
         "schema_version": "m6-paddle-ocr-evidence-1",
         "cohort_id": rows[0]["cohort_id"],
@@ -799,7 +850,8 @@ def _seed_m6_ocr_capture_for_web(package):
 
 
 def test_web_m6_ocr_overlay_full_user_flow_is_explicit_and_non_destructive(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import hashlib
     import zipfile
@@ -842,13 +894,18 @@ def test_web_m6_ocr_overlay_full_user_flow_is_explicit_and_non_destructive(
         names = set(archive.namelist())
         assert names == {
             "m6_ocr_overlay_manifest.json",
-            "images/sku-one-square.png", "images/sku-one-native-4x5.png",
-            "images/sku-two-square.png", "images/sku-two-native-4x5.png",
+            "images/sku-one-square.png",
+            "images/sku-one-native-4x5.png",
+            "images/sku-two-square.png",
+            "images/sku-two-native-4x5.png",
         }
         manifest = json.loads(archive.read("m6_ocr_overlay_manifest.json"))
         assert manifest["ocr_capture_sha256"] == hashlib.sha256(capture.read_bytes()).hexdigest()
         for row in manifest["items"]:
-            assert hashlib.sha256(archive.read(row["overlay_path"])).hexdigest() == row["overlay_sha256"]
+            assert (
+                hashlib.sha256(archive.read(row["overlay_path"])).hexdigest()
+                == row["overlay_sha256"]
+            )
     assert b"do not disclose" not in download.content
     assert (package / "m6_output_reviews.csv").read_bytes() == before["reviews"]
     assert (package / "images/sku-one-square.png").read_bytes() == before["image"]
@@ -857,7 +914,8 @@ def test_web_m6_ocr_overlay_full_user_flow_is_explicit_and_non_destructive(
 
 
 def test_web_m6_ocr_overlay_blocks_stale_capture_and_never_leaks_archive(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
@@ -884,7 +942,8 @@ def test_web_m6_ocr_overlay_blocks_stale_capture_and_never_leaks_archive(
 
 
 def test_web_m6_ocr_overlay_refuses_forged_or_unfinished_batches(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     assert client.get(f"/api/batches/{batch_id}/m6-overlay").status_code == 409
@@ -934,7 +993,8 @@ def test_web_m6_sku_ocr_review_pairs_readonly_labels_and_text(tmp_path, monkeypa
     assert data["quality_verified"] is False
     assert len(data["variants"]) == 2
     assert {v["variant_id"] for v in data["variants"]} == {
-        "square", "feed_4x5_native",
+        "square",
+        "feed_4x5_native",
     }
     for variant in data["variants"]:
         assert variant["review_labels"]["overall_accept"] == "UNVERIFIED"
@@ -943,7 +1003,9 @@ def test_web_m6_sku_ocr_review_pairs_readonly_labels_and_text(tmp_path, monkeypa
         assert variant["preview_line_count"] == 2
         assert variant["lines_truncated_count"] == 0
         assert variant["lines"][0] == {
-            "text": "¥129", "confidence": 0.95, "bbox": [65, 668, 200, 724],
+            "text": "¥129",
+            "confidence": 0.95,
+            "bbox": [65, 668, 200, 724],
         }
         assert variant["lines"][1]["bbox"] is None
         assert len(variant["image_sha256"]) == 64
@@ -953,7 +1015,8 @@ def test_web_m6_sku_ocr_review_pairs_readonly_labels_and_text(tmp_path, monkeypa
 
 
 def test_web_m6_sku_ocr_review_rejects_bad_selection_or_stale_artifacts(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     endpoint = f"/api/batches/{batch_id}/m6-ocr-review"
@@ -984,7 +1047,8 @@ def test_web_m6_sku_ocr_review_rejects_bad_selection_or_stale_artifacts(
 
 
 def test_web_m6_sku_ocr_review_preview_bounded_and_untrusted_text_is_safe(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
@@ -992,8 +1056,10 @@ def test_web_m6_sku_ocr_review_preview_bounded_and_untrusted_text_is_safe(
     package = tmp_path / "batch-root" / batch_id / "m6_review_package"
     capture = _seed_m6_ocr_capture_for_web(package)
     data = json.loads(capture.read_text(encoding="utf-8"))
-    lines = [{"text": "<img src=x onerror=alert(1)>" + "字" * 500,
-              "confidence": 0.77, "bbox": None} for _ in range(60)]
+    lines = [
+        {"text": "<img src=x onerror=alert(1)>" + "字" * 500, "confidence": 0.77, "bbox": None}
+        for _ in range(60)
+    ]
     for observation in data["observations"]:
         observation["recognized_lines"] = lines
         observation["recognized_line_count"] = len(lines)
@@ -1049,7 +1115,8 @@ def test_web_m6_sku_image_preview_serves_only_verified_frozen_images(tmp_path, m
 
 
 def test_web_m6_sku_image_preview_fails_closed_on_stale_or_linked_input(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
@@ -1097,13 +1164,22 @@ def test_web_m6_sku_review_renders_verified_images_without_using_ocr_as_approval
 
 def _m6_review_sidecar_request(package, *, sku="sku-one"):
     import hashlib
+
     raw = (package / "m6_output_reviews.csv").read_bytes()
     ocr = (package / "m6_paddle_ocr_evidence.json").read_bytes()
     checks = {
-        field: "PASS" for field in (
-            "sku_integrity", "text_legibility", "title", "subtitle", "price",
-            "original_price", "price_position", "original_price_position",
-            "cta", "composition",
+        field: "PASS"
+        for field in (
+            "sku_integrity",
+            "text_legibility",
+            "title",
+            "subtitle",
+            "price",
+            "original_price",
+            "price_position",
+            "original_price_position",
+            "cta",
+            "composition",
         )
     }
     return {
@@ -1111,8 +1187,12 @@ def _m6_review_sidecar_request(package, *, sku="sku-one"):
         "ocr_capture_sha256": hashlib.sha256(ocr).hexdigest(),
         "decisions": [
             {
-                "sku_id": sku, "variant_id": variant, "reviewer_alias": "reviewer-1",
-                "checks": checks.copy(), "overall_accept": "PASS", "overall_reason": "",
+                "sku_id": sku,
+                "variant_id": variant,
+                "reviewer_alias": "reviewer-1",
+                "checks": checks.copy(),
+                "overall_accept": "PASS",
+                "overall_reason": "",
             }
             for variant in ("square", "feed_4x5_native")
         ],
@@ -1120,9 +1200,9 @@ def _m6_review_sidecar_request(package, *, sku="sku-one"):
 
 
 def test_m6_sidecar_export_checks_frozen_images_and_never_writes_source(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
-    import hashlib
 
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar"
@@ -1136,8 +1216,11 @@ def test_m6_sidecar_export_checks_frozen_images_and_never_writes_source(
     request = _m6_review_sidecar_request(package)
     before = {
         filename: (package / filename).read_bytes()
-        for filename in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
-                         "images/sku-one-square.png")
+        for filename in (
+            "m6_output_reviews.csv",
+            "m6_paddle_ocr_evidence.json",
+            "images/sku-one-square.png",
+        )
     }
     response = client.post(endpoint, json=request)
     assert response.status_code == 200, response.text
@@ -1211,8 +1294,11 @@ def test_m6_sidecar_export_rejects_changed_ocr_csv_or_png(tmp_path, monkeypatch)
     _seed_m6_ocr_capture_for_web(package)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar"
     good = _m6_review_sidecar_request(package)
-    for filename in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
-                     "images/sku-one-square.png"):
+    for filename in (
+        "m6_output_reviews.csv",
+        "m6_paddle_ocr_evidence.json",
+        "images/sku-one-square.png",
+    ):
         file = package / filename
         saved = file.read_bytes()
         file.write_bytes(b"stale")
@@ -1225,8 +1311,11 @@ def test_m6_sidecar_workbench_exports_draft_with_explicit_operator_action():
     page = client.get("/")
     assert page.status_code == 200
     for item in (
-        'id="m6ReviewSaveSku"', 'id="m6ReviewExportSidecar"',
-        "/m6-review-sidecar", "m6ReviewDrafts", "OPERATOR_ASSERTED_NOT_ATTESTED",
+        'id="m6ReviewSaveSku"',
+        'id="m6ReviewExportSidecar"',
+        "/m6-review-sidecar",
+        "m6ReviewDrafts",
+        "OPERATOR_ASSERTED_NOT_ATTESTED",
     ):
         assert item in page.text
 
@@ -1247,14 +1336,19 @@ def _m6_frozen_sidecar_fixture(tmp_path, monkeypatch):
 
 
 def test_m6_review_sidecar_restore_revalidates_export_without_writing_source(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/restore"
     originals = {
         name: (package / name).read_bytes()
-        for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
-                     "images/sku-one-square.png", "images/sku-one-native-4x5.png")
+        for name in (
+            "m6_output_reviews.csv",
+            "m6_paddle_ocr_evidence.json",
+            "images/sku-one-square.png",
+            "images/sku-one-native-4x5.png",
+        )
     }
     response = client.post(endpoint, json=sidecar)
     assert response.status_code == 200, response.text
@@ -1267,7 +1361,8 @@ def test_m6_review_sidecar_restore_revalidates_export_without_writing_source(
 
 
 def test_m6_review_sidecar_restore_rejects_forged_identity_and_claims(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from copy import deepcopy
 
@@ -1307,17 +1402,25 @@ def test_m6_review_sidecar_restore_rejects_forged_identity_and_claims(
     forged = deepcopy(sidecar)
     forged["extra_attestation"] = "approved"
     assert client.post(endpoint, json=forged).status_code == 422
-    assert client.post(endpoint, content=b"x" * 262145,
-                       headers={"Content-Type": "application/json"}).status_code == 413
+    assert (
+        client.post(
+            endpoint, content=b"x" * 262145, headers={"Content-Type": "application/json"}
+        ).status_code
+        == 413
+    )
 
 
 def test_m6_review_sidecar_restore_blocks_stale_evidence_and_cross_batch(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/restore"
-    for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
-                 "images/sku-one-square.png"):
+    for name in (
+        "m6_output_reviews.csv",
+        "m6_paddle_ocr_evidence.json",
+        "images/sku-one-square.png",
+    ):
         file = package / name
         original = file.read_bytes()
         file.write_bytes(b"modified-evidence")
@@ -1330,22 +1433,27 @@ def test_m6_review_sidecar_restore_blocks_stale_evidence_and_cross_batch(
     assert client.post(f"/api/batches/{other_id}/m6-package").status_code == 201
     other_package = tmp_path / "batch-root" / other_id / "m6_review_package"
     _seed_m6_ocr_capture_for_web(other_package)
-    assert client.post(f"/api/batches/{other_id}/m6-review-sidecar/restore",
-                       json=sidecar).status_code == 409
+    assert (
+        client.post(f"/api/batches/{other_id}/m6-review-sidecar/restore", json=sidecar).status_code
+        == 409
+    )
 
 
 def test_m6_review_workbench_supports_manual_sidecar_restore():
     html = client.get("/").text
     for marker in (
-        'id="m6ReviewImportFile"', 'id="m6ReviewImportSidecar"',
-        '/m6-review-sidecar/restore', 'm6ReviewDrafts.clear()',
-        'OPERATOR_ASSERTED_NOT_ATTESTED',
+        'id="m6ReviewImportFile"',
+        'id="m6ReviewImportSidecar"',
+        "/m6-review-sidecar/restore",
+        "m6ReviewDrafts.clear()",
+        "OPERATOR_ASSERTED_NOT_ATTESTED",
     ):
         assert marker in html
 
 
 def test_m6_offline_sidecar_assessment_reports_operator_coverage_without_quality_pass(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from scripts.assess_m6_sidecar import assess_sidecar
 
@@ -1372,7 +1480,8 @@ def test_m6_offline_sidecar_assessment_reports_operator_coverage_without_quality
 
 
 def test_m6_offline_sidecar_assessment_distinguishes_complete_and_manual_fail(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from scripts.assess_m6_sidecar import assess_sidecar
 
@@ -1400,9 +1509,11 @@ def test_m6_offline_sidecar_assessment_distinguishes_complete_and_manual_fail(
 
 
 def test_m6_offline_sidecar_assessment_rejects_tamper_and_stale_source(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from copy import deepcopy
+
     from scripts.assess_m6_sidecar import SidecarAssessmentError, assess_sidecar
 
     _, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
@@ -1425,16 +1536,22 @@ def test_m6_offline_sidecar_assessment_rejects_tamper_and_stale_source(
 
 
 def test_m6_offline_sidecar_cli_publishes_one_non_clobber_audit_report(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from scripts.assess_m6_sidecar import main
+
     _, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     saved = tmp_path / "review.json"
     saved.write_text(json.dumps(sidecar), encoding="utf-8")
     target = tmp_path / "reports" / "sidecar_assessment.json"
     args = [
-        "--package-dir", str(package), "--sidecar", str(saved),
-        "--output", str(target),
+        "--package-dir",
+        str(package),
+        "--sidecar",
+        str(saved),
+        "--output",
+        str(target),
     ]
     assert main(args) == 0
     report = json.loads(target.read_text(encoding="utf-8"))
@@ -1446,21 +1563,31 @@ def test_m6_offline_sidecar_cli_publishes_one_non_clobber_audit_report(
     assert target.read_bytes() == original
     assert not list(target.parent.glob(".m6-report-*.tmp"))
     with pytest.raises(SystemExit):
-        main([
-            "--package-dir", str(package), "--sidecar", str(saved),
-            "--output", str(package / "m6_output_reviews.csv"),
-        ])
+        main(
+            [
+                "--package-dir",
+                str(package),
+                "--sidecar",
+                str(saved),
+                "--output",
+                str(package / "m6_output_reviews.csv"),
+            ]
+        )
 
 
 def test_m6_workbench_assessment_reuses_frozen_sidecar_evidence_gate(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
     before = {
         name: (package / name).read_bytes()
-        for name in ("m6_output_reviews.csv", "m6_paddle_ocr_evidence.json",
-                     "images/sku-one-square.png")
+        for name in (
+            "m6_output_reviews.csv",
+            "m6_paddle_ocr_evidence.json",
+            "images/sku-one-square.png",
+        )
     }
     res = client.post(endpoint, json=sidecar)
     assert res.status_code == 200, res.text
@@ -1479,7 +1606,8 @@ def test_m6_workbench_assessment_reuses_frozen_sidecar_evidence_gate(
 
 
 def test_m6_workbench_assessment_complete_labels_and_reported_failure(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
@@ -1503,14 +1631,19 @@ def test_m6_workbench_assessment_complete_labels_and_reported_failure(
 
 
 def test_m6_workbench_assessment_rejects_stale_images_and_forged_claims(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from copy import deepcopy
 
     batch_id, package, sidecar = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     endpoint = f"/api/batches/{batch_id}/m6-review-sidecar/assess"
-    for field in ("human_review_verified", "quality_verified", "runtime_attested",
-                  "automatically_accepted"):
+    for field in (
+        "human_review_verified",
+        "quality_verified",
+        "runtime_attested",
+        "automatically_accepted",
+    ):
         bad = deepcopy(sidecar)
         bad[field] = True
         assert client.post(endpoint, json=bad).status_code in (409, 422), field
@@ -1523,25 +1656,34 @@ def test_m6_workbench_assessment_rejects_stale_images_and_forged_claims(
     assert client.post(endpoint, json=sidecar).status_code == 409
     image.write_bytes(saved)
     assert client.post(endpoint, json=sidecar).status_code == 200
-    assert client.post(endpoint, content=b"0" * 262145,
-                       headers={"Content-Type": "application/json"}).status_code == 413
+    assert (
+        client.post(
+            endpoint, content=b"0" * 262145, headers={"Content-Type": "application/json"}
+        ).status_code
+        == 413
+    )
 
 
 def test_m6_workbench_assessment_controls_are_explicit_and_read_only():
     page = client.get("/")
     assert page.status_code == 200
     for marker in (
-        'id="m6ReviewAssess"', 'id="m6ReviewDraftProgress"',
-        'id="m6ReviewAssessmentStatus"', 'id="m6ReviewNextMissing"',
+        'id="m6ReviewAssess"',
+        'id="m6ReviewDraftProgress"',
+        'id="m6ReviewAssessmentStatus"',
+        'id="m6ReviewNextMissing"',
         'id="m6ReviewDownloadAssessment"',
-        '/m6-review-sidecar/assess', 'approved_for_publication',
-        'quality_verified', 'm6ReviewDrafts',
+        "/m6-review-sidecar/assess",
+        "approved_for_publication",
+        "quality_verified",
+        "m6ReviewDrafts",
     ):
         assert marker in page.text
 
 
 def test_m6_ocr_launch_is_explicitly_unavailable_without_local_models(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     batch_id = _upload_batch(monkeypatch, tmp_path).json()["batch_id"]
     endpoint = f"/api/batches/{batch_id}/m6-ocr-capture"
@@ -1560,7 +1702,8 @@ def test_m6_ocr_launch_is_explicitly_unavailable_without_local_models(
 
 
 def test_m6_ocr_launch_executes_existing_real_capture_only_after_user_post(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import app.m6_ocr_capture_routes as routes
     from scripts import capture_m6_paddle_ocr
@@ -1608,7 +1751,8 @@ def test_m6_ocr_launch_executes_existing_real_capture_only_after_user_post(
 
 
 def test_m6_ocr_launch_fails_closed_on_missing_capture_and_wrong_model_paths(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import app.m6_ocr_capture_routes as routes
     from scripts import capture_m6_paddle_ocr
@@ -1642,10 +1786,12 @@ def test_m6_ocr_launch_fails_closed_on_missing_capture_and_wrong_model_paths(
     assert "local failing OCR engine" not in status.text
 
     attempts = []
+
     def recovered_capture(*args, **kwargs):
         attempts.append((args, kwargs))
         _seed_m6_ocr_capture_for_web(tmp_path / "batch-root" / batch_id / "m6_review_package")
         return {"captured_variant_count": 4}
+
     monkeypatch.setattr(capture_m6_paddle_ocr, "capture", recovered_capture)
     retried = client.post(endpoint)
     assert retried.status_code == 202
@@ -1657,14 +1803,17 @@ def test_m6_ocr_launch_button_and_preflight_status_are_available():
     html = client.get("/")
     assert html.status_code == 200
     for marker in (
-        'id="captureM6OCR"', 'id="m6OCRCaptureStatus"',
-        '/m6-ocr-capture', "POSTER_M6_OCR_DET_MODEL_DIR",
+        'id="captureM6OCR"',
+        'id="m6OCRCaptureStatus"',
+        "/m6-ocr-capture",
+        "POSTER_M6_OCR_DET_MODEL_DIR",
     ):
         assert marker in html.text
 
 
 def test_m6_ocr_progress_reports_only_completed_variants_and_sanitized_status(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import app.m6_ocr_capture_routes as routes
 
@@ -1696,7 +1845,8 @@ def test_m6_ocr_progress_reports_only_completed_variants_and_sanitized_status(
 
 
 def test_m6_sidecar_worksheet_exports_operator_draft_without_modifying_frozen_inputs(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import csv
     import hashlib
@@ -1721,15 +1871,21 @@ def test_m6_sidecar_worksheet_exports_operator_draft_without_modifying_frozen_in
     rows = list(csv.DictReader(io.StringIO(result.content.decode("utf-8-sig"))))
     frozen = list(csv.DictReader(io.StringIO(before["m6_output_reviews.csv"].decode())))
     assert len(rows) == len(frozen) == 4
-    from scripts.validate_m6_cohort import REVIEW_FIELDS, FIELD_LABELS
+    from scripts.validate_m6_cohort import FIELD_LABELS, REVIEW_FIELDS
+
     assert set(rows[0]) == set(REVIEW_FIELDS)
     prior = {(row["sku_id"], row["variant_id"]): row for row in frozen}
     for row in rows:
         key = (row["sku_id"], row["variant_id"])
         source = prior[key]
         for column in REVIEW_FIELDS:
-            if column not in (*FIELD_LABELS, "reviewer_alias", "overall_accept",
-                              "overall_reason", "reviewed_at_utc"):
+            if column not in (
+                *FIELD_LABELS,
+                "reviewer_alias",
+                "overall_accept",
+                "overall_reason",
+                "reviewed_at_utc",
+            ):
                 assert row[column] == source[column]
         assert row["reviewed_at_utc"] == ""  # Do not fabricate inspection time
         if row["sku_id"] == "sku-one":
@@ -1769,11 +1925,12 @@ def test_m6_sidecar_worksheet_neutralizes_spreadsheet_formulas(tmp_path, monkeyp
     batch_id, package, _ = _m6_frozen_sidecar_fixture(tmp_path, monkeypatch)
     request = _m6_review_sidecar_request(package)
     request["decisions"][0]["overall_accept"] = "FAIL"
-    request["decisions"][0]["overall_reason"] = "=HYPERLINK(\"https://unsafe.invalid\")"
+    request["decisions"][0]["overall_reason"] = '=HYPERLINK("https://unsafe.invalid")'
     exported = client.post(f"/api/batches/{batch_id}/m6-review-sidecar", json=request)
     assert exported.status_code == 200
     result = client.post(
-        f"/api/batches/{batch_id}/m6-review-sidecar/worksheet", json=exported.json(),
+        f"/api/batches/{batch_id}/m6-review-sidecar/worksheet",
+        json=exported.json(),
     )
     assert result.status_code == 200
     rows = list(csv.DictReader(io.StringIO(result.content.decode("utf-8-sig"))))
@@ -1781,7 +1938,6 @@ def test_m6_sidecar_worksheet_neutralizes_spreadsheet_formulas(tmp_path, monkeyp
     assert row["overall_accept"] == "FAIL"
     assert row["overall_reason"].startswith("'=HYPERLINK(")
     assert row["reviewed_at_utc"] == ""
-
 
 
 def test_m6_zip_rejects_tampered_additive_cutout_evidence(tmp_path, monkeypatch):
@@ -1809,10 +1965,10 @@ def test_m6_zip_rejects_tampered_additive_cutout_evidence(tmp_path, monkeypatch)
     assert client.get(endpoint).status_code == 200
 
 
-
 def _upload_cutout_review_batch(monkeypatch, tmp_path):
     """Create one real transparent SKU with source-preserved batch evidence."""
     from PIL import ImageDraw
+
     monkeypatch.setenv("POSTER_BATCH_DIR", str(tmp_path / "batch-root"))
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
@@ -1820,126 +1976,164 @@ def _upload_cutout_review_batch(monkeypatch, tmp_path):
     result = Image.new("RGBA", (160, 190), (0, 0, 0, 0))
     ImageDraw.Draw(src).rectangle((30, 20, 120, 170), fill=(50, 110, 200, 255))
     ImageDraw.Draw(result).rectangle((30, 20, 120, 170), fill=(50, 110, 200, 255))
+
     def png(image):
-        stream=io.BytesIO()
+        stream = io.BytesIO()
         image.save(stream, format="PNG")
         return stream.getvalue()
-    columns=["sku_id","product_image","product_cutout_image","title","price"]
-    buffer=io.StringIO(newline="")
-    writer=csv.DictWriter(buffer,fieldnames=columns)
+
+    columns = ["sku_id", "product_image", "product_cutout_image", "title", "price"]
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=columns)
     writer.writeheader()
-    writer.writerow({"sku_id":"sku-cutout", "product_image":"original.png",
-                     "product_cutout_image":"cutout.png",
-                     "title":"透明主体审核", "price":"299"})
-    uploaded=client.post("/api/batches",files=[
-        ("manifest",("sku.csv",buffer.getvalue().encode(),"text/csv")),
-        ("images",("original.png",png(src),"image/png")),
-        ("images",("cutout.png",png(result),"image/png")),
-    ])
-    assert uploaded.status_code==201,uploaded.text
-    batch_id=uploaded.json()["batch_id"]
-    assert client.post(f"/api/batches/{batch_id}/apply").status_code==202
-    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code==201
-    return batch_id,tmp_path/"batch-root"/batch_id/"m6_review_package"
+    writer.writerow(
+        {
+            "sku_id": "sku-cutout",
+            "product_image": "original.png",
+            "product_cutout_image": "cutout.png",
+            "title": "透明主体审核",
+            "price": "299",
+        }
+    )
+    uploaded = client.post(
+        "/api/batches",
+        files=[
+            ("manifest", ("sku.csv", buffer.getvalue().encode(), "text/csv")),
+            ("images", ("original.png", png(src), "image/png")),
+            ("images", ("cutout.png", png(result), "image/png")),
+        ],
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    batch_id = uploaded.json()["batch_id"]
+    assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
+    assert client.post(f"/api/batches/{batch_id}/m6-package").status_code == 201
+    return batch_id, tmp_path / "batch-root" / batch_id / "m6_review_package"
 
 
 def test_web_cutout_review_saves_human_labels_with_cas_and_immutable_evidence(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import hashlib
+
     from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
-    batch, package = _upload_cutout_review_batch(monkeypatch,tmp_path)
-    endpoint=f"/api/batches/{batch}/m6-cutout-review"
-    opened=client.get(endpoint)
-    assert opened.status_code==200,opened.text
-    snapshot=opened.json()
-    assert len(snapshot["rows"])==1
-    row=snapshot["rows"][0]
-    assert row["quality_state"]=="REVIEW_REQUIRED"
-    assert row["human_accept"]=="UNVERIFIED"
-    assert row["model_runtime_attested"]=="NO"
-    image=client.get(endpoint+"/sku-cutout/comparison")
-    assert image.status_code==200
-    assert image.headers["content-type"]=="image/png"
-    assert hashlib.sha256(image.content).hexdigest()==row["comparison_image_sha256"]
-    frozen=(package/"m6_cutout_evidence.json").read_bytes()
-    original_png=(package/row["comparison_image_path"]).read_bytes()
-    original_csv=(package/"m6_cutout_reviews.csv").read_bytes()
-    payload={
-        "expected_csv_sha256":snapshot["csv_sha256"],"sku_id":"sku-cutout",
-        "subject_integrity_review":"PASS","edge_artifact_review":"PASS",
-        "brand_mark_review":"PASS","human_accept":"PASS",
-        "reviewer_alias":"operator-a","reviewer_notes":"人工检查三项均通过",
+
+    batch, package = _upload_cutout_review_batch(monkeypatch, tmp_path)
+    endpoint = f"/api/batches/{batch}/m6-cutout-review"
+    opened = client.get(endpoint)
+    assert opened.status_code == 200, opened.text
+    snapshot = opened.json()
+    assert len(snapshot["rows"]) == 1
+    row = snapshot["rows"][0]
+    assert row["quality_state"] == "REVIEW_REQUIRED"
+    assert row["human_accept"] == "UNVERIFIED"
+    assert row["model_runtime_attested"] == "NO"
+    image = client.get(endpoint + "/sku-cutout/comparison")
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/png"
+    assert hashlib.sha256(image.content).hexdigest() == row["comparison_image_sha256"]
+    frozen = (package / "m6_cutout_evidence.json").read_bytes()
+    original_png = (package / row["comparison_image_path"]).read_bytes()
+    original_csv = (package / "m6_cutout_reviews.csv").read_bytes()
+    payload = {
+        "expected_csv_sha256": snapshot["csv_sha256"],
+        "sku_id": "sku-cutout",
+        "subject_integrity_review": "PASS",
+        "edge_artifact_review": "PASS",
+        "brand_mark_review": "PASS",
+        "human_accept": "PASS",
+        "reviewer_alias": "operator-a",
+        "reviewer_notes": "人工检查三项均通过",
     }
-    saved=client.post(endpoint,json=payload)
-    assert saved.status_code==200,saved.text
-    assert saved.json()["status"]=="OPERATOR_ASSERTED_NOT_ATTESTED"
+    saved = client.post(endpoint, json=payload)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["status"] == "OPERATOR_ASSERTED_NOT_ATTESTED"
     assert saved.json()["model_runtime_attested"] is False
-    assert saved.json()["csv_sha256"]!=snapshot["csv_sha256"]
-    assert client.post(endpoint,json=payload).status_code==409
-    assert (package/"m6_cutout_evidence.json").read_bytes()==frozen
-    assert (package/row["comparison_image_path"]).read_bytes()==original_png
+    assert saved.json()["csv_sha256"] != snapshot["csv_sha256"]
+    assert client.post(endpoint, json=payload).status_code == 409
+    assert (package / "m6_cutout_evidence.json").read_bytes() == frozen
+    assert (package / row["comparison_image_path"]).read_bytes() == original_png
     from app.m6_cutout_review_routes import _HISTORY_DIR
-    history=package/_HISTORY_DIR
-    assert (history/(snapshot["csv_sha256"]+".csv")).read_bytes()==original_csv
-    verified=verify_cutout_evidence(
-        package,package.parent/"batch_import_results.json",min_skus=1)
-    assert verified["operator_accepted_count"]==1
-    assert client.get(f"/api/batches/{batch}/m6-package/download").status_code==200
+
+    history = package / _HISTORY_DIR
+    assert (history / (snapshot["csv_sha256"] + ".csv")).read_bytes() == original_csv
+    verified = verify_cutout_evidence(
+        package, package.parent / "batch_import_results.json", min_skus=1
+    )
+    assert verified["operator_accepted_count"] == 1
+    assert client.get(f"/api/batches/{batch}/m6-package/download").status_code == 200
 
 
 def test_web_cutout_review_rejects_inconsistent_labels_and_preserves_csv(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
-    batch, package = _upload_cutout_review_batch(monkeypatch,tmp_path)
-    endpoint=f"/api/batches/{batch}/m6-cutout-review"
-    starting=(package/"m6_cutout_reviews.csv").read_bytes()
-    base={
-        "expected_csv_sha256":client.get(endpoint).json()["csv_sha256"],
-        "sku_id":"sku-cutout","subject_integrity_review":"FAIL",
-        "edge_artifact_review":"PASS","brand_mark_review":"PASS",
-        "human_accept":"PASS","reviewer_alias":"reviewer-b","reviewer_notes":"问题",
+    batch, package = _upload_cutout_review_batch(monkeypatch, tmp_path)
+    endpoint = f"/api/batches/{batch}/m6-cutout-review"
+    starting = (package / "m6_cutout_reviews.csv").read_bytes()
+    base = {
+        "expected_csv_sha256": client.get(endpoint).json()["csv_sha256"],
+        "sku_id": "sku-cutout",
+        "subject_integrity_review": "FAIL",
+        "edge_artifact_review": "PASS",
+        "brand_mark_review": "PASS",
+        "human_accept": "PASS",
+        "reviewer_alias": "reviewer-b",
+        "reviewer_notes": "问题",
     }
-    assert client.post(endpoint,json=base).status_code==422
-    assert client.post(endpoint,json={**base,"human_accept":"FAIL",
-                                      "reviewer_notes":""}).status_code==422
-    assert client.post(endpoint,json={**base,"sku_id":"../secret",
-                                      "human_accept":"FAIL"}).status_code in (404,422)
-    assert (package/"m6_cutout_reviews.csv").read_bytes()==starting
-    fail={**base,"human_accept":"FAIL","reviewer_notes":"主体被裁切"}
-    resp=client.post(endpoint,json=fail)
-    assert resp.status_code==200,resp.text
-    assert resp.json()["status"]=="OPERATOR_REJECTED"
-    assert resp.json()["operator_rejected_count"]==1
+    assert client.post(endpoint, json=base).status_code == 422
+    assert (
+        client.post(
+            endpoint, json={**base, "human_accept": "FAIL", "reviewer_notes": ""}
+        ).status_code
+        == 422
+    )
+    assert client.post(
+        endpoint, json={**base, "sku_id": "../secret", "human_accept": "FAIL"}
+    ).status_code in (404, 422)
+    assert (package / "m6_cutout_reviews.csv").read_bytes() == starting
+    fail = {**base, "human_accept": "FAIL", "reviewer_notes": "主体被裁切"}
+    resp = client.post(endpoint, json=fail)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "OPERATOR_REJECTED"
+    assert resp.json()["operator_rejected_count"] == 1
 
 
 def test_web_cutout_review_blocks_tampered_evidence_without_mutation(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
-    batch, package=_upload_cutout_review_batch(monkeypatch,tmp_path)
-    endpoint=f"/api/batches/{batch}/m6-cutout-review"
-    snapshot=client.get(endpoint).json()
-    img=package/"images"/"sku-cutout-cutout-comparison.png"
+    batch, package = _upload_cutout_review_batch(monkeypatch, tmp_path)
+    endpoint = f"/api/batches/{batch}/m6-cutout-review"
+    snapshot = client.get(endpoint).json()
+    img = package / "images" / "sku-cutout-cutout-comparison.png"
     img.write_bytes(b"tampered")
-    payload={
-        "expected_csv_sha256":snapshot["csv_sha256"],"sku_id":"sku-cutout",
-        "subject_integrity_review":"PASS","edge_artifact_review":"PASS",
-        "brand_mark_review":"PASS","human_accept":"PASS",
-        "reviewer_alias":"reviewer-c","reviewer_notes":"confirmed",
+    payload = {
+        "expected_csv_sha256": snapshot["csv_sha256"],
+        "sku_id": "sku-cutout",
+        "subject_integrity_review": "PASS",
+        "edge_artifact_review": "PASS",
+        "brand_mark_review": "PASS",
+        "human_accept": "PASS",
+        "reviewer_alias": "reviewer-c",
+        "reviewer_notes": "confirmed",
     }
-    saved=(package/"m6_cutout_reviews.csv").read_bytes()
-    assert client.get(endpoint).status_code==409
-    assert client.post(endpoint,json=payload).status_code==409
-    assert client.get(endpoint+"/sku-cutout/comparison").status_code==409
-    assert (package/"m6_cutout_reviews.csv").read_bytes()==saved
+    saved = (package / "m6_cutout_reviews.csv").read_bytes()
+    assert client.get(endpoint).status_code == 409
+    assert client.post(endpoint, json=payload).status_code == 409
+    assert client.get(endpoint + "/sku-cutout/comparison").status_code == 409
+    assert (package / "m6_cutout_reviews.csv").read_bytes() == saved
 
 
 def test_cutout_review_ui_has_separate_sku_panel_and_frozen_evidence_controls():
-    html=client.get("/").text
+    html = client.get("/").text
     for marker in (
-        'id="openM6CutoutReview"', 'id="m6CutoutReviewPanel"',
-        'id="m6CutoutSku"', 'id="m6CutoutComparison"',
-        'id="m6CutoutReviewer"', 'id="m6CutoutDecision"',
+        'id="openM6CutoutReview"',
+        'id="m6CutoutReviewPanel"',
+        'id="m6CutoutSku"',
+        'id="m6CutoutComparison"',
+        'id="m6CutoutReviewer"',
+        'id="m6CutoutDecision"',
         'id="m6CutoutSave"',
     ):
         assert marker in html

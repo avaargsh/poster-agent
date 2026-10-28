@@ -4,19 +4,19 @@ Never calls OCR, never edits a saved poster and never pretends missing bounding
 boxes were measured. The sole source of OCR rows is the saved Acceptance Gate
 report, which is hash-matched to the exact poster version before rendering.
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
 import math
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app import storage
 from app.acceptance import AcceptanceReport
 from app.ocr_price_layout import square_price_zones
 from app.schemas import PosterSpec
-from app import storage
 
 STATUS_COLORS = {
     "PASS": (55, 207, 122, 255),
@@ -50,8 +50,10 @@ def _verified_source(poster_id: str, version: int, report: dict) -> tuple[bytes,
 def _valid_box(box, image_size: tuple[int, int]):
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
-    if any(isinstance(value, bool) or not isinstance(value, (float, int))
-           or not math.isfinite(value) for value in box):
+    if any(
+        isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value)
+        for value in box
+    ):
         return None
     x1, y1, x2, y2 = map(float, box)
     w, h = image_size
@@ -71,9 +73,7 @@ def _report_ocr_lines(report: AcceptanceReport) -> list[dict]:
     return []
 
 
-def render_overlay(
-    poster_id: str, version: int, saved_report: dict
-) -> tuple[bytes, dict]:
+def render_overlay(poster_id: str, version: int, saved_report: dict) -> tuple[bytes, dict]:
     png, report = _verified_source(poster_id, version, saved_report)
     with Image.open(io.BytesIO(png)) as img:
         img.load()
@@ -97,12 +97,14 @@ def render_overlay(
             if check_name not in status:
                 continue
             color = STATUS_COLORS[status[check_name]]
-            draw.rectangle(zone, fill=(color[0], color[1], color[2], 42),
-                           outline=color, width=5)
-            draw.rectangle((zone[0], zone[1]-30, zone[0]+265, zone[1]),
-                           fill=(12, 21, 34, 235))
-            draw.text((zone[0]+6, zone[1]-26), f"{name}: {status[check_name]}",
-                      font=small_font, fill=color)
+            draw.rectangle(zone, fill=(color[0], color[1], color[2], 42), outline=color, width=5)
+            draw.rectangle((zone[0], zone[1] - 30, zone[0] + 265, zone[1]), fill=(12, 21, 34, 235))
+            draw.text(
+                (zone[0] + 6, zone[1] - 26),
+                f"{name}: {status[check_name]}",
+                font=small_font,
+                fill=color,
+            )
             zones_drawn += 1
 
     rows = _report_ocr_lines(report) if report.ocr_status == "OK" else []
@@ -118,18 +120,30 @@ def render_overlay(
             continue
         draw.rectangle(bbox, outline=OCR_BOX_COLOR, width=3)
         # Numeric labels can be matched against OCR row order in JSON.
-        draw.text((min(bbox[0]+2, w-40), min(bbox[1]+1, h-20)),
-                  str(i+1), font=small_font, fill=OCR_BOX_COLOR,
-                  stroke_fill=(7, 12, 21, 255), stroke_width=2)
+        draw.text(
+            (min(bbox[0] + 2, w - 40), min(bbox[1] + 1, h - 20)),
+            str(i + 1),
+            font=small_font,
+            fill=OCR_BOX_COLOR,
+            stroke_fill=(7, 12, 21, 255),
+            stroke_width=2,
+        )
         boxes_drawn += 1
 
     draw.rectangle((0, 0, w, 65), fill=(9, 21, 34, 236))
-    draw.text((12, 8), f"DIAGNOSTIC ONLY   v{version}   OCR: {report.ocr_status}",
-              font=font, fill=(255, 255, 255, 255))
-    draw.text((12, 38),
-              f"zone: {zones_drawn}  bbox: {boxes_drawn}/{len(rows)}  "
-              f"missing-box: {unavailable_boxes}  truncated-at: {MAX_DRAWN_BOXES}",
-              font=small_font, fill=(255, 231, 163, 255))
+    draw.text(
+        (12, 8),
+        f"DIAGNOSTIC ONLY   v{version}   OCR: {report.ocr_status}",
+        font=font,
+        fill=(255, 255, 255, 255),
+    )
+    draw.text(
+        (12, 38),
+        f"zone: {zones_drawn}  bbox: {boxes_drawn}/{len(rows)}  "
+        f"missing-box: {unavailable_boxes}  truncated-at: {MAX_DRAWN_BOXES}",
+        font=small_font,
+        fill=(255, 231, 163, 255),
+    )
     result = Image.alpha_composite(base, overlay).convert("RGB")
     output = io.BytesIO()
     result.save(output, format="PNG", optimize=True)

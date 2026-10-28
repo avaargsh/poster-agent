@@ -1,4 +1,5 @@
 """Synthetic regression coverage only: never invokes a real PaddleOCR model."""
+
 from __future__ import annotations
 
 import csv
@@ -12,15 +13,19 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from scripts.capture_m6_paddle_ocr import OCREvidenceError, REVIEW_FIELDS, capture
+from scripts.capture_m6_paddle_ocr import REVIEW_FIELDS, OCREvidenceError, capture
 
 
 @pytest.fixture(autouse=True)
 def stub_numpy(monkeypatch):
     # Existing baseline CI does not install optional PaddleOCR or NumPy.
-    monkeypatch.setitem(sys.modules, "numpy", SimpleNamespace(
-        asarray=lambda image: SimpleNamespace(shape=(image.height, image.width, 3))
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "numpy",
+        SimpleNamespace(
+            asarray=lambda image: SimpleNamespace(shape=(image.height, image.width, 3))
+        ),
+    )
 
 
 VARIANTS = {
@@ -32,8 +37,11 @@ VARIANTS = {
 class PredictStub:
     def __init__(self, **options):
         assert options["device"] == "cpu"
-        for setting in ("use_doc_orientation_classify", "use_doc_unwarping",
-                        "use_textline_orientation"):
+        for setting in (
+            "use_doc_orientation_classify",
+            "use_doc_unwarping",
+            "use_textline_orientation",
+        ):
             assert options[setting] is False
         assert Path(options["text_detection_model_dir"]).is_dir()
         assert Path(options["text_recognition_model_dir"]).is_dir()
@@ -54,20 +62,22 @@ def package_fixture(tmp_path):
             payload = output.getvalue()
             name = f"images/{sku}-{suffix}.png"
             (package / name).write_bytes(payload)
-            rows.append({
-                **dict.fromkeys(REVIEW_FIELDS, "UNVERIFIED"),
-                "cohort_id": "m6-demo",
-                "sku_id": sku,
-                "poster_id": "e" * 32,
-                "source_version": "1",
-                "variant_id": variant,
-                "output_image_path": name,
-                "output_image_sha256": hashlib.sha256(payload).hexdigest(),
-                "source_product_sha256": "a" * 64,
-                "request_sha256": "b" * 64,
-                "spec_sha256": "c" * 64,
-                "source_square_image_sha256": "d" * 64,
-            })
+            rows.append(
+                {
+                    **dict.fromkeys(REVIEW_FIELDS, "UNVERIFIED"),
+                    "cohort_id": "m6-demo",
+                    "sku_id": sku,
+                    "poster_id": "e" * 32,
+                    "source_version": "1",
+                    "variant_id": variant,
+                    "output_image_path": name,
+                    "output_image_sha256": hashlib.sha256(payload).hexdigest(),
+                    "source_product_sha256": "a" * 64,
+                    "request_sha256": "b" * 64,
+                    "spec_sha256": "c" * 64,
+                    "source_square_image_sha256": "d" * 64,
+                }
+            )
     save_rows(package, rows)
     det = tmp_path / "detection"
     rec = tmp_path / "recognition"
@@ -97,8 +107,7 @@ def test_capture_records_immutable_inputs_but_never_claims_real_ocr_pass(tmp_pat
     assert report["automatically_accepted"] is False
     assert report["min_20_real_skus_proven"] is False
     assert report["source_authorizations_verified"] is False
-    assert all(row["status"] == "CAPTURED_REVIEW_REQUIRED"
-               for row in report["observations"])
+    assert all(row["status"] == "CAPTURED_REVIEW_REQUIRED" for row in report["observations"])
     assert all(row["recognized_line_count"] == 2 for row in report["observations"])
     assert len(report["model_digests"]["detection"]["sha256"]) == 64
     assert report["paddleocr_version"] == "test-double-not-real-ocr"
@@ -111,7 +120,6 @@ def test_detect_changed_png_and_no_partial_file(tmp_path):
     with pytest.raises(OCREvidenceError, match="PNG 已被修改"):
         capture(package, det, rec, engine_factory=PredictStub)
     assert not (package / "m6_paddle_ocr_evidence.json").exists()
-
 
 
 @pytest.mark.parametrize("failure", ["digest", "dimensions"])
@@ -141,6 +149,7 @@ def test_late_invalid_image_is_rejected_before_expensive_ocr_start(tmp_path, fai
     # Invalid late-cohort input must not load a model or run OCR on earlier SKUs.
     assert instantiated == []
     assert not (package / "m6_paddle_ocr_evidence.json").exists()
+
 
 def test_reject_symlinked_png_even_if_hash_matches(tmp_path):
     package, det, rec, rows = package_fixture(tmp_path)
@@ -263,11 +272,13 @@ def test_capture_preserves_paddleocr_boxes_for_every_reviewed_variant(tmp_path):
 
     class WithBoxes(PredictStub):
         def predict(self, image):
-            return [{
-                "rec_texts": ["¥129"],
-                "rec_scores": [0.96],
-                "rec_boxes": [[65, 668, 200, 720]],
-            }]
+            return [
+                {
+                    "rec_texts": ["¥129"],
+                    "rec_scores": [0.96],
+                    "rec_boxes": [[65, 668, 200, 720]],
+                }
+            ]
 
     report = capture(package, det, rec, engine_factory=WithBoxes)
     assert report["positioned_line_count"] == 4

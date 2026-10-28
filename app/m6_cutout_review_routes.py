@@ -5,22 +5,23 @@ review operation preserves the pre-write CSV by its SHA-256 in private
 history, validates the current whole cohort, and updates just human fields.
 Operator claims are intentionally NOT scientific or model attestation.
 """
+
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
 import hashlib
 import io
 import os
-from pathlib import Path
 import re
 import threading
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Literal
 
 from .m6_batch_package_routes import _verified_source
 
@@ -30,8 +31,13 @@ _LOCK = threading.RLock()
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _SKU = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 _HUMAN_KEYS = (
-    "subject_integrity_review", "edge_artifact_review", "brand_mark_review",
-    "human_accept", "reviewer_alias", "reviewer_notes", "reviewed_at_utc",
+    "subject_integrity_review",
+    "edge_artifact_review",
+    "brand_mark_review",
+    "human_accept",
+    "reviewer_alias",
+    "reviewer_notes",
+    "reviewed_at_utc",
 )
 
 
@@ -57,6 +63,7 @@ def _sha(raw: bytes) -> str:
 
 def _source(batch_id: str):
     from scripts.verify_m6_cutout_evidence import verify_cutout_evidence
+
     journal, folder = _verified_source(batch_id)
     if folder.is_symlink() or not folder.is_dir():
         raise _conflict("审核包尚未生成")
@@ -69,6 +76,7 @@ def _source(batch_id: str):
 
 def _read_csv(folder: Path, expected_sha: str):
     from scripts.verify_m6_cutout_evidence import _csv_rows
+
     path = folder / "m6_cutout_reviews.csv"
     rows, raw = _csv_rows(path)
     if _sha(raw) != expected_sha:
@@ -81,31 +89,33 @@ def _state(batch_id: str) -> dict:
     rows, _ = _read_csv(folder, report["reviews_csv_sha256"])
     exposed = []
     for row in rows:
-        exposed.append({
-            "sku_id": row["sku_id"],
-            "poster_id": row["poster_id"],
-            "source_version": row["source_version"],
-            "quality_state": row["quality_state"],
-            "model_runtime_attested": row["model_runtime_attested"],
-            "human_accept": row["human_accept"],
-            "subject_integrity_review": row["subject_integrity_review"],
-            "edge_artifact_review": row["edge_artifact_review"],
-            "brand_mark_review": row["brand_mark_review"],
-            "reviewer_alias": row["reviewer_alias"],
-            "reviewer_notes": row["reviewer_notes"],
-            "reviewed_at_utc": row["reviewed_at_utc"],
-            "machine_risks": row["machine_risks"],
-            "foreground_fraction": row["foreground_fraction"],
-            "soft_alpha_fraction": row["soft_alpha_fraction"],
-            "edge_touch_fraction": row["edge_touch_fraction"],
-            "comparison_image_path": row["comparison_image_path"],
-            "comparison_image_sha256": row["comparison_image_sha256"],
-            "comparison_url": (
-                f"/api/batches/{batch_id}/m6-cutout-review/"
-                f"{row['sku_id']}/comparison"
-                if row["quality_state"] == "REVIEW_REQUIRED" else None
-            ),
-        })
+        exposed.append(
+            {
+                "sku_id": row["sku_id"],
+                "poster_id": row["poster_id"],
+                "source_version": row["source_version"],
+                "quality_state": row["quality_state"],
+                "model_runtime_attested": row["model_runtime_attested"],
+                "human_accept": row["human_accept"],
+                "subject_integrity_review": row["subject_integrity_review"],
+                "edge_artifact_review": row["edge_artifact_review"],
+                "brand_mark_review": row["brand_mark_review"],
+                "reviewer_alias": row["reviewer_alias"],
+                "reviewer_notes": row["reviewer_notes"],
+                "reviewed_at_utc": row["reviewed_at_utc"],
+                "machine_risks": row["machine_risks"],
+                "foreground_fraction": row["foreground_fraction"],
+                "soft_alpha_fraction": row["soft_alpha_fraction"],
+                "edge_touch_fraction": row["edge_touch_fraction"],
+                "comparison_image_path": row["comparison_image_path"],
+                "comparison_image_sha256": row["comparison_image_sha256"],
+                "comparison_url": (
+                    f"/api/batches/{batch_id}/m6-cutout-review/{row['sku_id']}/comparison"
+                    if row["quality_state"] == "REVIEW_REQUIRED"
+                    else None
+                ),
+            }
+        )
     return {
         "batch_id": batch_id,
         "cohort_id": report["cohort_id"],
@@ -144,9 +154,12 @@ def get_cutout_comparison(batch_id: str, sku_id: str):
     if _sha(raw) != record["comparison_image_sha256"]:
         raise _conflict("原图与抠图对照 PNG 已发生变化")
     return Response(
-        raw, media_type="image/png",
-        headers={"Cache-Control": "no-store",
-                 "X-Evidence-Sha256": record["comparison_image_sha256"]},
+        raw,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Evidence-Sha256": record["comparison_image_sha256"],
+        },
     )
 
 
@@ -191,16 +204,24 @@ def save_cutout_review(batch_id: str, update: CutoutReviewUpdate):
     if not _SKU.fullmatch(update.sku_id):
         raise HTTPException(status_code=422, detail="SKU 标识非法")
     labels = [
-        update.subject_integrity_review, update.edge_artifact_review,
+        update.subject_integrity_review,
+        update.edge_artifact_review,
         update.brand_mark_review,
     ]
-    if (update.human_accept == "PASS" and any(x != "PASS" for x in labels)
-            or update.human_accept == "FAIL" and not any(x == "FAIL" for x in labels)):
+    if (
+        update.human_accept == "PASS"
+        and any(x != "PASS" for x in labels)
+        or update.human_accept == "FAIL"
+        and not any(x == "FAIL" for x in labels)
+    ):
         raise HTTPException(status_code=422, detail="总评结果与逐项审核不一致")
     alias = update.reviewer_alias.strip()
     notes = update.reviewer_notes.strip()
-    if (len(alias) < 2 or alias != update.reviewer_alias
-            or (update.human_accept == "FAIL" and not notes)):
+    if (
+        len(alias) < 2
+        or alias != update.reviewer_alias
+        or (update.human_accept == "FAIL" and not notes)
+    ):
         raise HTTPException(status_code=422, detail="请填写有效审核人，失败时需明确原因")
     with _LOCK:
         _, folder, report = _source(batch_id)
@@ -210,18 +231,20 @@ def save_cutout_review(batch_id: str, update: CutoutReviewUpdate):
         item = next((row for row in rows if row["sku_id"] == update.sku_id), None)
         if item is None or item["quality_state"] != "REVIEW_REQUIRED":
             raise _conflict("SKU 没有有效待审抠图或已不在当前批次")
-        item.update({
-            "subject_integrity_review": update.subject_integrity_review,
-            "edge_artifact_review": update.edge_artifact_review,
-            "brand_mark_review": update.brand_mark_review,
-            "human_accept": update.human_accept,
-            "reviewer_alias": alias, "reviewer_notes": notes,
-            "reviewed_at_utc": datetime.now(timezone.utc).isoformat(),
-        })
+        item.update(
+            {
+                "subject_integrity_review": update.subject_integrity_review,
+                "edge_artifact_review": update.edge_artifact_review,
+                "brand_mark_review": update.brand_mark_review,
+                "human_accept": update.human_accept,
+                "reviewer_alias": alias,
+                "reviewer_notes": notes,
+                "reviewed_at_utc": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         columns = list(rows[0].keys())
         text = io.StringIO(newline="")
-        writer = csv.DictWriter(text, fieldnames=columns,
-                                extrasaction="raise", lineterminator="\n")
+        writer = csv.DictWriter(text, fieldnames=columns, extrasaction="raise", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
         next_bytes = text.getvalue().encode("utf-8")

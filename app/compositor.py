@@ -1,10 +1,13 @@
 """确定性海报渲染：背景 + 原始 SKU + Logo + 可编辑文字。"""
+
 from __future__ import annotations
+
 import io
-import math
 import os
 from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+
 from .schemas import PosterSpec, price_text
 
 SIZE = 1024
@@ -51,16 +54,17 @@ def local_background(style: str) -> Image.Image:
     draw = ImageDraw.Draw(img)
     for y in range(SIZE):
         t = y / (SIZE - 1)
-        color = tuple(int(a * (1-t) + b * t) for a, b in zip(*palette))
+        color = tuple(int(a * (1 - t) + b * t) for a, b in zip(*palette))
         draw.line((0, y, SIZE, y), fill=color)
     for i in range(6):
         r = 120 + i * 82
-        draw.arc((655-r, 510-r, 655+r, 510+r), 0, 360, fill=(60, 130, 173), width=2)
+        draw.arc((655 - r, 510 - r, 655 + r, 510 + r), 0, 360, fill=(60, 130, 173), width=2)
     return img
 
 
-def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int,
-              max_size: int = 64, min_size: int = 23) -> ImageFont.FreeTypeFont:
+def _fit_text(
+    draw: ImageDraw.ImageDraw, text: str, max_width: int, max_size: int = 64, min_size: int = 23
+) -> ImageFont.FreeTypeFont:
     for size in range(max_size, min_size - 1, -2):
         font = get_font(size)
         if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
@@ -68,7 +72,13 @@ def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int,
     return get_font(min_size)
 
 
-def _break_lines(draw: ImageDraw.ImageDraw, value: str, font: ImageFont.FreeTypeFont, width: int, max_lines: int = 2) -> list[str]:
+def _break_lines(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    font: ImageFont.FreeTypeFont,
+    width: int,
+    max_lines: int = 2,
+) -> list[str]:
     lines: list[str] = []
     line = ""
     for ch in value:
@@ -146,9 +156,7 @@ def _product_in_frame(
     # for the hero template and explicit top/bottom placement.
     # The historical classic + center + full path deliberately stays identical.
     travel = 80 if spec.layout_id == "hero" or spec.product_align != "center" else 0
-    image = _contain(
-        product, (int(width * factor), int((height - travel) * factor))
-    )
+    image = _contain(product, (int(width * factor), int((height - travel) * factor)))
     room = height - image.height
     align_y = {"top": 0, "center": room // 2, "bottom": room}[spec.product_align]
     return image, (x + (width - image.width) // 2, y + align_y)
@@ -181,32 +189,36 @@ def _measure_hero_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
     if cta_box[2] - cta_box[0] > 260:
         raise ValueError("CTA 文案过长，无法放入按钮")
     return {
-        "title_font": title_font, "title_lines": lines, "subtitle_y": subtitle_y,
-        "subtitle_font": subtitle_font, "price_value": price_value,
-        "price_font": price_font, "original_value": original_value,
-        "original_font": original_font, "cta_font": cta_font, "cta_box": cta_box,
+        "title_font": title_font,
+        "title_lines": lines,
+        "subtitle_y": subtitle_y,
+        "subtitle_font": subtitle_font,
+        "price_value": price_value,
+        "price_font": price_font,
+        "original_value": original_value,
+        "original_font": original_font,
+        "cta_font": cta_font,
+        "cta_box": cta_box,
     }
 
 
 def _compose_hero(
-    spec: PosterSpec, product: Image.Image,
-    logo: Image.Image | None, background: Image.Image,
+    spec: PosterSpec,
+    product: Image.Image,
+    logo: Image.Image | None,
+    background: Image.Image,
 ) -> bytes:
     """Square hero template: product above and price/copy in protected footer."""
     offset = spec.layer_layout
     canvas = _cover(background, (SIZE, SIZE)).convert("RGBA")
     overlay = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).rounded_rectangle(
-        (32, 615, 992, 985), radius=30, fill=(2, 18, 42, 219)
-    )
+    ImageDraw.Draw(overlay).rounded_rectangle((32, 615, 992, 985), radius=30, fill=(2, 18, 42, 219))
     canvas = Image.alpha_composite(canvas, overlay)
     product_img, (x, y) = _product_in_frame(product, (257, 112, 510, 480), spec)
     if product_img.getextrema()[3][0] == 255:
         card = Image.new("RGBA", (554, 514), (255, 255, 255, 241))
         mask = Image.new("L", card.size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle(
-            (0, 0, 553, 513), radius=30, fill=255
-        )
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, 553, 513), radius=30, fill=255)
         card.putalpha(mask)
         canvas.alpha_composite(card, (235, 92))
     canvas.alpha_composite(product_img, (x, y))
@@ -218,34 +230,47 @@ def _compose_hero(
     layout = _measure_hero_layout(draw, spec)
     for index, line in enumerate(layout["title_lines"]):
         draw.text(
-            (75 + offset.title_dx, 637 + index * 64 + offset.title_dy), line,
-            font=layout["title_font"], fill="#FFFFFF",
+            (75 + offset.title_dx, 637 + index * 64 + offset.title_dy),
+            line,
+            font=layout["title_font"],
+            fill="#FFFFFF",
         )
     if spec.subtitle:
         draw.text(
-            (76 + offset.title_dx, layout["subtitle_y"] + offset.title_dy), spec.subtitle,
-            font=layout["subtitle_font"], fill="#CAE4FF",
+            (76 + offset.title_dx, layout["subtitle_y"] + offset.title_dy),
+            spec.subtitle,
+            font=layout["subtitle_font"],
+            fill="#CAE4FF",
         )
-    draw.text((76 + offset.price_dx, 801 + offset.price_dy), "活动价", font=get_font(27), fill="#CDE6FF")
     draw.text(
-        (66 + offset.price_dx, 830 + offset.price_dy), layout["price_value"], font=layout["price_font"],
-        fill="#FFE596", stroke_width=1, stroke_fill="#D59F52",
+        (76 + offset.price_dx, 801 + offset.price_dy), "活动价", font=get_font(27), fill="#CDE6FF"
+    )
+    draw.text(
+        (66 + offset.price_dx, 830 + offset.price_dy),
+        layout["price_value"],
+        font=layout["price_font"],
+        fill="#FFE596",
+        stroke_width=1,
+        stroke_fill="#D59F52",
     )
     if layout["original_value"] is not None:
         draw.text(
-            (80 + offset.price_dx, 944 + offset.price_dy), layout["original_value"],
-            font=layout["original_font"], fill="#BBD2ED",
+            (80 + offset.price_dx, 944 + offset.price_dy),
+            layout["original_value"],
+            font=layout["original_font"],
+            fill="#BBD2ED",
         )
     draw.rounded_rectangle(
-        (660 + offset.cta_dx, 877 + offset.cta_dy,
-         959 + offset.cta_dx, 951 + offset.cta_dy),
-        radius=26, fill="#F8CA5A"
+        (660 + offset.cta_dx, 877 + offset.cta_dy, 959 + offset.cta_dx, 951 + offset.cta_dy),
+        radius=26,
+        fill="#F8CA5A",
     )
     cta_box = layout["cta_box"]
     draw.text(
-        (809 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2,
-         894 + offset.cta_dy),
-        spec.cta, font=layout["cta_font"], fill="#203653",
+        (809 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2, 894 + offset.cta_dy),
+        spec.cta,
+        font=layout["cta_font"],
+        fill="#203653",
     )
     output = io.BytesIO()
     canvas.convert("RGB").save(output, "PNG", optimize=True)
@@ -253,7 +278,8 @@ def _compose_hero(
 
 
 def validate_square_layout(
-    spec: PosterSpec, logo: Image.Image | None = None,
+    spec: PosterSpec,
+    logo: Image.Image | None = None,
 ) -> None:
     """Reject pixel-accurate cross-layer collisions before an AI claim.
 
@@ -265,12 +291,16 @@ def validate_square_layout(
     report = inspect_square_layout(spec, logo)
     if report["status"] != "PASS":
         issues = report["issues"]
-        raise ValueError("方形海报图层碰撞或越界：" +
-                         "；".join(item["message"] for item in issues[:3]) +
-                         "。可用图层检测与一键修正工具调整。")
+        raise ValueError(
+            "方形海报图层碰撞或越界："
+            + "；".join(item["message"] for item in issues[:3])
+            + "。可用图层检测与一键修正工具调整。"
+        )
 
 
-def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, background: Image.Image) -> bytes:
+def compose(
+    spec: PosterSpec, product: Image.Image, logo: Image.Image | None, background: Image.Image
+) -> bytes:
     # The create and edit APIs share this final guard. A failed edit does not
     # mutate the published PNG/version, and the original source stays intact.
     validate_square_layout(spec, logo)
@@ -284,9 +314,7 @@ def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, ba
     canvas = Image.alpha_composite(canvas, overlay)
 
     # 商品主体使用原图，透明 PNG 能获得最佳合成效果。
-    product_rgba, (product_x, product_y) = _product_in_frame(
-        product, (542, 205, 460, 680), spec
-    )
+    product_rgba, (product_x, product_y) = _product_in_frame(product, (542, 205, 460, 680), spec)
     if product_rgba.getextrema()[3][0] == 255:  # 白底或不透明图，保留完整素材而非虚假抠图
         card = Image.new("RGBA", (474, 700), (255, 255, 255, 241))
         mask = Image.new("L", card.size, 0)
@@ -304,35 +332,52 @@ def compose(spec: PosterSpec, product: Image.Image, logo: Image.Image | None, ba
     layout = _measure_text_layout(draw, spec)
     for index, line in enumerate(layout["title_lines"]):
         draw.text(
-            (75 + offset.title_dx, layout["title_top"] + index * 86 + offset.title_dy), line,
-            font=layout["title_font"], fill="#FFFFFF", stroke_width=0,
+            (75 + offset.title_dx, layout["title_top"] + index * 86 + offset.title_dy),
+            line,
+            font=layout["title_font"],
+            fill="#FFFFFF",
+            stroke_width=0,
         )
     if spec.subtitle:
         draw.text(
-            (75 + offset.title_dx, layout["subtitle_top"] + offset.title_dy), spec.subtitle,
-            font=layout["subtitle_font"], fill="#CAE4FF",
+            (75 + offset.title_dx, layout["subtitle_top"] + offset.title_dy),
+            spec.subtitle,
+            font=layout["subtitle_font"],
+            fill="#CAE4FF",
         )
 
-    draw.text((75 + offset.price_dx, 610 + offset.price_dy), "限时到手价", font=get_font(31), fill="#CDE6FF")
     draw.text(
-        (65 + offset.price_dx, 668 + offset.price_dy), layout["price_value"], font=layout["price_font"],
-        fill="#FFE596", stroke_width=1, stroke_fill="#D59F52",
+        (75 + offset.price_dx, 610 + offset.price_dy),
+        "限时到手价",
+        font=get_font(31),
+        fill="#CDE6FF",
+    )
+    draw.text(
+        (65 + offset.price_dx, 668 + offset.price_dy),
+        layout["price_value"],
+        font=layout["price_font"],
+        fill="#FFE596",
+        stroke_width=1,
+        stroke_fill="#D59F52",
     )
     if layout["original_value"] is not None:
         draw.text(
-            (78 + offset.price_dx, 800 + offset.price_dy), layout["original_value"], font=layout["original_font"],
+            (78 + offset.price_dx, 800 + offset.price_dy),
+            layout["original_value"],
+            font=layout["original_font"],
             fill="#BBD2ED",
         )
     draw.rounded_rectangle(
-        (76 + offset.cta_dx, 867 + offset.cta_dy,
-         410 + offset.cta_dx, 934 + offset.cta_dy),
-        radius=28, fill="#F8CA5A"
+        (76 + offset.cta_dx, 867 + offset.cta_dy, 410 + offset.cta_dx, 934 + offset.cta_dy),
+        radius=28,
+        fill="#F8CA5A",
     )
     cta_box = layout["cta_box"]
     draw.text(
-        (243 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2,
-         877 + offset.cta_dy), spec.cta,
-        font=layout["cta_font"], fill="#203653",
+        (243 + offset.cta_dx - (cta_box[2] - cta_box[0]) / 2, 877 + offset.cta_dy),
+        spec.cta,
+        font=layout["cta_font"],
+        fill="#203653",
     )
     output = io.BytesIO()
     canvas.convert("RGB").save(output, "PNG", optimize=True)

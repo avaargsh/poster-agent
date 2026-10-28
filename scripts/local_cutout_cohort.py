@@ -7,6 +7,7 @@ this journal is an operator-owned local observation. Technical runs accept
 unverified asset metadata; formal M6 acceptance separately requires authorized,
 independent SKUs and human reviews.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,15 +52,16 @@ def _read_csv(path: Path, fields: tuple[str, ...] | None = None):
     if not raw or len(raw) > 2 * 1024 * 1024:
         raise CutoutCohortError("CSV 不能为空或超过 2 MiB")
     try:
-        table = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""),
-                               strict=True)
+        table = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
         header = table.fieldnames
-        if (not header or len(header) != len(set(header))
-                or (fields is not None and set(header) != set(fields))):
+        if (
+            not header
+            or len(header) != len(set(header))
+            or (fields is not None and set(header) != set(fields))
+        ):
             raise CutoutCohortError("CSV 字段与授权模板不匹配")
         rows = list(table)
-        if any(None in row or any(value is None for value in row.values())
-               for row in rows):
+        if any(None in row or any(value is None for value in row.values()) for row in rows):
             raise CutoutCohortError("CSV 行包含重复/缺失字段")
         return header, rows, _sha(raw)
     except (UnicodeError, csv.Error) as exc:
@@ -98,17 +100,22 @@ def _sources(manifest: Path, registry: Path, *, min_skus: int):
     for item in prepared:
         sku = item["sku_id"]
         reg = rows_by_sku[sku]
-        if (reg["source_asset_authorization_status"] != "AUTHORIZED"
-                or not reg["authorization_evidence_ref"]
-                or reg["distinct_sku_verified"] != "YES"
-                or reg["duplicate_source_image_reviewed"] != "YES"
-                or not reg["reviewer_alias"]):
+        if (
+            reg["source_asset_authorization_status"] != "AUTHORIZED"
+            or not reg["authorization_evidence_ref"]
+            or reg["distinct_sku_verified"] != "YES"
+            or reg["duplicate_source_image_reviewed"] != "YES"
+            or not reg["reviewer_alias"]
+        ):
             raise CutoutCohortError(f"{sku}: 商品素材授权或独立 SKU 人工登记不完整")
         if reg["source_image_sha256"] != item["product_sha256"]:
             raise CutoutCohortError(f"{sku}: 授权登记源图 SHA-256 与输入不一致")
-        if (item["logo"] is not None and reg["logo_authorization_status"] != "AUTHORIZED"
-                or item["logo"] is None
-                and reg["logo_authorization_status"] != "NOT_APPLICABLE"):
+        if (
+            item["logo"] is not None
+            and reg["logo_authorization_status"] != "AUTHORIZED"
+            or item["logo"] is None
+            and reg["logo_authorization_status"] != "NOT_APPLICABLE"
+        ):
             raise CutoutCohortError(f"{sku}: Logo 授权声明与输入资源不一致")
         if item["product_sha256"] in source_hashes:
             raise CutoutCohortError("不同 SKU 使用重复原图；请核对实际独立商品身份")
@@ -148,37 +155,54 @@ def _technical_sources(manifest: Path, registry: Path | None, *, min_skus: int):
         registry_rows = []
         for item in prepared:
             row = dict.fromkeys(REGISTRY_FIELDS, "")
-            row.update(cohort_id=cohort, sku_id=item["sku_id"],
-                       source_image_sha256=item["product_sha256"],
-                       source_asset_authorization_status="UNVERIFIED",
-                       logo_authorization_status="UNVERIFIED" if item["logo"] else "NOT_APPLICABLE",
-                       distinct_sku_verified="UNVERIFIED",
-                       duplicate_source_image_reviewed="UNVERIFIED")
+            row.update(
+                cohort_id=cohort,
+                sku_id=item["sku_id"],
+                source_image_sha256=item["product_sha256"],
+                source_asset_authorization_status="UNVERIFIED",
+                logo_authorization_status="UNVERIFIED" if item["logo"] else "NOT_APPLICABLE",
+                distinct_sku_verified="UNVERIFIED",
+                duplicate_source_image_reviewed="UNVERIFIED",
+            )
             registry_rows.append(row)
         registry_sha = _sha(_registry_bytes(registry_rows))
     else:
         _, registry_rows, registry_sha = _read_csv(registry, REGISTRY_FIELDS)
         by_sku = {r["sku_id"]: r for r in registry_rows}
         cohorts = {r["cohort_id"] for r in registry_rows}
-        if (len(by_sku) != len(registry_rows) or len(cohorts) != 1 or not next(iter(cohorts))
-                or set(by_sku) != {p["sku_id"] for p in prepared}):
+        if (
+            len(by_sku) != len(registry_rows)
+            or len(cohorts) != 1
+            or not next(iter(cohorts))
+            or set(by_sku) != {p["sku_id"] for p in prepared}
+        ):
             raise CutoutCohortError("素材登记表与图片清单的 SKU 集合不一致")
         cohort = next(iter(cohorts))
         for item in prepared:
             if by_sku[item["sku_id"]]["source_image_sha256"] != item["product_sha256"]:
                 raise CutoutCohortError("素材登记源图 SHA-256 与输入不一致")
-    authorized = sum(r["source_asset_authorization_status"] == "AUTHORIZED"
-                     and bool(r["authorization_evidence_ref"]) for r in registry_rows)
-    return {"manifest_sha256": source_sha, "registry_sha256": registry_sha,
-            "cohort_id": cohort, "rows": rows, "header": header, "prepared": prepared,
-            "registry_rows": registry_rows, "authorized_sku_count": authorized,
-            "authorization_status": "OPERATOR_DECLARED_AUTHORIZED"
-            if authorized == len(prepared) else "UNVERIFIED"}
+    authorized = sum(
+        r["source_asset_authorization_status"] == "AUTHORIZED"
+        and bool(r["authorization_evidence_ref"])
+        for r in registry_rows
+    )
+    return {
+        "manifest_sha256": source_sha,
+        "registry_sha256": registry_sha,
+        "cohort_id": cohort,
+        "rows": rows,
+        "header": header,
+        "prepared": prepared,
+        "registry_rows": registry_rows,
+        "authorized_sku_count": authorized,
+        "authorization_status": "OPERATOR_DECLARED_AUTHORIZED"
+        if authorized == len(prepared)
+        else "UNVERIFIED",
+    }
 
 
 def _safe_dir(directory: Path):
-    if (directory.is_symlink()
-            or (directory.exists() and not directory.is_dir())):
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
         raise CutoutCohortError("输出路径为符号链接或非目录")
     if directory.exists() and (directory / "cutout_trial.json").is_symlink():
         raise CutoutCohortError("本地运行账本不得使用符号链接")
@@ -188,8 +212,7 @@ def _atomic_json(path: Path, value: dict) -> None:
     pending = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         with pending.open("xb") as handle:
-            handle.write((json.dumps(value, ensure_ascii=False, indent=2)
-                          + "\n").encode("utf-8"))
+            handle.write((json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(pending, path)
@@ -211,9 +234,7 @@ def _store_once(path: Path, data: bytes):
 
 
 def _source_png(raw: bytes, filename: str) -> tuple[Image.Image, bytes]:
-    image = asyncio.run(read_upload(
-        UploadFile(file=io.BytesIO(raw), filename=filename)
-    ))
+    image = asyncio.run(read_upload(UploadFile(file=io.BytesIO(raw), filename=filename)))
     picture = io.BytesIO()
     image.save(picture, format="PNG")
     return image, picture.getvalue()
@@ -225,30 +246,41 @@ def _check_done(out: Path, item: dict, row: dict) -> None:
         raise CutoutCohortError(f"{sku}: 运行记录尚未完成")
     expected_sha = item["product_sha256"]
     cutout = out / "cutouts" / f"{sku}.png"
-    if (cutout.is_symlink() or not cutout.is_file()
-            or not SHA.fullmatch(str(row.get("output_sha256", "")))
-            or _sha(cutout.read_bytes()) != row["output_sha256"]
-            or row.get("source_sha256") != expected_sha):
+    if (
+        cutout.is_symlink()
+        or not cutout.is_file()
+        or not SHA.fullmatch(str(row.get("output_sha256", "")))
+        or _sha(cutout.read_bytes()) != row["output_sha256"]
+        or row.get("source_sha256") != expected_sha
+    ):
         raise CutoutCohortError(f"{sku}: 输出文件摘要不一致或已丢失")
     original = item["product"].read_bytes()
     if _sha(original) != expected_sha:
         raise CutoutCohortError(f"{sku}: 原始输入文件摘要发生变化")
     saved_source = out / "source" / f"{sku}{item['product'].suffix.lower()}"
-    if (saved_source.is_symlink() or not saved_source.is_file()
-            or _sha(saved_source.read_bytes()) != expected_sha):
+    if (
+        saved_source.is_symlink()
+        or not saved_source.is_file()
+        or _sha(saved_source.read_bytes()) != expected_sha
+    ):
         raise CutoutCohortError(f"{sku}: 已复制的商品源图文件摘要发生变化")
     if item["logo"] is not None:
         saved_logo = out / "source" / f"{sku}-logo{item['logo'].suffix.lower()}"
-        if (saved_logo.is_symlink() or not saved_logo.is_file()
-                or _sha(saved_logo.read_bytes()) != item["logo_sha256"]):
+        if (
+            saved_logo.is_symlink()
+            or not saved_logo.is_file()
+            or _sha(saved_logo.read_bytes()) != item["logo_sha256"]
+        ):
             raise CutoutCohortError(f"{sku}: 已复制的 Logo 文件摘要发生变化")
     _, normalized = _source_png(original, item["product"].name)
     try:
         computed, _ = evidence_from_pngs(normalized, cutout.read_bytes())
     except (OSError, ValueError) as exc:
         raise CutoutCohortError(f"{sku}: 输出 PNG 文件无效") from exc
-    if (row.get("normalized_source_sha256") != computed["source_png_sha256"]
-            or row.get("metrics") != computed):
+    if (
+        row.get("normalized_source_sha256") != computed["source_png_sha256"]
+        or row.get("metrics") != computed
+    ):
         raise CutoutCohortError(f"{sku}: 当前输出与记录的像素指标不一致")
 
 
@@ -257,8 +289,9 @@ def _manifest_bytes(source: dict) -> bytes:
     if "product_cutout_image" not in output_header:
         output_header.append("product_cutout_image")
     data = io.StringIO(newline="")
-    writer = csv.DictWriter(data, fieldnames=output_header,
-                            lineterminator="\n", extrasaction="raise")
+    writer = csv.DictWriter(
+        data, fieldnames=output_header, lineterminator="\n", extrasaction="raise"
+    )
     writer.writeheader()
     for item, original in zip(source["prepared"], source["rows"], strict=True):
         sku = item["sku_id"]
@@ -288,9 +321,7 @@ def _result(state: dict, mode: str):
         "mode": mode,
         "status": state["status"],
         "cohort_sku_count": len(state["expected_sku_ids"]),
-        "completed_sku_count": sum(
-            r.get("status") == "COMPLETED" for r in state["rows"].values()
-        ),
+        "completed_sku_count": sum(r.get("status") == "COMPLETED" for r in state["rows"].values()),
         "model_sha256": state["model_sha256"],
         "model_runtime_attested": False,
         "real_model_quality_verified": False,
@@ -304,8 +335,13 @@ def _result(state: dict, mode: str):
 
 
 def prepare_cohort(
-    manifest: Path, registry: Path | None, output_dir: Path, *, apply: bool = False,
-    min_skus: int = 20, retry_failed: bool = False,
+    manifest: Path,
+    registry: Path | None,
+    output_dir: Path,
+    *,
+    apply: bool = False,
+    min_skus: int = 20,
+    retry_failed: bool = False,
     purpose: Literal["technical_evaluation", "quality_acceptance"] = "quality_acceptance",
 ) -> dict:
     """Read-only plan or an explicitly started, safe-to-resume local CLI run."""
@@ -316,15 +352,23 @@ def prepare_cohort(
         raise CutoutCohortError("未知的运行用途")
     if purpose == "quality_acceptance" and registry is None:
         raise CutoutCohortError("正式验收需要独立的授权登记表")
-    source = (_technical_sources(manifest, registry, min_skus=min_skus)
-              if purpose == "technical_evaluation" else _sources(manifest, registry, min_skus=min_skus))
+    source = (
+        _technical_sources(manifest, registry, min_skus=min_skus)
+        if purpose == "technical_evaluation"
+        else _sources(manifest, registry, min_skus=min_skus)
+    )
     _safe_dir(out)
     if not apply:
         return {
-            "schema_version": SCHEMA, "mode": "check", "status":
-                "TECHNICAL_READY" if purpose == "technical_evaluation" else "AUTHORIZED_READY",
-            "purpose": purpose, "authorization_status": source["authorization_status"],
-            "human_visual_review": "UNVERIFIED", "quality_accepted": False,
+            "schema_version": SCHEMA,
+            "mode": "check",
+            "status": "TECHNICAL_READY"
+            if purpose == "technical_evaluation"
+            else "AUTHORIZED_READY",
+            "purpose": purpose,
+            "authorization_status": source["authorization_status"],
+            "human_visual_review": "UNVERIFIED",
+            "quality_accepted": False,
             "cohort_sku_count": len(source["prepared"]),
             "authorized_sku_count": source["authorized_sku_count"],
             "model_runtime_attested": False,
@@ -345,16 +389,18 @@ def prepare_cohort(
             state = json.loads(journal.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise CutoutCohortError("已有运行账本损坏") from exc
-        if (state.get("schema_version") != SCHEMA
-                or state.get("purpose", "quality_acceptance") != purpose
-                or state.get("source_manifest_sha256") != source["manifest_sha256"]
-                or state.get("authorization_registry_sha256") != source["registry_sha256"]
-                or state.get("model_sha256") != identity["model_sha256"]
-                or state.get("expected_sku_ids") != expected_skus
-                or state.get("cohort_id") != source["cohort_id"]
-                or state.get("runner") != RUNNER
-                or not isinstance(state.get("rows"), dict)
-                or set(state["rows"]) - set(expected_skus)):
+        if (
+            state.get("schema_version") != SCHEMA
+            or state.get("purpose", "quality_acceptance") != purpose
+            or state.get("source_manifest_sha256") != source["manifest_sha256"]
+            or state.get("authorization_registry_sha256") != source["registry_sha256"]
+            or state.get("model_sha256") != identity["model_sha256"]
+            or state.get("expected_sku_ids") != expected_skus
+            or state.get("cohort_id") != source["cohort_id"]
+            or state.get("runner") != RUNNER
+            or not isinstance(state.get("rows"), dict)
+            or set(state["rows"]) - set(expected_skus)
+        ):
             raise CutoutCohortError("已有账本与当前授权清单、模型或 SKU 集合不一致")
     else:
         out.mkdir(parents=True, exist_ok=False)
@@ -370,10 +416,15 @@ def prepare_cohort(
             "authorization_registry_sha256": source["registry_sha256"],
             "model_sha256": identity["model_sha256"],
             "model_id": "u2netp",
-            "machine": {"os": platform.system(), "architecture": platform.machine(),
-                        "python": platform.python_version()},
-            "expected_sku_ids": expected_skus, "rows": {},
-            "status": "INCOMPLETE", "model_runtime_attested": False,
+            "machine": {
+                "os": platform.system(),
+                "architecture": platform.machine(),
+                "python": platform.python_version(),
+            },
+            "expected_sku_ids": expected_skus,
+            "rows": {},
+            "status": "INCOMPLETE",
+            "model_runtime_attested": False,
             "independent_human_review_attested": False,
             "real_model_quality_verified": False,
         }
@@ -417,7 +468,8 @@ def prepare_cohort(
             metrics, _ = evidence_from_pngs(normalized, candidate)
             _store_once(target, candidate)
             state["rows"][sku] = {
-                "status": "COMPLETED", "source_sha256": item["product_sha256"],
+                "status": "COMPLETED",
+                "source_sha256": item["product_sha256"],
                 "normalized_source_sha256": metrics["source_png_sha256"],
                 "output_sha256": _sha(candidate),
                 "metrics": metrics,
@@ -428,7 +480,8 @@ def prepare_cohort(
             _atomic_json(journal, state)
         except (OSError, ValueError, RuntimeError) as exc:
             state["rows"][sku] = {
-                "status": "FAILED", "source_sha256": item["product_sha256"],
+                "status": "FAILED",
+                "source_sha256": item["product_sha256"],
                 "error_code": type(exc).__name__,
             }
             state["status"] = "INCOMPLETE"
@@ -443,7 +496,11 @@ def prepare_cohort(
 
 
 def verify_cohort(
-    output_dir: Path, manifest: Path, registry: Path | None, *, min_skus: int = 20,
+    output_dir: Path,
+    manifest: Path,
+    registry: Path | None,
+    *,
+    min_skus: int = 20,
     purpose: Literal["technical_evaluation", "quality_acceptance"] = "quality_acceptance",
 ) -> dict:
     """Re-read all source and output pixels without loading ONNX or contacting network."""
@@ -453,8 +510,11 @@ def verify_cohort(
         raise CutoutCohortError("未知的运行用途")
     if purpose == "quality_acceptance" and registry is None:
         raise CutoutCohortError("正式验收需要独立的授权登记表")
-    source = (_technical_sources(Path(manifest), Path(registry) if registry else None, min_skus=min_skus)
-              if purpose == "technical_evaluation" else _sources(Path(manifest), Path(registry), min_skus=min_skus))
+    source = (
+        _technical_sources(Path(manifest), Path(registry) if registry else None, min_skus=min_skus)
+        if purpose == "technical_evaluation"
+        else _sources(Path(manifest), Path(registry), min_skus=min_skus)
+    )
     journal = out / "cutout_trial.json"
     if journal.is_symlink() or not journal.is_file():
         raise CutoutCohortError("本地模型运行账本缺失")
@@ -462,40 +522,56 @@ def verify_cohort(
         state = json.loads(journal.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CutoutCohortError("模型运行账本无效") from exc
-    if (state.get("schema_version") != SCHEMA or state.get("runner") != RUNNER
-            or state.get("source_manifest_sha256") != source["manifest_sha256"]
-            or (state.get("authorization_registry_sha256") != source["registry_sha256"]
-                and not (purpose == "quality_acceptance" and state.get("purpose") == "technical_evaluation"))
-            or state.get("cohort_id") != source["cohort_id"]
-            or state.get("expected_sku_ids") != [x["sku_id"] for x in source["prepared"]]
-            or not SHA.fullmatch(str(state.get("model_sha256", "")))
-            or state.get("model_runtime_attested") is not False
-            or state.get("independent_human_review_attested") is not False
-            or state.get("real_model_quality_verified") is not False
-            or state.get("status") != "COMPLETED"
-            or not isinstance(state.get("rows"), dict)
-            or set(state["rows"]) != set(state["expected_sku_ids"])):
+    if (
+        state.get("schema_version") != SCHEMA
+        or state.get("runner") != RUNNER
+        or state.get("source_manifest_sha256") != source["manifest_sha256"]
+        or (
+            state.get("authorization_registry_sha256") != source["registry_sha256"]
+            and not (
+                purpose == "quality_acceptance" and state.get("purpose") == "technical_evaluation"
+            )
+        )
+        or state.get("cohort_id") != source["cohort_id"]
+        or state.get("expected_sku_ids") != [x["sku_id"] for x in source["prepared"]]
+        or not SHA.fullmatch(str(state.get("model_sha256", "")))
+        or state.get("model_runtime_attested") is not False
+        or state.get("independent_human_review_attested") is not False
+        or state.get("real_model_quality_verified") is not False
+        or state.get("status") != "COMPLETED"
+        or not isinstance(state.get("rows"), dict)
+        or set(state["rows"]) != set(state["expected_sku_ids"])
+    ):
         raise CutoutCohortError("本地批次账本身份或完成状态无效")
     for item in source["prepared"]:
         sku = item["sku_id"]
         _check_done(out, item, state["rows"][sku])
         source_file = out / "source" / f"{sku}{item['product'].suffix.lower()}"
         original = item["product"].read_bytes()
-        if (source_file.is_symlink() or not source_file.is_file()
-                or source_file.read_bytes() != original):
+        if (
+            source_file.is_symlink()
+            or not source_file.is_file()
+            or source_file.read_bytes() != original
+        ):
             raise CutoutCohortError(f"{sku}: 导出的原始素材摘要不一致")
         if item["logo"] is not None:
             copy = out / "source" / f"{sku}-logo{item['logo'].suffix.lower()}"
-            if (copy.is_symlink() or not copy.is_file()
-                    or _sha(copy.read_bytes()) != item["logo_sha256"]):
+            if (
+                copy.is_symlink()
+                or not copy.is_file()
+                or _sha(copy.read_bytes()) != item["logo_sha256"]
+            ):
                 raise CutoutCohortError(f"{sku}: 导出的 Logo 素材摘要不一致")
     if (out / "manifest_with_cutouts.csv").is_symlink():
         raise CutoutCohortError("导出的清单为符号链接")
     # Verify is strictly read-only; missing exports stay missing and fail.
     exported = out / "manifest_with_cutouts.csv"
-    if (exported.is_symlink() or not exported.is_file()
-            or exported.read_bytes() != _manifest_bytes(source)
-            or state.get("export_manifest_sha256") != _sha(exported.read_bytes())):
+    if (
+        exported.is_symlink()
+        or not exported.is_file()
+        or exported.read_bytes() != _manifest_bytes(source)
+        or state.get("export_manifest_sha256") != _sha(exported.read_bytes())
+    ):
         raise CutoutCohortError("输出清单缺失、被替换或与批次账本不一致")
     try:
         _, exported_rows = preflight(exported)
@@ -513,11 +589,15 @@ def verify_cohort(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Local u2netp technical run; authorization is separate acceptance metadata")
+        description="Local u2netp technical run; authorization is separate acceptance metadata"
+    )
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--registry", type=Path)
-    parser.add_argument("--purpose", choices=("technical_evaluation", "quality_acceptance"),
-                        default="technical_evaluation")
+    parser.add_argument(
+        "--purpose",
+        choices=("technical_evaluation", "quality_acceptance"),
+        default="technical_evaluation",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
@@ -525,11 +605,16 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.verify:
-            result = verify_cohort(args.output_dir, args.manifest, args.registry, purpose=args.purpose)
+            result = verify_cohort(
+                args.output_dir, args.manifest, args.registry, purpose=args.purpose
+            )
         else:
             result = prepare_cohort(
-                args.manifest, args.registry, args.output_dir,
-                apply=args.apply, retry_failed=args.retry_failed,
+                args.manifest,
+                args.registry,
+                args.output_dir,
+                apply=args.apply,
+                retry_failed=args.retry_failed,
                 purpose=args.purpose,
             )
     except (OSError, ValueError, RuntimeError) as exc:

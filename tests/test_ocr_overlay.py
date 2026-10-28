@@ -2,15 +2,17 @@
 
 All OCR values here are MOCKED. No real PaddleOCR model is loaded in CI.
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
-from PIL import Image
-from fastapi.testclient import TestClient
 
-from app.main import app
+from fastapi.testclient import TestClient
+from PIL import Image
+
 from app import storage
+from app.main import app
 from app.ocr_overlay import MAX_DRAWN_BOXES, _valid_box
 
 client = TestClient(app)
@@ -22,9 +24,12 @@ def _make_poster(tmp_path, monkeypatch, product_bytes):
     response = client.post(
         "/api/posters",
         data={
-            "title": "双十一电动牙刷", "subtitle": "品质生活",
-            "price": "199", "original_price": "399",
-            "cta": "立即抢购", "background_mode": "local",
+            "title": "双十一电动牙刷",
+            "subtitle": "品质生活",
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即抢购",
+            "background_mode": "local",
         },
         files={"product": ("sku.png", product_bytes, "image/png")},
     )
@@ -42,11 +47,11 @@ def _overlay_url(pid, version=1, mode="paddle"):
 
 def _fake_ocr(_):
     return [
-        {"text": "双十一电动牙刷", "score": .98, "bbox": [80, 270, 425, 335]},
-        {"text": "¥199", "score": .99, "bbox": [75, 673, 289, 758]},
-        {"text": "原价 ¥399", "score": .98, "bbox": [77, 803, 343, 845]},
-        {"text": "立即抢购", "score": .97, "bbox": [90, 878, 373, 926]},
-        {"text": "品质生活", "score": .98, "bbox": [80, 378, 309, 409]},
+        {"text": "双十一电动牙刷", "score": 0.98, "bbox": [80, 270, 425, 335]},
+        {"text": "¥199", "score": 0.99, "bbox": [75, 673, 289, 758]},
+        {"text": "原价 ¥399", "score": 0.98, "bbox": [77, 803, 343, 845]},
+        {"text": "立即抢购", "score": 0.97, "bbox": [90, 878, 373, 926]},
+        {"text": "品质生活", "score": 0.98, "bbox": [80, 378, 309, 409]},
     ]
 
 
@@ -56,9 +61,11 @@ def test_overlay_requires_saved_report_and_never_runs_ocr(tmp_path, monkeypatch,
     monkeypatch.setattr("app.acceptance.recognize", _fake_ocr)
     response = client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"})
     assert response.status_code == 200, response.text
+
     # After report creation GET overlay MUST read only stored evidence.
     def fail_if_called(_):
         raise AssertionError("GET overlay must not execute OCR")
+
     monkeypatch.setattr("app.acceptance.recognize", fail_if_called)
     before_png = storage.version_path(pid, 1).read_bytes()
     response = client.get(_overlay_url(pid))
@@ -79,10 +86,11 @@ def test_overlay_requires_saved_report_and_never_runs_ocr(tmp_path, monkeypatch,
     assert not list(storage.poster_dir(pid).glob("**/*overlay*.png"))
 
 
-def test_offline_mode_overlay_marks_no_ocr_and_does_not_fake_boxes(tmp_path, monkeypatch, product_bytes):
+def test_offline_mode_overlay_marks_no_ocr_and_does_not_fake_boxes(
+    tmp_path, monkeypatch, product_bytes
+):
     pid = _make_poster(tmp_path, monkeypatch, product_bytes)
-    response = client.post(_report_url(pid, mode="none").split("?")[0],
-                           json={"ocr_mode": "none"})
+    response = client.post(_report_url(pid, mode="none").split("?")[0], json={"ocr_mode": "none"})
     assert response.status_code == 200
     result = client.get(_overlay_url(pid, mode="none"))
     assert result.status_code == 200
@@ -93,11 +101,16 @@ def test_offline_mode_overlay_marks_no_ocr_and_does_not_fake_boxes(tmp_path, mon
 
 def test_missing_ocr_boxes_remain_missing_not_inferred(tmp_path, monkeypatch, product_bytes):
     pid = _make_poster(tmp_path, monkeypatch, product_bytes)
-    monkeypatch.setattr("app.acceptance.recognize", lambda _: [
-        {"text": "¥199", "score": 0.99, "bbox": None},
-        {"text": "原价 ¥399", "score": 0.99, "bbox": [80, 809, 290, 837]},
-    ])
-    assert client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    monkeypatch.setattr(
+        "app.acceptance.recognize",
+        lambda _: [
+            {"text": "¥199", "score": 0.99, "bbox": None},
+            {"text": "原价 ¥399", "score": 0.99, "bbox": [80, 809, 290, 837]},
+        ],
+    )
+    assert (
+        client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    )
     response = client.get(_overlay_url(pid))
     assert response.status_code == 200
     assert response.headers["x-ocr-boxes-drawn"] == "1"
@@ -107,7 +120,9 @@ def test_missing_ocr_boxes_remain_missing_not_inferred(tmp_path, monkeypatch, pr
 def test_overlay_rejects_tampered_image_and_spec_hashes(tmp_path, monkeypatch, product_bytes):
     pid = _make_poster(tmp_path, monkeypatch, product_bytes)
     monkeypatch.setattr("app.acceptance.recognize", _fake_ocr)
-    assert client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    assert (
+        client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    )
 
     img_path = storage.version_path(pid, 1)
     source = img_path.read_bytes()
@@ -141,13 +156,17 @@ def test_invalid_bbox_and_input_limits_are_explicit():
 def test_overlay_different_versions_use_correct_png(tmp_path, monkeypatch, product_bytes):
     pid = _make_poster(tmp_path, monkeypatch, product_bytes)
     monkeypatch.setattr("app.acceptance.recognize", _fake_ocr)
-    assert client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    assert (
+        client.post(_report_url(pid).split("?")[0], json={"ocr_mode": "paddle"}).status_code == 200
+    )
     response = client.post(f"/api/posters/{pid}/revisions", json={"price": "189"})
     assert response.status_code == 201
     assert client.get(_overlay_url(pid, 2)).status_code == 404
     assert client.get(_overlay_url(pid, 1)).status_code == 200
-    assert client.post(_report_url(pid, 2).split("?")[0],
-                       json={"ocr_mode": "paddle"}).status_code == 200
+    assert (
+        client.post(_report_url(pid, 2).split("?")[0], json={"ocr_mode": "paddle"}).status_code
+        == 200
+    )
     first, second = client.get(_overlay_url(pid, 1)), client.get(_overlay_url(pid, 2))
     assert first.headers["x-source-image-sha256"] != second.headers["x-source-image-sha256"]
     assert first.content != second.content

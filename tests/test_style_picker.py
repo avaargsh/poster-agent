@@ -1,10 +1,11 @@
 """M5n local style picker: free presets reuse the existing form/API contract."""
-from fastapi.testclient import TestClient
-from PIL import Image
+
 from io import BytesIO
 
-from app.main import app
+from fastapi.testclient import TestClient
+from PIL import Image
 
+from app.main import app
 
 client = TestClient(app)
 
@@ -19,7 +20,7 @@ def test_style_picker_is_accessible_and_keeps_manual_style_input():
     assert 'role="group" aria-labelledby="stylePresetLabel"' in html
     assert 'aria-pressed="true"' in html
     assert 'name="style" maxlength="80"' in html
-    assert 'syncStylePresetPicker();' in html
+    assert "syncStylePresetPicker();" in html
     assert "activeReviewRunId && activeReviewApproved" in html
 
 
@@ -37,8 +38,7 @@ def test_new_local_presets_create_distinct_real_pngs_without_ai(
         response = client.post(
             "/api/posters",
             files={"product": ("sku.png", product_bytes, "image/png")},
-            data={"title": "新品特惠", "price": "199", "style": style,
-                  "background_mode": "local"},
+            data={"title": "新品特惠", "price": "199", "style": style, "background_mode": "local"},
         )
         assert response.status_code == 201, response.text
         poster = response.json()

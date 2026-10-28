@@ -1,4 +1,5 @@
 """Read-only channel PNG exports: M4a safe-scaled, M4b native 4:5."""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +9,7 @@ from fastapi.responses import Response
 
 from app import storage
 from app.channel_exports import PRESETS, render_variant
-from app.native_layout import WIDTH, HEIGHT, render_native_feed, render_native_product_focus
+from app.native_layout import HEIGHT, WIDTH, render_native_feed, render_native_product_focus
 from app.schemas import PosterSpec
 
 router = APIRouter(prefix="/api/posters", tags=["channel-exports"])
@@ -35,8 +36,11 @@ def list_channel_exports(poster_id: str, version: int):
         "automatically_accepted": False,
         "formats": [
             {
-                "id": key, "width": size[0], "height": size[1],
-                "mode": "contain", "reflows_text": False,
+                "id": key,
+                "width": size[0],
+                "height": size[1],
+                "mode": "contain",
+                "reflows_text": False,
                 "url": f"/api/posters/{poster_id}/versions/{version}/exports/{key}",
             }
             for key, size in PRESETS.items()
@@ -44,8 +48,11 @@ def list_channel_exports(poster_id: str, version: int):
         # Native formats are separate so old clients retain their M4a contract.
         "native_formats": [
             {
-                "id": key, "width": WIDTH, "height": HEIGHT,
-                "mode": "native_layout", "reflows_text": True,
+                "id": key,
+                "width": WIDTH,
+                "height": HEIGHT,
+                "mode": "native_layout",
+                "reflows_text": True,
                 "automatically_accepted": False,
                 "layout_template": template,
                 "url": f"/api/posters/{poster_id}/versions/{version}/exports/{key}",
@@ -73,9 +80,7 @@ def download_channel_export(poster_id: str, version: int, preset: str):
             if preset == NATIVE_ID:
                 result_png = render_native_feed(spec, product, logo, background)
             else:
-                result_png = render_native_product_focus(
-                    spec, product, logo, background
-                )
+                result_png = render_native_product_focus(spec, product, logo, background)
             width, height = WIDTH, HEIGHT
             source_hash = hashlib.sha256(source).hexdigest()
             export_mode = "native_layout"

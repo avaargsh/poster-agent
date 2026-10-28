@@ -1,6 +1,8 @@
 """自然语言 Brief 编译 API。用户必须在原有创建表单中确认并提交。"""
+
 from fastapi import APIRouter, HTTPException
-from app.brief_compiler import BriefRequest, BriefCompilerError
+
+from app.brief_compiler import BriefCompilerError, BriefRequest
 from app.workflows.brief_graph import brief_graph
 
 router = APIRouter(prefix="/api/briefs", tags=["briefs"])

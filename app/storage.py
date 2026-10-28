@@ -5,6 +5,7 @@ files. New posters are assembled in a hidden staging directory and published wit
 a same-filesystem directory rename only after every required file is complete.
 This is not a multi-process or production object-store implementation.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -205,7 +206,8 @@ def read_assets(poster_id: str) -> tuple[Image.Image, Image.Image | None, Image.
 
 
 def read_assets_for_spec(
-    poster_id: str, spec: PosterSpec,
+    poster_id: str,
+    spec: PosterSpec,
 ) -> tuple[Image.Image, Image.Image | None, Image.Image]:
     """Select the foreground bound to this exact immutable version's spec."""
     product, logo, background = read_assets(poster_id)
@@ -319,23 +321,23 @@ def find_completed_execution(key: str, request_hash: str) -> dict | None:
                     or hashlib.sha256(file.read_bytes()).hexdigest() != digest
                 ):
                     return None
-            spec = PosterSpec.model_validate(
-                json.loads(files["spec"].read_text(encoding="utf-8"))
-            )
+            spec = PosterSpec.model_validate(json.loads(files["spec"].read_text(encoding="utf-8")))
             if spec.background_mode != meta.get("background_mode"):
                 return None
             # Rebuild the result from the verified directory only. Calling
             # view() would re-read metadata and spec after verification, leaving
             # a time-of-check/time-of-use gap for concurrent file changes.
-            matches.append({
-                "poster_id": poster_id,
-                "version": 1,
-                "spec": spec.model_dump(mode="json"),
-                "image_url": f"/api/posters/{poster_id}/versions/1/image",
-                "versions": [1],
-                "background_mode": meta["background_mode"],
-                "product_cutout_available": "product_cutout" in files,
-            })
+            matches.append(
+                {
+                    "poster_id": poster_id,
+                    "version": 1,
+                    "spec": spec.model_dump(mode="json"),
+                    "image_url": f"/api/posters/{poster_id}/versions/1/image",
+                    "versions": [1],
+                    "background_mode": meta["background_mode"],
+                    "product_cutout_available": "product_cutout" in files,
+                }
+            )
             if len(matches) > 1:
                 return None
         except (OSError, ValueError, TypeError, KeyError):

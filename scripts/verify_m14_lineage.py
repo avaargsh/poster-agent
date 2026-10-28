@@ -5,10 +5,10 @@ source and candidate bytes, saved poster v1 receipt, review image and export.
 A successful result proves local consistency of untrusted observations only:
 it never grants publishing rights, model runtime attestation or human approval.
 """
+
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import io
 import json
@@ -68,8 +68,13 @@ def _m6_review_rows(package: Path, expected: dict[str, str], cohort: str):
 
 
 def verify_lineage(
-    trial_dir: Path, source_manifest: Path, registry: Path,
-    m5g_journal: Path, m6_package: Path, *, min_skus: int = 20,
+    trial_dir: Path,
+    source_manifest: Path,
+    registry: Path,
+    m5g_journal: Path,
+    m6_package: Path,
+    *,
+    min_skus: int = 20,
 ) -> dict:
     """Cross-check all three frozen stages without writing files or running models."""
     trial_dir = Path(trial_dir)
@@ -79,16 +84,12 @@ def verify_lineage(
         raise LineageError("M14 或 M6 来源目录不存在或为符号链接")
     try:
         trial = verify_cohort(trial_dir, source_manifest, registry, min_skus=min_skus)
-        cutout_m6 = verify_cutout_evidence(
-            m6_package, m5g_journal, min_skus=min_skus
-        )
+        cutout_m6 = verify_cutout_evidence(m6_package, m5g_journal, min_skus=min_skus)
         trial_journal_raw = _bytes(trial_dir / "cutout_trial.json", 2 * 1024 * 1024)
         trial_journal = json.loads(trial_journal_raw)
         m5g_raw = _bytes(m5g_journal, 2 * 1024 * 1024)
         batch = json.loads(m5g_raw)
-        m6_summary = json.loads(_bytes(
-            m6_package / "m6_preparation.json", 2 * 1024 * 1024
-        ))
+        m6_summary = json.loads(_bytes(m6_package / "m6_preparation.json", 2 * 1024 * 1024))
         exported = trial_dir / "manifest_with_cutouts.csv"
         exported_raw = _bytes(exported, 2 * 1024 * 1024)
         _, staged_items = preflight(exported)
@@ -97,18 +98,20 @@ def verify_lineage(
             raise
         raise LineageError("M14、M5g 或 M6 来源验证失败：" + str(exc)) from exc
 
-    if (trial["status"] != "RECORDED_UNATTESTED"
-            or batch.get("schema_version") != "m5g-1"
-            or batch.get("mode") != "apply"
-            or batch.get("completed") is not True
-            or batch.get("manifest_sha256") != _sha(exported_raw)
-            or batch.get("expected_sku_ids") != trial_journal["expected_sku_ids"]
-            or batch.get("expected_sku_count") != len(staged_items)
-            or set(batch.get("rows", {})) != {x["sku_id"] for x in staged_items}
-            or m6_summary.get("source_batch_journal_sha256") != _sha(m5g_raw)
-            or m6_summary.get("source_manifest_sha256") != _sha(exported_raw)
-            or cutout_m6["candidate_count"] != len(staged_items)
-            or cutout_m6["batch_sku_count"] != len(staged_items)):
+    if (
+        trial["status"] != "RECORDED_UNATTESTED"
+        or batch.get("schema_version") != "m5g-1"
+        or batch.get("mode") != "apply"
+        or batch.get("completed") is not True
+        or batch.get("manifest_sha256") != _sha(exported_raw)
+        or batch.get("expected_sku_ids") != trial_journal["expected_sku_ids"]
+        or batch.get("expected_sku_count") != len(staged_items)
+        or set(batch.get("rows", {})) != {x["sku_id"] for x in staged_items}
+        or m6_summary.get("source_batch_journal_sha256") != _sha(m5g_raw)
+        or m6_summary.get("source_manifest_sha256") != _sha(exported_raw)
+        or cutout_m6["candidate_count"] != len(staged_items)
+        or cutout_m6["batch_sku_count"] != len(staged_items)
+    ):
         raise LineageError("M14 导出清单与 M5g 批次或 M6 cohort 来源不一致")
     expected = {sku: item["poster_id"] for sku, item in batch["rows"].items()}
     cohort = cutout_m6["cohort_id"]
@@ -120,21 +123,27 @@ def verify_lineage(
         record = batch["rows"][sku]
         trail = trial_journal["rows"].get(sku)
         pid = record["poster_id"]
-        if (not isinstance(trail, dict) or trail.get("status") != "COMPLETED"
-                or not item["cutout"] or record.get("version") != 1
-                or record.get("request_sha256") != item["request_sha256"]
-                or record.get("product_sha256") != item["product_sha256"]
-                or record.get("product_cutout_sha256") != item["cutout_sha256"]
-                or trail.get("source_sha256") != item["product_sha256"]
-                or trail.get("output_sha256") != item["cutout_sha256"]
-                or trail.get("model_sha256") != trial_journal["model_sha256"]):
+        if (
+            not isinstance(trail, dict)
+            or trail.get("status") != "COMPLETED"
+            or not item["cutout"]
+            or record.get("version") != 1
+            or record.get("request_sha256") != item["request_sha256"]
+            or record.get("product_sha256") != item["product_sha256"]
+            or record.get("product_cutout_sha256") != item["cutout_sha256"]
+            or trail.get("source_sha256") != item["product_sha256"]
+            or trail.get("output_sha256") != item["cutout_sha256"]
+            or trail.get("model_sha256") != trial_journal["model_sha256"]
+        ):
             raise LineageError(f"{sku}: M14 来源抠图与 M5g 批次账本不一致")
         try:
             verify_batch_artifact(pid, record)
             latest_source = storage.poster_dir(pid) / "assets" / "product.png"
             latest_cutout = storage.poster_dir(pid) / "assets" / "product_cutout.png"
-            if (_sha(_bytes(latest_source)) != trail["normalized_source_sha256"]
-                    or _sha(_bytes(latest_cutout)) != trail["output_sha256"]):
+            if (
+                _sha(_bytes(latest_source)) != trail["normalized_source_sha256"]
+                or _sha(_bytes(latest_cutout)) != trail["output_sha256"]
+            ):
                 raise LineageError(f"{sku}: M5g 已保存素材与本地 ONNX 试验哈希不一致")
         except (OSError, ValueError) as exc:
             if isinstance(exc, LineageError):
@@ -142,25 +151,27 @@ def verify_lineage(
             raise LineageError(f"{sku}: M5g 已保存海报和执行凭据校验失败") from exc
 
         pinned_square_sha = _sha(_bytes(storage.version_path(pid, 1)))
-        pinned_spec_sha = _sha(_bytes(
-            storage.poster_dir(pid) / "versions" / "v1.json", 2 * 1024 * 1024
-        ))
+        pinned_spec_sha = _sha(
+            _bytes(storage.poster_dir(pid) / "versions" / "v1.json", 2 * 1024 * 1024)
+        )
         for variant, suffix, dims in (
             ("square", "square", (1024, 1024)),
             ("feed_4x5_native", "native-4x5", (1080, 1350)),
         ):
             row = by_key[(sku, variant)]
             name = f"images/{sku}-{suffix}.png"
-            if (row["cohort_id"] != cohort
-                    or row["poster_id"] != pid
-                    or row["source_version"] != "1"
-                    or row["source_product_sha256"] != record["product_sha256"]
-                    or row["request_sha256"] != record["request_sha256"]
-                    or row["spec_sha256"] != pinned_spec_sha
-                    or row["source_square_image_sha256"] != pinned_square_sha
-                    or row["output_image_path"] != name
-                    or not row["output_image_sha256"]
-                    or row["overall_accept"] not in ("PASS", "FAIL", "UNVERIFIED")):
+            if (
+                row["cohort_id"] != cohort
+                or row["poster_id"] != pid
+                or row["source_version"] != "1"
+                or row["source_product_sha256"] != record["product_sha256"]
+                or row["request_sha256"] != record["request_sha256"]
+                or row["spec_sha256"] != pinned_spec_sha
+                or row["source_square_image_sha256"] != pinned_square_sha
+                or row["output_image_path"] != name
+                or not row["output_image_sha256"]
+                or row["overall_accept"] not in ("PASS", "FAIL", "UNVERIFIED")
+            ):
                 raise LineageError(f"{sku}: M6 {variant} 版式来源或审核标签无效")
             _png(m6_package / name, dims, row["output_image_sha256"])
             # Compare against immutable underlying render/export bytes, not
@@ -174,21 +185,26 @@ def verify_lineage(
                 expected_bytes = response.body
             if _sha(expected_bytes) != row["output_image_sha256"]:
                 raise LineageError(f"{sku}: M6 {variant} 图片被替换或与冻结渲染不一致")
-        pairs.append({
-            "sku_id": sku, "poster_id": pid, "version": 1,
-            "source_sha256": item["product_sha256"],
-            "cutout_sha256": item["cutout_sha256"],
-            "model_sha256": trial_journal["model_sha256"],
-            "source_matched": True, "cutout_matched": True,
-            "m6_review_images_matched": True,
-        })
+        pairs.append(
+            {
+                "sku_id": sku,
+                "poster_id": pid,
+                "version": 1,
+                "source_sha256": item["product_sha256"],
+                "cutout_sha256": item["cutout_sha256"],
+                "model_sha256": trial_journal["model_sha256"],
+                "source_matched": True,
+                "cutout_matched": True,
+                "m6_review_images_matched": True,
+            }
+        )
 
     status = (
         "LINEAGE_VERIFIED_REVIEW_PENDING"
-        if cutout_m6["status"] == "HUMAN_REVIEW_REQUIRED" else
-        "LINEAGE_VERIFIED_OPERATOR_ASSERTED"
-        if cutout_m6["status"] == "OPERATOR_ASSERTED_NOT_ATTESTED" else
-        "LINEAGE_VERIFIED_OPERATOR_REJECTED"
+        if cutout_m6["status"] == "HUMAN_REVIEW_REQUIRED"
+        else "LINEAGE_VERIFIED_OPERATOR_ASSERTED"
+        if cutout_m6["status"] == "OPERATOR_ASSERTED_NOT_ATTESTED"
+        else "LINEAGE_VERIFIED_OPERATOR_REJECTED"
     )
     return {
         "schema_version": SCHEMA,
@@ -221,8 +237,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = verify_lineage(
-            args.trial_dir, args.source_manifest, args.registry,
-            args.m5g_journal, args.m6_package,
+            args.trial_dir,
+            args.source_manifest,
+            args.registry,
+            args.m5g_journal,
+            args.m6_package,
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.exit(2, f"M14→M5g→M6 证据链验证失败：{exc}\n")

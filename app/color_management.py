@@ -4,6 +4,7 @@ When a source includes a valid ICC profile, convert its pixel values to the
 standard sRGB working space BEFORE discarding all embedded metadata. Do not
 silently ignore malformed or unsupported profiles.
 """
+
 from __future__ import annotations
 
 import io
@@ -40,18 +41,14 @@ def normalize_upload_color(oriented: Image.Image, icc: bytes | None) -> Image.Im
         if oriented.mode == "CMYK":
             # CMYK JPEG requires a proper CMYK ICC → RGB transform. Calling
             # plain .convert('RGB') first would reinterpret CMYK incorrectly.
-            converted = ImageCms.profileToProfile(
-                oriented, source, srgb, outputMode="RGB"
-            )
+            converted = ImageCms.profileToProfile(oriented, source, srgb, outputMode="RGB")
             output = converted.convert("RGBA")
         else:
             rgba = oriented.convert("RGBA")
             alpha = rgba.getchannel("A")
             # Transform only RGB channels. This prevents LittleCMS/Pillow from
             # modifying alpha and supports transparent PNG/WebP assets.
-            rgb = ImageCms.profileToProfile(
-                rgba.convert("RGB"), source, srgb, outputMode="RGB"
-            )
+            rgb = ImageCms.profileToProfile(rgba.convert("RGB"), source, srgb, outputMode="RGB")
             output = rgb.convert("RGBA")
             output.putalpha(alpha)
         output.info.clear()

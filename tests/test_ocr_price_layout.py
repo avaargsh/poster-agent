@@ -1,4 +1,5 @@
 """M3e spatial-price regressions: OCR boxes are MOCKS, not PaddleOCR measurements."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -11,8 +12,7 @@ client = TestClient(app)
 
 
 def make_spec(original="399"):
-    return PosterSpec(title="双十一限时优惠", price="199",
-                      original_price=original, cta="立即抢购")
+    return PosterSpec(title="双十一限时优惠", price="199", original_price=original, cta="立即抢购")
 
 
 def line(text, bbox, score=0.99):
@@ -38,10 +38,12 @@ def test_correct_amounts_in_correct_regions_pass():
 
 
 def test_swapped_prices_fail_even_if_global_text_checks_would_pass():
-    data = checks([
-        line("¥399", [75, 672, 280, 752]),
-        line("原价 ¥199", [77, 802, 330, 836]),
-    ])
+    data = checks(
+        [
+            line("¥399", [75, 672, 280, 752]),
+            line("原价 ¥199", [77, 802, 330, 836]),
+        ]
+    )
     assert data["ocr_price_position"]["status"] == "FAIL"
     assert data["ocr_original_price_position"]["status"] == "FAIL"
 
@@ -94,19 +96,27 @@ def test_acceptance_gate_blocks_swapped_money_coordinates(tmp_path, monkeypatch,
     created = client.post(
         "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "双十一限时优惠", "price": "199",
-              "original_price": "399", "cta": "立即抢购", "background_mode": "local"},
+        data={
+            "title": "双十一限时优惠",
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即抢购",
+            "background_mode": "local",
+        },
     )
     assert created.status_code == 201, created.text
     poster_id = created.json()["poster_id"]
 
     # These fake OCR strings include BOTH correct prices but in the WRONG regions.
-    monkeypatch.setattr("app.acceptance.recognize", lambda image_path: [
-        line("双十一限时优惠", [75, 270, 415, 340]),
-        line("¥399", [75, 672, 280, 752]),
-        line("原价 ¥199", [77, 802, 330, 836]),
-        line("立即抢购", [78, 880, 380, 930]),
-    ])
+    monkeypatch.setattr(
+        "app.acceptance.recognize",
+        lambda image_path: [
+            line("双十一限时优惠", [75, 270, 415, 340]),
+            line("¥399", [75, 672, 280, 752]),
+            line("原价 ¥199", [77, 802, 330, 836]),
+            line("立即抢购", [78, 880, 380, 930]),
+        ],
+    )
     result = client.post(
         f"/api/posters/{poster_id}/versions/1/acceptance",
         json={"ocr_mode": "paddle"},
@@ -122,29 +132,43 @@ def test_acceptance_gate_blocks_swapped_money_coordinates(tmp_path, monkeypatch,
     assert report["verdict"] == "BLOCKED"
 
 
-def test_acceptance_gate_requires_box_evidence_for_complete_pass(tmp_path, monkeypatch, product_bytes):
+def test_acceptance_gate_requires_box_evidence_for_complete_pass(
+    tmp_path, monkeypatch, product_bytes
+):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     brand = tmp_path / "brand.json"
     brand.write_text('{"forbidden_terms":[]}', encoding="utf-8")
     monkeypatch.setenv("POSTER_BRAND_RULES_FILE", str(brand))
-    created = client.post("/api/posters",
-        files={"product": ("sku.png", product_bytes, "image/png"),
-               "logo": ("logo.png", product_bytes, "image/png")},
-        data={"title": "双十一限时优惠", "price": "199",
-              "original_price": "399", "cta": "立即抢购",
-              "subtitle": "", "background_mode": "local"})
+    created = client.post(
+        "/api/posters",
+        files={
+            "product": ("sku.png", product_bytes, "image/png"),
+            "logo": ("logo.png", product_bytes, "image/png"),
+        },
+        data={
+            "title": "双十一限时优惠",
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即抢购",
+            "subtitle": "",
+            "background_mode": "local",
+        },
+    )
     assert created.status_code == 201, created.text
     poster_id = created.json()["poster_id"]
-    monkeypatch.setattr("app.acceptance.recognize", lambda _: [
-        {"text": "双十一限时优惠", "score": .99},
-        {"text": "¥199", "score": .99},
-        {"text": "¥399", "score": .99},
-        {"text": "立即抢购", "score": .99},
-        {"text": "品质生活 · 限时优惠", "score": .99},
-    ])
+    monkeypatch.setattr(
+        "app.acceptance.recognize",
+        lambda _: [
+            {"text": "双十一限时优惠", "score": 0.99},
+            {"text": "¥199", "score": 0.99},
+            {"text": "¥399", "score": 0.99},
+            {"text": "立即抢购", "score": 0.99},
+            {"text": "品质生活 · 限时优惠", "score": 0.99},
+        ],
+    )
     report = client.post(
-        f"/api/posters/{poster_id}/versions/1/acceptance",
-        json={"ocr_mode": "paddle"}).json()
+        f"/api/posters/{poster_id}/versions/1/acceptance", json={"ocr_mode": "paddle"}
+    ).json()
     assert report["auto_checks"] == "INCOMPLETE"
     assert report["verdict"] == "REVIEW_REQUIRED"
     statuses = {c["name"]: c["status"] for c in report["checks"]}

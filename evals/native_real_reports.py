@@ -4,6 +4,7 @@ No model is invoked. Positive class = a human-reported defective field.
 An OCR position check is required for price fields, and UNVERIFIED remains
 abstention. Visual-only human reviews are descriptive, NOT OCR predictions.
 """
+
 from __future__ import annotations
 
 import csv
@@ -14,19 +15,31 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app import storage
-from app.native_acceptance import (
-    NATIVE_VARIANTS, VARIANT, NativeVariant, StaleNativeEvidence, verified_report,
-)
-from app.native_human_reviews import VISUAL_FIELDS, CORE_FIELDS, OPTIONAL_FIELDS
 from app.human_annotations import REVIEWER_PATTERN, VALID_ID
+from app.native_acceptance import (
+    NATIVE_VARIANTS,
+    VARIANT,
+    NativeVariant,
+    StaleNativeEvidence,
+    verified_report,
+)
+from app.native_human_reviews import CORE_FIELDS, OPTIONAL_FIELDS, VISUAL_FIELDS
 from evals.benchmark import _classification, metrics
 
 OCR_FIELDS = frozenset((*CORE_FIELDS, *OPTIONAL_FIELDS))
 VISUAL = frozenset(VISUAL_FIELDS)
-REQUIRED = frozenset({
-    "poster_id", "version", "variant_id", "field", "defective",
-    "image_sha256", "source_image_sha256", "reviewer",
-})
+REQUIRED = frozenset(
+    {
+        "poster_id",
+        "version",
+        "variant_id",
+        "field",
+        "defective",
+        "image_sha256",
+        "source_image_sha256",
+        "reviewer",
+    }
+)
 DIGEST = re.compile(r"^[a-f0-9]{64}$")
 
 
@@ -64,12 +77,18 @@ def read_native_labels(path: Path, *, variant: NativeVariant = VARIANT) -> list[
                     raise ValueError("duplicate labeled field")
                 seen.add(identity)
                 reviewers.add(reviewer)
-                records.append({
-                    "poster_id": poster_id, "version": version, "variant_id": row_variant,
-                    "field": field, "defective": defective == "true",
-                    "image_sha256": image_sha, "source_image_sha256": source_sha,
-                    "reviewer": reviewer,
-                })
+                records.append(
+                    {
+                        "poster_id": poster_id,
+                        "version": version,
+                        "variant_id": row_variant,
+                        "field": field,
+                        "defective": defective == "true",
+                        "image_sha256": image_sha,
+                        "source_image_sha256": source_sha,
+                        "reviewer": reviewer,
+                    }
+                )
             except (ValueError, TypeError, AttributeError, KeyError) as exc:
                 raise ValueError(f"原生 4:5 CSV 第 {line_number} 行无效") from exc
     if not records:
@@ -94,7 +113,10 @@ def _text_prediction(field: str, checks: dict[str, str]) -> str:
 
 
 def evaluate_native_reports(
-    annotations: Path, output_dir: Path, *, variant: NativeVariant = VARIANT,
+    annotations: Path,
+    output_dir: Path,
+    *,
+    variant: NativeVariant = VARIANT,
 ) -> dict:
     records = read_native_labels(annotations, variant=variant)
     # Validate and collect EVERYTHING before creating any result artifacts.
@@ -109,10 +131,15 @@ def evaluate_native_reports(
             try:
                 report = verified_report(pid, version, "paddle", variant=variant)
             except (FileNotFoundError, StaleNativeEvidence, ValueError, OSError) as exc:
-                raise ValueError(f"{pid} v{version}: 缺少有效且未过期的原生 PaddleOCR 验收报告") from exc
+                raise ValueError(
+                    f"{pid} v{version}: 缺少有效且未过期的原生 PaddleOCR 验收报告"
+                ) from exc
             if report.get("ocr_status") != "OK" or report.get("ocr_mode") != "paddle":
                 raise ValueError(f"{pid} v{version}: OCR 未成功执行，拒绝生成准确率指标")
-            if report.get("variant_id") != variant or report.get("image_dimensions") != [1080, 1350]:
+            if report.get("variant_id") != variant or report.get("image_dimensions") != [
+                1080,
+                1350,
+            ]:
                 raise ValueError(f"{pid} v{version}: 不是原生 1080×1350 的验收报告")
             checks_list = report.get("checks")
             if not isinstance(checks_list, list):
@@ -125,8 +152,9 @@ def evaluate_native_reports(
                 check_status[name] = status
             report_cache[key] = (report, check_status)
         report, checks = report_cache[key]
-        if (record["image_sha256"] != report.get("native_image_sha256")
-                or record["source_image_sha256"] != report.get("source_image_sha256")):
+        if record["image_sha256"] != report.get("native_image_sha256") or record[
+            "source_image_sha256"
+        ] != report.get("source_image_sha256"):
             raise ValueError(f"{pid} v{version}: 人工标注与原生导出/原方图摘要不一致")
         if field in VISUAL:
             visual_counts[field]["defective" if record["defective"] else "correct"] += 1
@@ -134,15 +162,20 @@ def evaluate_native_reports(
             continue
 
         predicted = _text_prediction(field, checks)
-        rows.append({
-            "poster_id": pid, "version": version, "variant_id": variant,
-            "field": field, "reviewer": record["reviewer"],
-            "ground_truth_defective": record["defective"],
-            "prediction": predicted,
-            "outcome": _classification(predicted, record["defective"]),
-            "image_sha256": record["image_sha256"],
-            "source_image_sha256": record["source_image_sha256"],
-        })
+        rows.append(
+            {
+                "poster_id": pid,
+                "version": version,
+                "variant_id": variant,
+                "field": field,
+                "reviewer": record["reviewer"],
+                "ground_truth_defective": record["defective"],
+                "prediction": predicted,
+                "outcome": _classification(predicted, record["defective"]),
+                "image_sha256": record["image_sha256"],
+                "source_image_sha256": record["source_image_sha256"],
+            }
+        )
 
     if not rows:
         raise ValueError("缺少可评测的 OCR 文本字段标签；视觉字段不能冒充 OCR 指标")
@@ -187,8 +220,11 @@ def evaluate_native_reports(
         },
         "source_report_sha256": {
             f"{pid}:v{version}": hashlib.sha256(
-                (storage.poster_dir(pid) / "versions"
-                 / f"v{version}.{variant}.acceptance.paddle.json").read_bytes()
+                (
+                    storage.poster_dir(pid)
+                    / "versions"
+                    / f"v{version}.{variant}.acceptance.paddle.json"
+                ).read_bytes()
             ).hexdigest()
             for pid, version in sorted(report_cache)
         },

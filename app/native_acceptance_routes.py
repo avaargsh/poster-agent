@@ -1,4 +1,5 @@
 """Separate quality reports for native 4:5 derivatives, without paid image API calls."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,11 @@ from pydantic import BaseModel
 
 from app import storage
 from app.native_acceptance import (
-    NativeVariant, StaleNativeEvidence, evaluate_native, report_path, verified_report,
+    NativeVariant,
+    StaleNativeEvidence,
+    evaluate_native,
+    report_path,
+    verified_report,
 )
 
 router = APIRouter(prefix="/api/posters", tags=["native-quality"])
@@ -21,24 +26,29 @@ class NativeQualityOptions(BaseModel):
 
 @router.post("/{poster_id}/versions/{version}/exports/{variant}/acceptance")
 def run_native_acceptance(
-    poster_id: str, version: int, variant: NativeVariant, options: NativeQualityOptions,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant,
+    options: NativeQualityOptions,
 ):
     try:
         report = evaluate_native(poster_id, version, options.ocr_mode, variant)
         with storage.LOCK:
-            storage._atomic_json(
-                report_path(poster_id, version, options.ocr_mode, variant), report
-            )
+            storage._atomic_json(report_path(poster_id, version, options.ocr_mode, variant), report)
         return report
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="海报或版本不存在") from exc
     except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="无法完成原生 4:5 验收，请检查源素材和布局配置") from exc
+        raise HTTPException(
+            status_code=422, detail="无法完成原生 4:5 验收，请检查源素材和布局配置"
+        ) from exc
 
 
 @router.get("/{poster_id}/versions/{version}/exports/{variant}/acceptance")
 def read_native_acceptance(
-    poster_id: str, version: int, variant: NativeVariant,
+    poster_id: str,
+    version: int,
+    variant: NativeVariant,
     ocr_mode: Literal["none", "paddle"] = "none",
 ):
     try:

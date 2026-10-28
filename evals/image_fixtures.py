@@ -7,6 +7,7 @@ For each image, the expected_spec represents the campaign's intended copy;
 the rendered spec deliberately differs in selected fields. Ground truth is
 derived from those deterministic input differences, never from an OCR guess.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,7 +51,8 @@ class ImageManifest(BaseModel):
             if Path(case.image_file).name != case.image_file:
                 raise ValueError("Image paths must be basenames")
             derived_labels = [
-                field for field in self.target_fields
+                field
+                for field in self.target_fields
                 if getattr(case.rendered_spec, field) != getattr(self.expected_spec, field)
             ]
             if derived_labels != case.truth_defects:
@@ -59,8 +61,13 @@ class ImageManifest(BaseModel):
 
 
 EXPECTED = PosterSpec(
-    title="双十一优惠", subtitle="", price="199", original_price=None,
-    cta="立即抢购", style="蓝色科技风", background_mode="local",
+    title="双十一优惠",
+    subtitle="",
+    price="199",
+    original_price=None,
+    cta="立即抢购",
+    style="蓝色科技风",
+    background_mode="local",
 )
 
 
@@ -102,8 +109,9 @@ def make_product() -> Image.Image:
     """Locally generated illustrative toy SKU, not any actual brand."""
     product = Image.new("RGBA", (500, 680), (0, 0, 0, 0))
     draw = ImageDraw.Draw(product)
-    draw.rounded_rectangle((170, 28, 325, 591), radius=52,
-                           fill="#DFEDF7", outline="#83A9C7", width=9)
+    draw.rounded_rectangle(
+        (170, 28, 325, 591), radius=52, fill="#DFEDF7", outline="#83A9C7", width=9
+    )
     draw.rounded_rectangle((205, 80, 291, 101), radius=10, fill="#2A8CB8")
     draw.ellipse((230, 230, 263, 265), fill="#A5C7D9")
     draw.rounded_rectangle((227, 580, 269, 653), radius=16, fill="#8AB9CF")
@@ -124,26 +132,34 @@ def generate_fixture_set(output_dir: Path) -> Path:
     logo = make_logo()
     cases: list[ImageFixture] = []
     for scenario in SCENARIOS:
-        rendered = EXPECTED.model_copy(update={
-            "title": scenario.title,
-            "price": EXPECTED.price.__class__(scenario.price),
-            "cta": scenario.cta,
-            "style": scenario.style,
-        })
+        rendered = EXPECTED.model_copy(
+            update={
+                "title": scenario.title,
+                "price": EXPECTED.price.__class__(scenario.price),
+                "cta": scenario.cta,
+                "style": scenario.style,
+            }
+        )
         # A new validated spec, so mistakes in authored scenario data fail early.
         rendered = PosterSpec.model_validate(rendered.model_dump())
         truth = [
-            field for field in ("title", "price", "cta")
+            field
+            for field in ("title", "price", "cta")
             if getattr(rendered, field) != getattr(EXPECTED, field)
         ]
         png = compose(rendered, product, logo, local_background(rendered.style))
         image_file = scenario.name + ".png"
         (output_dir / image_file).write_bytes(png)
-        cases.append(ImageFixture(
-            case_id=scenario.name, category=scenario.category, image_file=image_file,
-            image_sha256=hashlib.sha256(png).hexdigest(),
-            rendered_spec=rendered, truth_defects=truth,
-        ))
+        cases.append(
+            ImageFixture(
+                case_id=scenario.name,
+                category=scenario.category,
+                image_file=image_file,
+                image_sha256=hashlib.sha256(png).hexdigest(),
+                rendered_spec=rendered,
+                truth_defects=truth,
+            )
+        )
     manifest = ImageManifest(
         dataset_id="m3b_rendered_image_fixtures_v1",
         dataset_kind="code_rendered_png_fixtures",

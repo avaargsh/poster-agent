@@ -4,6 +4,7 @@ The assessment reports declared human-label coverage and failures, not image
 quality, identity of the reviewer, OCR runtime execution or publication approval.
 The input sidecar remains separate from the OCR-bound official review CSV.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,10 +16,15 @@ from fastapi import HTTPException
 
 from app.m6_review_sidecar_routes import MAX_REQUEST_BYTES, validate_saved_sidecar
 from scripts.capture_m6_paddle_ocr import (
-    OCREvidenceError, _identities, _read_regular, _review_rows,
+    OCREvidenceError,
+    _identities,
+    _read_regular,
+    _review_rows,
 )
 from scripts.validate_m6_cohort import (
-    M6ValidationError, _publish_report, _safe_report_destination,
+    M6ValidationError,
+    _publish_report,
+    _safe_report_destination,
 )
 from scripts.verify_m6_ocr_capture import _read_snapshot
 
@@ -47,8 +53,10 @@ def assess_sidecar(package_dir: Path, raw_sidecar: bytes) -> dict:
         _, frozen_rows, sku_count = _identities(rows)
         # Detect changes to the review CSV or OCR evidence between checks.
         _, current_ocr_sha = _read_snapshot(package / "m6_paddle_ocr_evidence.json")
-        if (reviews_sha != canonical["reviews_csv_sha256"]
-                or current_ocr_sha != canonical["ocr_capture_sha256"]):
+        if (
+            reviews_sha != canonical["reviews_csv_sha256"]
+            or current_ocr_sha != canonical["ocr_capture_sha256"]
+        ):
             raise SidecarAssessmentError("冻结评审表或 OCR 证据已变更")
     except (HTTPException, OCREvidenceError, OSError, ValueError) as exc:
         raise SidecarAssessmentError(f"侧车与冻结源证据不一致：{exc}") from exc
@@ -57,8 +65,7 @@ def assess_sidecar(package_dir: Path, raw_sidecar: bytes) -> dict:
     claimed = {(item["sku_id"], item["variant_id"]) for item in canonical["decisions"]}
     missing = sorted(expected - claimed)
     failures = sorted(
-        (item for item in canonical["decisions"]
-         if item["manual_overall_label"] == "FAIL"),
+        (item for item in canonical["decisions"] if item["manual_overall_label"] == "FAIL"),
         key=lambda item: (item["sku_id"], item["variant_id"]),
     )
     if missing:
@@ -83,14 +90,16 @@ def assess_sidecar(package_dir: Path, raw_sidecar: bytes) -> dict:
         "expected_output_count": len(expected),
         "operator_decision_count": len(claimed),
         "missing_decision_count": len(missing),
-        "missing_decisions": [
-            {"sku_id": sku, "variant_id": variant} for sku, variant in missing
-        ],
+        "missing_decisions": [{"sku_id": sku, "variant_id": variant} for sku, variant in missing],
         "reported_pass_count": len(claimed) - len(failures),
         "reported_fail_count": len(failures),
         "manual_failures": [
-            {"sku_id": item["sku_id"], "variant_id": item["variant_id"],
-             "reason": item["overall_reason"]} for item in failures
+            {
+                "sku_id": item["sku_id"],
+                "variant_id": item["variant_id"],
+                "reason": item["overall_reason"],
+            }
+            for item in failures
         ],
         "ocr_capture_consistency_checked": True,
         "decision_image_hashes_checked": True,
@@ -103,9 +112,10 @@ def assess_sidecar(package_dir: Path, raw_sidecar: bytes) -> dict:
         "automatically_accepted": False,
         "next_action": (
             "Complete the missing SKU/variant operator review entries"
-            if missing else "Investigate reported manual failures"
-            if failures else
-            "Run independent M6 bundle, authorization, OCR runtime and quality acceptance"
+            if missing
+            else "Investigate reported manual failures"
+            if failures
+            else "Run independent M6 bundle, authorization, OCR runtime and quality acceptance"
         ),
         "limitations": [
             "Human labels are unverified operator claims; they are not signed reviewer attestations.",
@@ -127,10 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     package = args.package_dir.expanduser().resolve()
     try:
-        dest = _safe_report_destination(args.output, (
-            args.sidecar, package / "m6_output_reviews.csv",
-            package / "m6_paddle_ocr_evidence.json",
-        ))
+        dest = _safe_report_destination(
+            args.output,
+            (
+                args.sidecar,
+                package / "m6_output_reviews.csv",
+                package / "m6_paddle_ocr_evidence.json",
+            ),
+        )
         # Never risk writing a report over any file in the source package.
         if dest.is_relative_to(package):
             raise SidecarAssessmentError("验收报告必须写到 M6 审核包目录之外")
@@ -157,11 +171,16 @@ def main(argv: list[str] | None = None) -> int:
         _publish_report(dest, result)
     except (OSError, M6ValidationError) as exc:
         parser.exit(2, f"M6 侧车验收报告保存失败：{exc}\n")
-    print(json.dumps({
-        "status": report["status"],
-        "report_sha256": hashlib.sha256(result).hexdigest(),
-        "report_path": str(dest),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "report_sha256": hashlib.sha256(result).hexdigest(),
+                "report_path": str(dest),
+            },
+            ensure_ascii=False,
+        )
+    )
     return 2 if report["status"] == "BLOCKED" else 0
 
 

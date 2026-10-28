@@ -2,6 +2,7 @@
 
 Local synthetic SKU images only; no image model, OCR, or real product acceptance.
 """
+
 from __future__ import annotations
 
 import csv
@@ -28,8 +29,17 @@ def png(color):
 def manifest(rows):
     out = io.StringIO(newline="")
     writer = csv.DictWriter(
-        out, fieldnames=["sku_id", "product_image", "title", "price",
-                          "original_price", "subtitle", "cta", "style"]
+        out,
+        fieldnames=[
+            "sku_id",
+            "product_image",
+            "title",
+            "price",
+            "original_price",
+            "subtitle",
+            "cta",
+            "style",
+        ],
     )
     writer.writeheader()
     writer.writerows(rows)
@@ -38,12 +48,26 @@ def manifest(rows):
 
 def rows():
     return [
-        dict(sku_id="sku-one", product_image="one.png", title="电动牙刷",
-             price="199", original_price="399", subtitle="质感生活",
-             cta="查看商品", style="蓝色科技风"),
-        dict(sku_id="sku-two", product_image="two.png", title="护肤单品",
-             price="89", original_price="119", subtitle="精选好物",
-             cta="立即查看", style="粉色浪漫"),
+        dict(
+            sku_id="sku-one",
+            product_image="one.png",
+            title="电动牙刷",
+            price="199",
+            original_price="399",
+            subtitle="质感生活",
+            cta="查看商品",
+            style="蓝色科技风",
+        ),
+        dict(
+            sku_id="sku-two",
+            product_image="two.png",
+            title="护肤单品",
+            price="89",
+            original_price="119",
+            subtitle="精选好物",
+            cta="立即查看",
+            style="粉色浪漫",
+        ),
     ]
 
 
@@ -53,12 +77,16 @@ def source_poster(monkeypatch, tmp_path):
     r = client.post(
         "/api/posters",
         files={"product": ("model.png", png((15, 120, 180, 255)), "image/png")},
-        data={"title": "模板源", "price": "199", "layout_id": "hero",
-              "product_align": "bottom", "product_scale": "compact",
-              "layer_layout": json.dumps({
-                  "schema_version": 1, "title_dx": 12,
-                  "price_dy": -6, "cta_dx": 9, "logo_dy": 7
-              })},
+        data={
+            "title": "模板源",
+            "price": "199",
+            "layout_id": "hero",
+            "product_align": "bottom",
+            "product_scale": "compact",
+            "layer_layout": json.dumps(
+                {"schema_version": 1, "title_dx": 12, "price_dy": -6, "cta_dx": 9, "logo_dy": 7}
+            ),
+        },
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -71,10 +99,14 @@ def post_batch(monkeypatch, tmp_path, src, *, version="1", poster_id=None, csv_b
         ("images", ("one.png", png((50, 90, 210, 255)), "image/png")),
         ("images", ("two.png", png((200, 80, 70, 255)), "image/png")),
     ]
-    return client.post("/api/batches", files=files, data={
-        "layout_poster_id": poster_id or src["poster_id"],
-        "layout_version": version,
-    })
+    return client.post(
+        "/api/batches",
+        files=files,
+        data={
+            "layout_poster_id": poster_id or src["poster_id"],
+            "layout_version": version,
+        },
+    )
 
 
 def test_saved_poster_layout_applies_to_every_sku_without_changing_prices(tmp_path, monkeypatch):
@@ -125,8 +157,11 @@ def test_batch_snapshots_old_version_even_when_source_poster_changes(tmp_path, m
     batch_id = staged.json()["batch_id"]
     revised = client.post(
         f"/api/posters/{source['poster_id']}/revisions",
-        json={"expected_version": 1, "layout_id": "classic",
-              "layer_layout": {"schema_version": 1, "price_dx": 10}},
+        json={
+            "expected_version": 1,
+            "layout_id": "classic",
+            "layer_layout": {"schema_version": 1, "price_dx": 10},
+        },
     )
     assert revised.status_code == 201, revised.text
     assert client.post(f"/api/batches/{batch_id}/apply").status_code == 202
@@ -141,10 +176,14 @@ def test_batch_snapshots_old_version_even_when_source_poster_changes(tmp_path, m
 
 def test_invalid_or_unpublished_template_fails_before_any_batch_staging(tmp_path, monkeypatch):
     source = source_poster(monkeypatch, tmp_path)
-    for version, poster in [("0", None), ("2", None), ("-1", None),
-                            ("x", None), ("1", "bad-poster-id")]:
-        response = post_batch(monkeypatch, tmp_path, source,
-                              version=version, poster_id=poster)
+    for version, poster in [
+        ("0", None),
+        ("2", None),
+        ("-1", None),
+        ("x", None),
+        ("1", "bad-poster-id"),
+    ]:
+        response = post_batch(monkeypatch, tmp_path, source, version=version, poster_id=poster)
         assert response.status_code in {404, 422}, response.text
     root = tmp_path / "batches"
     assert not root.exists() or list(root.iterdir()) == []
@@ -157,8 +196,11 @@ def test_cli_manifest_layout_columns_validate_and_run(tmp_path, monkeypatch):
     batch_dir.mkdir()
     (batch_dir / "one.png").write_bytes(png((55, 110, 170, 255)))
     row = {
-        **rows()[0], "product_image": "one.png", "layout_id": "hero",
-        "product_align": "top", "product_scale": "compact",
+        **rows()[0],
+        "product_image": "one.png",
+        "layout_id": "hero",
+        "product_align": "top",
+        "product_scale": "compact",
         "layer_layout": json.dumps({"schema_version": 1, "price_dx": 10}),
     }
     fields = list(row)
@@ -181,8 +223,7 @@ def test_manifest_rejects_bad_layout_json_before_generation(tmp_path, monkeypatc
     batch_dir = tmp_path / "items"
     batch_dir.mkdir()
     (batch_dir / "one.png").write_bytes(png((70, 110, 145, 255)))
-    for raw in ('{"price_dx":999}', '{"bad_field":1}', "[0,1]", "{",
-                '{"schema_version":2}'):
+    for raw in ('{"price_dx":999}', '{"bad_field":1}', "[0,1]", "{", '{"schema_version":2}'):
         row = {**rows()[0], "layer_layout": raw}
         path = batch_dir / "bad.csv"
         with path.open("w", newline="", encoding="utf-8") as fp:

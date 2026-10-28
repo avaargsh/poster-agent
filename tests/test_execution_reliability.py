@@ -1,4 +1,5 @@
 """M2c proof: once-only claim, durable event trail, and UNKNOWN on uncertain paid call."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,14 +8,20 @@ from threading import Event
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app import execution_store
+from app.main import app
 
 client = TestClient(app)
 
+
 def data(price="199", subtitle="品质生活 · 限时优惠"):
-    return {"title": "双十一电动牙刷", "price": price, "subtitle": subtitle,
-            "style": "蓝色科技风", "background_mode": "local"}
+    return {
+        "title": "双十一电动牙刷",
+        "price": price,
+        "subtitle": subtitle,
+        "style": "蓝色科技风",
+        "background_mode": "local",
+    }
 
 
 def post(product_bytes, key, price="199", subtitle="品质生活 · 限时优惠"):
@@ -49,15 +56,21 @@ def test_same_key_different_input_is_conflict(tmp_path, monkeypatch, product_byt
     assert client.get("/api/executions/m2c-test-key-02").json()["result"]["spec"]["price"] == "199"
 
 
-def test_unknown_result_never_automatically_retries_paid_model(tmp_path, monkeypatch, product_bytes):
+def test_unknown_result_never_automatically_retries_paid_model(
+    tmp_path, monkeypatch, product_bytes
+):
     from app.image_provider import ImageProviderError
+
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     calls = {"count": 0}
+
     async def simulated_failure(style):
         calls["count"] += 1
         raise ImageProviderError("模拟超时，计费结果未知")
+
     monkeypatch.setattr("app.main.generate_ai_background", simulated_failure)
+
     def paid_post():
         return client.post(
             "/api/posters",
@@ -65,6 +78,7 @@ def test_unknown_result_never_automatically_retries_paid_model(tmp_path, monkeyp
             files={"product": ("sku.png", product_bytes, "image/png")},
             data={**data(), "background_mode": "ai"},
         )
+
     assert paid_post().status_code == 502
     state = client.get("/api/executions/m2c-unknown-key").json()
     assert state["status"] == "UNKNOWN"
@@ -77,6 +91,7 @@ def test_running_claim_blocks_duplicate_and_recovery_marks_unknown(tmp_path, mon
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     assert execution_store.begin("m2c-running-key", "hash-1") is None
     from pytest import raises
+
     with raises(execution_store.ExecutionConflict):
         execution_store.begin("m2c-running-key", "hash-1")
     assert execution_store.recover_incomplete() == 1
@@ -124,7 +139,9 @@ def test_ai_requires_idempotency_key_before_provider_call(tmp_path, monkeypatch,
 
     async def unexpected_paid_call(style):
         calls["count"] += 1
-        raise AssertionError("AI mode must reject a missing idempotency key before provider dispatch")
+        raise AssertionError(
+            "AI mode must reject a missing idempotency key before provider dispatch"
+        )
 
     monkeypatch.setattr("app.main.generate_ai_background", unexpected_paid_call)
     response = client.post(
@@ -235,15 +252,19 @@ def test_recent_execution_history_limit_is_bounded():
 
 def test_paid_generation_concurrency_limit_does_not_claim_second_key(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
-    assert execution_store.begin(
-        "m2c-paid-active-01",
-        "hash-1",
-        paid=True,
-        max_paid_per_hour=20,
-        max_concurrent_paid=1,
-    ) is None
+    assert (
+        execution_store.begin(
+            "m2c-paid-active-01",
+            "hash-1",
+            paid=True,
+            max_paid_per_hour=20,
+            max_concurrent_paid=1,
+        )
+        is None
+    )
 
     from pytest import raises
+
     with raises(execution_store.PaidGenerationLimitExceeded, match="并发上限"):
         execution_store.begin(
             "m2c-paid-active-02",
@@ -291,6 +312,7 @@ def test_paid_generation_hourly_limit_rejects_before_second_provider_call(
     assert calls["count"] == 1
     assert client.get("/api/executions/m2c-paid-hour-02").status_code == 404
 
+
 def test_ai_mode_rejects_invalid_key_before_upload_decode(tmp_path, monkeypatch):
     execution_db = tmp_path / "executions.sqlite3"
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(execution_db))
@@ -317,11 +339,13 @@ def test_paid_budget_backfills_recent_completed_legacy_ai_runs(tmp_path, monkeyp
     execution_db = tmp_path / "executions.sqlite3"
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(execution_db))
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    legacy_result = json.dumps({
-        "poster_id": "legacy-poster-001",
-        "version": 1,
-        "background_mode": "ai",
-    })
+    legacy_result = json.dumps(
+        {
+            "poster_id": "legacy-poster-001",
+            "version": 1,
+            "background_mode": "ai",
+        }
+    )
 
     # Build the pre-guardrail ledger schema: no paid events or migration table.
     with sqlite3.connect(execution_db) as conn:
@@ -341,6 +365,7 @@ def test_paid_budget_backfills_recent_completed_legacy_ai_runs(tmp_path, monkeyp
         )
 
     from pytest import raises
+
     with raises(execution_store.PaidGenerationLimitExceeded, match="每小时请求上限"):
         execution_store.begin(
             "m2c-paid-after-migration",
@@ -352,6 +377,7 @@ def test_paid_budget_backfills_recent_completed_legacy_ai_runs(tmp_path, monkeyp
 
     with raises(LookupError):
         execution_store.get("m2c-paid-after-migration")
+
 
 def test_manual_reconcile_completed_poster_after_ledger_finish_failure(
     tmp_path, monkeypatch, product_bytes
@@ -379,9 +405,7 @@ def test_manual_reconcile_completed_poster_after_ledger_finish_failure(
     assert repaired.json()["status"] == "COMPLETED"
     assert repaired.json()["result"]["poster_id"] == ids[0]
     assert repaired.json()["result"] == storage.view(ids[0])
-    assert "RECOVERED_FROM_ARTIFACT" in [
-        event["event_type"] for event in repaired.json()["events"]
-    ]
+    assert "RECOVERED_FROM_ARTIFACT" in [event["event_type"] for event in repaired.json()["events"]]
 
     second = post(product_bytes, key)
     assert second.status_code == 201, second.text
@@ -389,11 +413,11 @@ def test_manual_reconcile_completed_poster_after_ledger_finish_failure(
     assert len(list((tmp_path / "posters").iterdir())) == 1
 
 
-def test_startup_recovers_matching_finished_artifact_without_model_call(
-    tmp_path, monkeypatch
-):
+def test_startup_recovers_matching_finished_artifact_without_model_call(tmp_path, monkeypatch):
     import io
+
     from PIL import Image
+
     from app import storage
     from app.schemas import PosterSpec
 
@@ -407,8 +431,13 @@ def test_startup_recovers_matching_finished_artifact_without_model_call(
     rendered = io.BytesIO()
     background.save(rendered, format="PNG")
     saved = storage.create(
-        spec, product, None, background, rendered.getvalue(),
-        idempotency_key=key, request_hash=request_hash,
+        spec,
+        product,
+        None,
+        background,
+        rendered.getvalue(),
+        idempotency_key=key,
+        request_hash=request_hash,
     )
     assert execution_store.get(key)["status"] == "RUNNING"
     assert execution_store.recover_incomplete() == 1
@@ -416,14 +445,13 @@ def test_startup_recovers_matching_finished_artifact_without_model_call(
     assert recovered["status"] == "COMPLETED"
     assert recovered["result"] == saved
     assert [event["event_type"] for event in recovered["events"]] == [
-        "CLAIMED", "RECOVERED_FROM_ARTIFACT",
+        "CLAIMED",
+        "RECOVERED_FROM_ARTIFACT",
     ]
     assert execution_store.recover_incomplete() == 0
 
 
-def test_corrupt_artifact_remains_unknown_without_paid_retry(
-    tmp_path, monkeypatch, product_bytes
-):
+def test_corrupt_artifact_remains_unknown_without_paid_retry(tmp_path, monkeypatch, product_bytes):
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
     key = "receipt-corrupt-artifact"
@@ -446,7 +474,9 @@ def test_corrupt_artifact_remains_unknown_without_paid_retry(
 
 def test_unmatched_request_receipt_never_promoted(tmp_path, monkeypatch):
     import io
+
     from PIL import Image
+
     from app import storage
     from app.schemas import PosterSpec
 
@@ -460,8 +490,13 @@ def test_unmatched_request_receipt_never_promoted(tmp_path, monkeypatch):
     png = io.BytesIO()
     background.save(png, format="PNG")
     storage.create(
-        spec, product, None, background, png.getvalue(),
-        idempotency_key=key, request_hash="another-request",
+        spec,
+        product,
+        None,
+        background,
+        png.getvalue(),
+        idempotency_key=key,
+        request_hash="another-request",
     )
     assert execution_store.recover_incomplete() == 1
     assert execution_store.get(key)["status"] == "UNKNOWN"
@@ -472,6 +507,7 @@ def test_reconcile_missing_execution_returns_404(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     response = client.post("/api/executions/receipt-missing-key/reconcile")
     assert response.status_code == 404
+
 
 def test_paid_generation_unknown_to_completed_e2e_without_second_model_call(
     tmp_path, monkeypatch, product_bytes
@@ -534,6 +570,7 @@ def test_paid_generation_unknown_to_completed_e2e_without_second_model_call(
         for item in history.json()["items"]
     )
 
+
 def test_execution_history_status_filter_and_pagination(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
 
@@ -544,9 +581,9 @@ def test_execution_history_status_filter_and_pagination(tmp_path, monkeypatch):
         if i < 5:
             execution_store.mark_unknown(key)
         else:
-            execution_store.finish(key, {
-                "poster_id": "a" * 32, "version": 1, "background_mode": "local"
-            })
+            execution_store.finish(
+                key, {"poster_id": "a" * 32, "version": 1, "background_mode": "local"}
+            )
 
     first = client.get("/api/executions?limit=2&offset=0&status=UNKNOWN")
     second = client.get("/api/executions?limit=2&offset=2&status=UNKNOWN")
@@ -567,21 +604,21 @@ def test_execution_history_status_filter_and_pagination(tmp_path, monkeypatch):
     assert not completed.json()["has_more"]
     assert all(item["poster_id"] == "a" * 32 for item in completed.json()["items"])
     assert all(
-        "result" not in item and "request_hash" not in item
-        for item in completed.json()["items"]
+        "result" not in item and "request_hash" not in item for item in completed.json()["items"]
     )
 
 
 def test_execution_history_rejects_unbounded_or_invalid_filters(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
     bad_queries = (
-        "limit=0", "limit=51", "offset=-1", "offset=10001",
-        "status=FAILED", "status=UNKNOWN%27%20OR%201%3D1",
+        "limit=0",
+        "limit=51",
+        "offset=-1",
+        "offset=10001",
+        "status=FAILED",
+        "status=UNKNOWN%27%20OR%201%3D1",
     )
-    assert all(
-        client.get("/api/executions?" + params).status_code == 422
-        for params in bad_queries
-    )
+    assert all(client.get("/api/executions?" + params).status_code == 422 for params in bad_queries)
     # The old API contract remains valid for existing callers.
     response = client.get("/api/executions?limit=10")
     assert response.status_code == 200
@@ -597,27 +634,40 @@ def test_unknown_paid_result_releases_concurrency_but_preserves_hourly_budget(
     import pytest
 
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
-    assert execution_store.begin(
-        "m7-unknown-paid-first", "hash-first",
-        paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
-    ) is None
+    assert (
+        execution_store.begin(
+            "m7-unknown-paid-first",
+            "hash-first",
+            paid=True,
+            max_paid_per_hour=2,
+            max_concurrent_paid=1,
+        )
+        is None
+    )
     execution_store.mark_unknown("m7-unknown-paid-first")
     assert execution_store.get("m7-unknown-paid-first")["status"] == "UNKNOWN"
 
     # UNKNOWN no longer occupies the one active paid worker, but still counts
     # against the rolling paid-call budget because provider billing is uncertain.
-    assert execution_store.begin(
-        "m7-unknown-paid-second", "hash-second",
-        paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
-    ) is None
+    assert (
+        execution_store.begin(
+            "m7-unknown-paid-second",
+            "hash-second",
+            paid=True,
+            max_paid_per_hour=2,
+            max_concurrent_paid=1,
+        )
+        is None
+    )
     execution_store.mark_unknown("m7-unknown-paid-second")
 
-    with pytest.raises(
-        execution_store.PaidGenerationLimitExceeded, match="每小时请求上限"
-    ):
+    with pytest.raises(execution_store.PaidGenerationLimitExceeded, match="每小时请求上限"):
         execution_store.begin(
-            "m7-unknown-paid-third", "hash-third",
-            paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
+            "m7-unknown-paid-third",
+            "hash-third",
+            paid=True,
+            max_paid_per_hour=2,
+            max_concurrent_paid=1,
         )
     with pytest.raises(LookupError):
         execution_store.get("m7-unknown-paid-third")
@@ -626,8 +676,11 @@ def test_unknown_paid_result_releases_concurrency_but_preserves_hourly_budget(
     # automatic paid retry under the original key.
     with pytest.raises(execution_store.ExecutionConflict):
         execution_store.begin(
-            "m7-unknown-paid-first", "hash-first",
-            paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
+            "m7-unknown-paid-first",
+            "hash-first",
+            paid=True,
+            max_paid_per_hour=2,
+            max_concurrent_paid=1,
         )
 
 
@@ -636,8 +689,10 @@ def test_cancelled_paid_request_becomes_unknown_without_reserving_worker_forever
 ):
     """Cancelling an in-flight provider call must preserve uncertain billing."""
     import io
+
     import pytest
     from fastapi import UploadFile
+
     from app.main import create_poster
 
     monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
@@ -654,19 +709,21 @@ def test_cancelled_paid_request_becomes_unknown_without_reserving_worker_forever
     monkeypatch.setattr("app.main.generate_ai_background", waiting_provider)
 
     async def cancel_in_flight_request():
-        task = asyncio.create_task(create_poster(
-            product=UploadFile(file=io.BytesIO(product_bytes), filename="sku.png"),
-            title="双十一电动牙刷",
-            price="199",
-            style="蓝色科技风",
-            subtitle="品质生活 · 限时优惠",
-            original_price="",
-            cta="立即抢购",
-            background_mode="ai",
-            logo=None,
-            review_run_id="",
-            idempotency_key=key,
-        ))
+        task = asyncio.create_task(
+            create_poster(
+                product=UploadFile(file=io.BytesIO(product_bytes), filename="sku.png"),
+                title="双十一电动牙刷",
+                price="199",
+                style="蓝色科技风",
+                subtitle="品质生活 · 限时优惠",
+                original_price="",
+                cta="立即抢购",
+                background_mode="ai",
+                logo=None,
+                review_run_id="",
+                idempotency_key=key,
+            )
+        )
         await asyncio.wait_for(started.wait(), timeout=5)
         assert execution_store.get(key)["status"] == "RUNNING"
         task.cancel()
@@ -684,7 +741,13 @@ def test_cancelled_paid_request_becomes_unknown_without_reserving_worker_forever
     # and its budget reservation: an uncertain provider outcome is not retried.
     with pytest.raises(execution_store.ExecutionConflict):
         execution_store.begin(key, "a-new-hash", paid=True)
-    assert execution_store.begin(
-        "m7-paid-after-cancel", "hash-after",
-        paid=True, max_paid_per_hour=2, max_concurrent_paid=1,
-    ) is None
+    assert (
+        execution_store.begin(
+            "m7-paid-after-cancel",
+            "hash-after",
+            paid=True,
+            max_paid_per_hour=2,
+            max_concurrent_paid=1,
+        )
+        is None
+    )

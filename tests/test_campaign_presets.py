@@ -1,4 +1,5 @@
 """Campaign preset bulk CSV workflow: no hidden price/title substitutions."""
+
 import csv
 import io
 
@@ -10,8 +11,17 @@ client = TestClient(app)
 
 
 def upload(rows, *, columns=None, template="flash-sale"):
-    columns = columns or ["sku_id", "product_image", "title", "price",
-                           "original_price", "subtitle", "cta", "style", "logo_image"]
+    columns = columns or [
+        "sku_id",
+        "product_image",
+        "title",
+        "price",
+        "original_price",
+        "subtitle",
+        "cta",
+        "style",
+        "logo_image",
+    ]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=columns)
     writer.writeheader()
@@ -25,9 +35,16 @@ def upload(rows, *, columns=None, template="flash-sale"):
 
 def sample(**changes):
     return {
-        "sku_id": "SKU_01", "product_image": "one.png", "title": "电动牙刷",
-        "price": "199", "original_price": "399", "subtitle": "",
-        "cta": "", "style": "", "logo_image": "", **changes,
+        "sku_id": "SKU_01",
+        "product_image": "one.png",
+        "title": "电动牙刷",
+        "price": "199",
+        "original_price": "399",
+        "subtitle": "",
+        "cta": "",
+        "style": "",
+        "logo_image": "",
+        **changes,
     }
 
 
@@ -42,9 +59,19 @@ def test_catalog_and_fill_blanks_only_no_price_or_title_change():
     assert "flash-sale" in names
     assert "price" not in names["flash-sale"]
     assert "title" not in names["flash-sale"]
-    response = upload([sample(), sample(sku_id="SKU_02", title="已有标题",
-                                       price="88", subtitle="人工审核文案",
-                                       cta="立即查看", style="自定义品牌风")])
+    response = upload(
+        [
+            sample(),
+            sample(
+                sku_id="SKU_02",
+                title="已有标题",
+                price="88",
+                subtitle="人工审核文案",
+                cta="立即查看",
+                style="自定义品牌风",
+            ),
+        ]
+    )
     assert response.status_code == 200, response.text
     assert response.headers["x-template-filled-rows"] == "1"
     assert "attachment;" in response.headers["content-disposition"]
@@ -79,7 +106,7 @@ def test_compact_required_only_manifest_is_expanded_but_product_facts_untouched(
 
 def test_manifest_fail_closed_on_invalid_data_and_cannot_stage_or_run():
     cases = [
-        ([sample(title="=WEBSERVICE(\"https://example.com\")")], None),
+        ([sample(title='=WEBSERVICE("https://example.com")')], None),
         ([sample(price="")], None),
         ([sample(sku_id="../bad")], None),
         ([sample(), sample()], None),
@@ -88,13 +115,20 @@ def test_manifest_fail_closed_on_invalid_data_and_cannot_stage_or_run():
     ]
     for rows, columns in cases:
         if columns:
-            rows = [{**{k: v for k, v in row.items() if k in columns}, "script": "echo"} for row in rows]
+            rows = [
+                {**{k: v for k, v in row.items() if k in columns}, "script": "echo"} for row in rows
+            ]
         response = upload(rows, columns=columns)
         assert response.status_code == 422, response.text
     assert upload([sample()], template="unknown").status_code == 422
-    assert client.post("/api/campaign-presets/apply-manifest", files={
-        "manifest": ("bad.csv", b"x" * (1024 * 1024 + 1), "text/csv")},
-        data={"template_id": "nature"}).status_code == 413
+    assert (
+        client.post(
+            "/api/campaign-presets/apply-manifest",
+            files={"manifest": ("bad.csv", b"x" * (1024 * 1024 + 1), "text/csv")},
+            data={"template_id": "nature"},
+        ).status_code
+        == 413
+    )
 
 
 def test_browser_exposes_explicit_download_not_automatic_generation():

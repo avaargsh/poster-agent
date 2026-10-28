@@ -3,10 +3,10 @@
 Report is explicitly opt-in; M3a does not automatically publish, repair or
 silently treat unavailable OCR as success.
 """
+
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Literal
 
@@ -36,7 +36,9 @@ def run_acceptance(poster_id: str, version: int, options: AcceptanceOptions):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="海报或版本不存在") from exc
     except (ValueError, json.JSONDecodeError, OSError) as exc:
-        raise HTTPException(status_code=422, detail="验收规则或文件格式无效，请检查后台配置") from exc
+        raise HTTPException(
+            status_code=422, detail="验收规则或文件格式无效，请检查后台配置"
+        ) from exc
 
 
 @router.get("/{poster_id}/versions/{version}/acceptance")
@@ -70,7 +72,9 @@ def acceptance_overlay(
             },
         )
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="该版本尚无对应验收报告，先执行 Acceptance Gate") from exc
+        raise HTTPException(
+            status_code=404, detail="该版本尚无对应验收报告，先执行 Acceptance Gate"
+        ) from exc
     except StaleAcceptanceReport as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, ValueError, json.JSONDecodeError) as exc:

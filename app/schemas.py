@@ -1,6 +1,8 @@
 """核心领域模型：输入规格与修改接口。"""
+
 from decimal import Decimal
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -10,6 +12,7 @@ class LayerLayoutV1(BaseModel):
     A strict, bounded schema protects prices, CTA and logo from accidental
     clipping/overlap. Existing specs without this object have zero offsets.
     """
+
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1] = 1

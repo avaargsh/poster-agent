@@ -2,13 +2,14 @@
 
 All image tests exercise actual Pillow pixels with local Noto/PingFang fonts.
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
 
-from PIL import Image, ImageChops
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app import storage
 from app.channel_exports import render_variant
@@ -24,9 +25,14 @@ def _make(tmp_path, monkeypatch, product_bytes):
     resp = client.post(
         "/api/posters",
         files={"product": ("sku.png", product_bytes, "image/png")},
-        data={"title": "电动牙刷", "subtitle": "限时抢购", "price": "199",
-              "original_price": "399", "cta": "立即购买",
-              "background_mode": "local"},
+        data={
+            "title": "电动牙刷",
+            "subtitle": "限时抢购",
+            "price": "199",
+            "original_price": "399",
+            "cta": "立即购买",
+            "background_mode": "local",
+        },
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["poster_id"]
@@ -36,8 +42,13 @@ def test_render_native_is_deterministic_and_has_real_independent_layout():
     product = Image.new("RGBA", (350, 620), (240, 100, 40, 255))
     logo = Image.new("RGBA", (200, 80), (12, 230, 95, 255))
     bg = Image.new("RGB", (1024, 1024), (35, 57, 87))
-    spec = PosterSpec(title="高效清洁电动牙刷", price="199",
-                      original_price="399", subtitle="限时福利", cta="立即抢购")
+    spec = PosterSpec(
+        title="高效清洁电动牙刷",
+        price="199",
+        original_price="399",
+        subtitle="限时福利",
+        cta="立即抢购",
+    )
     a = render_native_feed(spec, product, logo, bg)
     assert render_native_feed(spec, product, logo, bg) == a
     with Image.open(io.BytesIO(a)) as image:
@@ -45,12 +56,14 @@ def test_render_native_is_deterministic_and_has_real_independent_layout():
         assert image.mode == "RGB"
     # Native is a fresh composition, not contain-scaled whole square source.
     from app.compositor import compose
+
     square = compose(spec, product, logo, bg)
     contained = render_variant(square, "feed_4x5")
     assert a != contained.png
     # Changing the specified text or product affects native pixels.
     changed = render_native_feed(
-        spec.model_copy(update={"price": spec.price + 1}), product, logo, bg)
+        spec.model_copy(update={"price": spec.price + 1}), product, logo, bg
+    )
     assert changed != a
     other_product = Image.new("RGBA", product.size, (40, 100, 240, 255))
     assert render_native_feed(spec, other_product, logo, bg) != a
@@ -70,9 +83,11 @@ def test_native_format_list_and_versioned_get(tmp_path, monkeypatch, product_byt
     saved = storage.version_path(pid, 1).read_bytes()
     saved_spec = (storage.poster_dir(pid) / "versions" / "v1.json").read_bytes()
     meta = (storage.poster_dir(pid) / "meta.json").read_bytes()
+
     # Model calls must never happen during read-only derivatives.
     def forbid(*_args, **_kwargs):
         raise AssertionError("Native export must not execute paid AI")
+
     monkeypatch.setattr("app.main.generate_ai_background", forbid)
 
     list_resp = client.get(f"/api/posters/{pid}/versions/1/exports")
@@ -138,9 +153,7 @@ def test_revision_rejects_subtitle_that_square_layout_cannot_render(
     updated = client.post(f"/api/posters/{pid}/revisions", json={"subtitle": text})
     assert updated.status_code == 422
     assert "副标题" in updated.json()["detail"]
-    assert client.get(
-        f"/api/posters/{pid}/versions/2/exports/feed_4x5_native"
-    ).status_code == 404
+    assert client.get(f"/api/posters/{pid}/versions/2/exports/feed_4x5_native").status_code == 404
 
 
 def test_native_layout_rejects_overflowing_subtitle():
@@ -161,8 +174,13 @@ def test_product_focus_layout_is_deterministic_and_distinct():
     product = Image.new("RGBA", (420, 620), (240, 100, 40, 255))
     logo = Image.new("RGBA", (200, 80), (12, 230, 95, 255))
     background = Image.new("RGB", (1024, 1024), (35, 57, 87))
-    spec = PosterSpec(title="高效清洁电动牙刷双十一优惠", subtitle="全新升级 · 长效续航",
-                      price="199", original_price="399", cta="立即抢购")
+    spec = PosterSpec(
+        title="高效清洁电动牙刷双十一优惠",
+        subtitle="全新升级 · 长效续航",
+        price="199",
+        original_price="399",
+        cta="立即抢购",
+    )
     first = render_native_product_focus(spec, product, logo, background)
     assert render_native_product_focus(spec, product, logo, background) == first
     with Image.open(io.BytesIO(first)) as image:
@@ -250,8 +268,10 @@ def test_two_native_templates_export_from_same_immutable_version(
     tmp_path, monkeypatch, product_bytes
 ):
     poster_id = _make(tmp_path, monkeypatch, product_bytes)
+
     async def forbid_paid_provider(*_args, **_kwargs):
         raise AssertionError("Comparing saved layouts must not call a paid model")
+
     monkeypatch.setattr("app.main.generate_ai_background", forbid_paid_provider)
     original = storage.version_path(poster_id, 1).read_bytes()
     for_variant = "/api/posters/{}/versions/1/exports/{}"

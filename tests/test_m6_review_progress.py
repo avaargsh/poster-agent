@@ -1,4 +1,5 @@
 """M6 in-browser review-progress preview, using only synthetic CSV metadata."""
+
 from __future__ import annotations
 
 import csv
@@ -26,33 +27,37 @@ def _fixture() -> tuple[list[dict], list[dict]]:
     registry = []
     reviews = []
     for sku in ("sku-one", "sku-two"):
-        registry.append({
-            **dict.fromkeys(REGISTRY_FIELDS, ""),
-            "cohort_id": COHORT,
-            "sku_id": sku,
-            "source_asset_authorization_status": "AUTHORIZED",
-            "authorization_evidence_ref": "operator-attestation",
-            "logo_authorization_status": "NOT_APPLICABLE",
-            "distinct_sku_verified": "YES",
-            "duplicate_source_image_reviewed": "YES",
-            "reviewer_alias": "operator",
-        })
-        for variant in ("square", "feed_4x5_native"):
-            reviews.append({
-                **dict.fromkeys(REVIEW_FIELDS, "PASS"),
+        registry.append(
+            {
+                **dict.fromkeys(REGISTRY_FIELDS, ""),
                 "cohort_id": COHORT,
                 "sku_id": sku,
-                "variant_id": variant,
-                "output_image_path": "images/review.png",
-                "output_image_sha256": SHA,
+                "source_asset_authorization_status": "AUTHORIZED",
+                "authorization_evidence_ref": "operator-attestation",
+                "logo_authorization_status": "NOT_APPLICABLE",
+                "distinct_sku_verified": "YES",
+                "duplicate_source_image_reviewed": "YES",
                 "reviewer_alias": "operator",
-                "overall_accept": "PASS",
-                "overall_reason": "",
-                "reviewed_at_utc": "2026-10-26T09:00:00Z",
-                "subtitle": "N/A",
-                "original_price": "N/A",
-                "original_price_position": "N/A",
-            })
+            }
+        )
+        for variant in ("square", "feed_4x5_native"):
+            reviews.append(
+                {
+                    **dict.fromkeys(REVIEW_FIELDS, "PASS"),
+                    "cohort_id": COHORT,
+                    "sku_id": sku,
+                    "variant_id": variant,
+                    "output_image_path": "images/review.png",
+                    "output_image_sha256": SHA,
+                    "reviewer_alias": "operator",
+                    "overall_accept": "PASS",
+                    "overall_reason": "",
+                    "reviewed_at_utc": "2026-10-26T09:00:00Z",
+                    "subtitle": "N/A",
+                    "original_price": "N/A",
+                    "original_price_position": "N/A",
+                }
+            )
     return registry, reviews
 
 
@@ -60,7 +65,11 @@ def _post(registry: list[dict], reviews: list[dict]):
     return client.post(
         "/api/m6/review-progress",
         files={
-            "registry": ("m6_cohort_registry.csv", _csv_bytes(REGISTRY_FIELDS, registry), "text/csv"),
+            "registry": (
+                "m6_cohort_registry.csv",
+                _csv_bytes(REGISTRY_FIELDS, registry),
+                "text/csv",
+            ),
             "reviews": ("m6_output_reviews.csv", _csv_bytes(REVIEW_FIELDS, reviews), "text/csv"),
         },
     )

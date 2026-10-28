@@ -4,6 +4,7 @@ Consumes a successfully validated M6 report and the exact final human CSV.
 This command never opens poster images, invokes OCR or authenticates reviewers.
 All rates are fractions of operator-entered labels; NEVER publication approval.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,14 +16,16 @@ from typing import Any
 
 from scripts.validate_m6_cohort import (
     FIELD_LABELS,
-    M6ValidationError,
     REVIEW_FIELDS,
-    SCHEMA as M6_SCHEMA,
     VARIANTS,
+    M6ValidationError,
     _publish_report,
     _read_csv,
     _read_json,
     _safe_report_destination,
+)
+from scripts.validate_m6_cohort import (
+    SCHEMA as M6_SCHEMA,
 )
 
 SCHEMA = "m6-operator-quality-summary-1"
@@ -48,7 +51,8 @@ def _ratio(count: int, denominator: int) -> float | None:
 
 
 def summarize_operator_quality(
-    validation_report: dict[str, Any], reviews: Path,
+    validation_report: dict[str, Any],
+    reviews: Path,
 ) -> dict[str, Any]:
     """Aggregate only validated operator labels; omit all SKU and reason text."""
     report = validation_report
@@ -58,22 +62,16 @@ def summarize_operator_quality(
         raise OperatorQualityError("M6 原始证据未通过一致性校验，禁止评分")
     if report.get("ocr_capture_consistency") != "MATCHED_DECLARED_REAL":
         raise OperatorQualityError("OCR 本地声明与冻结图片/CSV 未完成一致性核对")
-    if report.get("ocr_source_binding") not in (
-        "SAME_REVIEW_SNAPSHOT", "MATCHED_IMMUTABLE_FIELDS"
-    ):
+    if report.get("ocr_source_binding") not in ("SAME_REVIEW_SNAPSHOT", "MATCHED_IMMUTABLE_FIELDS"):
         raise OperatorQualityError("人工审核表与 OCR 冻结来源未建立允许的绑定")
     if report.get("ocr_runtime_attested") is not False or (
         report.get("real_ocr_quality_verified") is not False
     ):
         raise OperatorQualityError("不接受宣称独立证明 OCR 或质量通过的元数据报告")
     hashes = report.get("input_sha256")
-    if not isinstance(hashes, dict) or not isinstance(
-        hashes.get("ocr_capture"), str
-    ):
+    if not isinstance(hashes, dict) or not isinstance(hashes.get("ocr_capture"), str):
         raise OperatorQualityError("缺少 OCR 采集摘要")
-    _review_path, rows, csv_sha = _read_csv(
-        Path(reviews), REVIEW_FIELDS, "最终 M6 人工评审"
-    )
+    _review_path, rows, csv_sha = _read_csv(Path(reviews), REVIEW_FIELDS, "最终 M6 人工评审")
     if hashes.get("output_reviews") != csv_sha:
         raise OperatorQualityError("最终人工评审 CSV 的 SHA-256 与 M6 校验报告不一致")
     if report.get("ocr_source_binding") == "MATCHED_IMMUTABLE_FIELDS" and (
@@ -93,15 +91,19 @@ def summarize_operator_quality(
         variants.add(variant)
         variant_states[variant].append(status)
     sku_count = len(keys)
-    if not sku_count or len(rows) != 2 * sku_count or any(
-        variants != set(VARIANTS) for variants in keys.values()
+    if (
+        not sku_count
+        or len(rows) != 2 * sku_count
+        or any(variants != set(VARIANTS) for variants in keys.values())
     ):
         raise OperatorQualityError("SKU 缺少方图/原生 4:5 配对，不得缩小分母")
-    if (report.get("expected_sku_count") != sku_count or
-        report.get("expected_output_count") != len(rows) or
-        report.get("review_row_count") != len(rows) or
-        report.get("present_output_count") != len(rows) or
-        report.get("missing_output_count") != 0):
+    if (
+        report.get("expected_sku_count") != sku_count
+        or report.get("expected_output_count") != len(rows)
+        or report.get("review_row_count") != len(rows)
+        or report.get("present_output_count") != len(rows)
+        or report.get("missing_output_count") != 0
+    ):
         raise OperatorQualityError("人工评审与已验证 cohort 分母或图片数不一致")
     for variant in VARIANTS:
         original_counts = report.get("manual_overall_counts", {}).get(variant)
@@ -117,9 +119,7 @@ def summarize_operator_quality(
             **counts,
             "denominator": sku_count,
             "reported_pass_fraction": _ratio(counts["PASS"], sku_count),
-            "decision_coverage_fraction": _ratio(
-                counts["PASS"] + counts["FAIL"], sku_count
-            ),
+            "decision_coverage_fraction": _ratio(counts["PASS"] + counts["FAIL"], sku_count),
         }
     by_field = {}
     for field in FIELD_LABELS:
@@ -129,16 +129,11 @@ def summarize_operator_quality(
             **count,
             "applicable_denominator": applicable,
             "reported_pass_fraction": _ratio(count["PASS"], applicable),
-            "decision_coverage_fraction": _ratio(
-                count["PASS"] + count["FAIL"], applicable
-            ),
+            "decision_coverage_fraction": _ratio(count["PASS"] + count["FAIL"], applicable),
         }
-    status_by_key = {
-        (row["sku_id"], row["variant_id"]): row["overall_accept"] for row in rows
-    }
+    status_by_key = {(row["sku_id"], row["variant_id"]): row["overall_accept"] for row in rows}
     paired_pass = sum(
-        all(status_by_key[(sku, variant)] == "PASS" for variant in VARIANTS)
-        for sku in keys
+        all(status_by_key[(sku, variant)] == "PASS" for variant in VARIANTS) for sku in keys
     )
     min_met = sku_count >= MINIMUM_SKUS
     return {
@@ -149,8 +144,11 @@ def summarize_operator_quality(
         "input_sha256": {
             "final_reviews": csv_sha,
             "ocr_capture": hashes["ocr_capture"],
-            **({"ocr_source_reviews": hashes["ocr_source_reviews"]}
-               if "ocr_source_reviews" in hashes else {}),
+            **(
+                {"ocr_source_reviews": hashes["ocr_source_reviews"]}
+                if "ocr_source_reviews" in hashes
+                else {}
+            ),
         },
         "sku_count": sku_count,
         "variant_count": len(rows),
@@ -160,9 +158,7 @@ def summarize_operator_quality(
             **overall,
             "denominator": len(rows),
             "reported_pass_fraction": _ratio(overall["PASS"], len(rows)),
-            "decision_coverage_fraction": _ratio(
-                overall["PASS"] + overall["FAIL"], len(rows)
-            ),
+            "decision_coverage_fraction": _ratio(overall["PASS"] + overall["FAIL"], len(rows)),
         },
         "by_variant": by_variant,
         "both_variants_passed": {
@@ -197,12 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        destination = _safe_report_destination(
-            args.output, (args.validation_report, args.reviews)
-        )
-        _, validation, report_sha = _read_json(
-            args.validation_report, "M6 完整验证报告"
-        )
+        destination = _safe_report_destination(args.output, (args.validation_report, args.reviews))
+        _, validation, report_sha = _read_json(args.validation_report, "M6 完整验证报告")
         summary = summarize_operator_quality(validation, args.reviews)
         summary["input_sha256"]["validation_report"] = report_sha
         payload = (json.dumps(summary, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -210,12 +202,17 @@ def main(argv: list[str] | None = None) -> int:
         _publish_report(destination, payload)
     except (OperatorQualityError, M6ValidationError, OSError, ValueError) as exc:
         parser.exit(2, f"M6 匿名汇总失败：{exc}\n")
-    print(json.dumps({
-        "status": summary["status"],
-        "sku_count": summary["sku_count"],
-        "minimum_sku_count_met": summary["minimum_sku_count_met"],
-        "report_sha256": hashlib.sha256(payload).hexdigest(),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "status": summary["status"],
+                "sku_count": summary["sku_count"],
+                "minimum_sku_count_met": summary["minimum_sku_count_met"],
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

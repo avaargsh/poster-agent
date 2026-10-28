@@ -3,6 +3,7 @@
 Unlike mock-based tests, inference is opt-in and loads the actual OCR provider.
 A NOT_RUN or failed result NEVER contributes to claimed OCR quality metrics.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,7 +19,7 @@ from typing import Callable
 
 from PIL import Image
 
-from app.ocr_provider import OCRUnavailable, OCRExecutionError, recognize
+from app.ocr_provider import OCRExecutionError, OCRUnavailable, recognize
 
 
 def _package_version(package: str) -> str | None:
@@ -108,15 +109,14 @@ def probe(
         if not isinstance(lines, list):
             raise OCRExecutionError("OCR 返回的数据格式不是行列表")
         scores = [
-            float(line["score"]) for line in lines
+            float(line["score"])
+            for line in lines
             if isinstance(line, dict) and line.get("score") is not None
         ]
         report["status"] = "OK"
         report["model_invocation_completed"] = True
         report["line_count"] = len(lines)
-        report["mean_recognition_score"] = (
-            round(sum(scores) / len(scores), 6) if scores else None
-        )
+        report["mean_recognition_score"] = round(sum(scores) / len(scores), 6) if scores else None
         report["message"] = "OCR 调用完成；识别置信度不能替代人工标注准确率"
         if include_text:
             report["ocr_lines"] = lines

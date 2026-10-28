@@ -105,9 +105,7 @@ def test_failed_version_write_keeps_previous_version_readable(tmp_path, monkeypa
     assert storage.version_path(poster_id, 2).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_stale_staging_symlink_is_unlinked_without_touching_target(
-    tmp_path, monkeypatch
-):
+def test_stale_staging_symlink_is_unlinked_without_touching_target(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path))
     important = tmp_path / "important-existing-directory"
     important.mkdir()

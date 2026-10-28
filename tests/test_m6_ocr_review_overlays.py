@@ -1,4 +1,5 @@
 """Synthetic offline M6 overlay fixtures: no real OCR or SKU acceptance."""
+
 from __future__ import annotations
 
 import csv
@@ -31,30 +32,36 @@ def _fixture(tmp_path):
         image_bytes = output.getvalue()
         name = f"images/sku-one-{suffix}.png"
         (package / name).write_bytes(image_bytes)
-        rows.append({
-            **dict.fromkeys(REVIEW_FIELDS, "UNVERIFIED"),
-            "cohort_id": "m6-local-example",
-            "sku_id": "sku-one",
-            "poster_id": "b" * 32,
-            "source_version": "1",
-            "variant_id": variant,
-            "output_image_path": name,
-            "output_image_sha256": _sha(image_bytes),
-            "source_product_sha256": "a" * 64,
-            "request_sha256": "c" * 64,
-            "spec_sha256": "d" * 64,
-            "source_square_image_sha256": "e" * 64,
-        })
-        observations.append({
-            "sku_id": "sku-one", "variant_id": variant, "poster_id": "b" * 32,
-            "image_sha256": _sha(image_bytes),
-            "recognized_line_count": 2,
-            "recognized_lines": [
-                {"text": "¥129", "confidence": 0.96, "bbox": [65, 668, 230, 725]},
-                {"text": "Title", "confidence": 0.91, "bbox": None},
-            ],
-            "status": "CAPTURED_REVIEW_REQUIRED",
-        })
+        rows.append(
+            {
+                **dict.fromkeys(REVIEW_FIELDS, "UNVERIFIED"),
+                "cohort_id": "m6-local-example",
+                "sku_id": "sku-one",
+                "poster_id": "b" * 32,
+                "source_version": "1",
+                "variant_id": variant,
+                "output_image_path": name,
+                "output_image_sha256": _sha(image_bytes),
+                "source_product_sha256": "a" * 64,
+                "request_sha256": "c" * 64,
+                "spec_sha256": "d" * 64,
+                "source_square_image_sha256": "e" * 64,
+            }
+        )
+        observations.append(
+            {
+                "sku_id": "sku-one",
+                "variant_id": variant,
+                "poster_id": "b" * 32,
+                "image_sha256": _sha(image_bytes),
+                "recognized_line_count": 2,
+                "recognized_lines": [
+                    {"text": "¥129", "confidence": 0.96, "bbox": [65, 668, 230, 725]},
+                    {"text": "Title", "confidence": 0.91, "bbox": None},
+                ],
+                "status": "CAPTURED_REVIEW_REQUIRED",
+            }
+        )
     with (package / "m6_output_reviews.csv").open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=REVIEW_FIELDS)
         writer.writeheader()
@@ -63,21 +70,29 @@ def _fixture(tmp_path):
         "schema_version": "m6-paddle-ocr-evidence-1",
         "cohort_id": "m6-local-example",
         "reviews_csv_sha256": _sha((package / "m6_output_reviews.csv").read_bytes()),
-        "sku_count": 1, "expected_variant_count": 2, "captured_variant_count": 2,
+        "sku_count": 1,
+        "expected_variant_count": 2,
+        "captured_variant_count": 2,
         "real_ocr_inference_attempted": True,  # Fixture declaration, not a real OCR run.
-        "paddleocr_version": "3.3.0", "paddlepaddle_version": "3.2.0",
+        "paddleocr_version": "3.3.0",
+        "paddlepaddle_version": "3.2.0",
         "model_digests": {
             "detection": {"sha256": "f" * 64, "file_count": 1, "total_bytes": 4},
             "recognition": {"sha256": "e" * 64, "file_count": 1, "total_bytes": 4},
         },
         "captured_at_utc": "2026-10-26T00:00:00+00:00",
-        "elapsed_seconds": 1.1, "human_review_performed": False,
-        "automatically_accepted": False, "source_authorizations_verified": False,
-        "min_20_real_skus_proven": False, "observations": observations,
-        "positioned_line_count": 2, "unlocated_line_count": 2,
+        "elapsed_seconds": 1.1,
+        "human_review_performed": False,
+        "automatically_accepted": False,
+        "source_authorizations_verified": False,
+        "min_20_real_skus_proven": False,
+        "observations": observations,
+        "positioned_line_count": 2,
+        "unlocated_line_count": 2,
     }
     (package / "m6_paddle_ocr_evidence.json").write_text(
-        json.dumps(evidence), encoding="utf-8",
+        json.dumps(evidence),
+        encoding="utf-8",
     )
     return package, rows, evidence
 
@@ -85,8 +100,7 @@ def _fixture(tmp_path):
 def test_bounded_overlay_zip_is_non_destructive_and_review_only(tmp_path):
     package, rows, evidence = _fixture(tmp_path)
     before = {
-        row["output_image_path"]: (package / row["output_image_path"]).read_bytes()
-        for row in rows
+        row["output_image_path"]: (package / row["output_image_path"]).read_bytes() for row in rows
     }
     summary = prepare_review_overlays(package)
     archive_path = package / "m6_ocr_review_overlays.zip"
@@ -111,8 +125,9 @@ def test_bounded_overlay_zip_is_non_destructive_and_review_only(tmp_path):
         for row in rows:
             output = zf.read(row["output_image_path"])
             with Image.open(io.BytesIO(output)) as rendered:
-                assert rendered.size == ((1024, 1024) if row["variant_id"] == "square"
-                                        else (1080, 1350))
+                assert rendered.size == (
+                    (1024, 1024) if row["variant_id"] == "square" else (1080, 1350)
+                )
             assert output != before[row["output_image_path"]]
             assert (package / row["output_image_path"]).read_bytes() == before[
                 row["output_image_path"]
@@ -140,7 +155,8 @@ def test_blocks_changed_inputs_and_never_publishes_partial_archive(tmp_path, mut
     elif mutation == "capture":
         evidence["observations"][0]["status"] = "PASS"
         (package / "m6_paddle_ocr_evidence.json").write_text(
-            json.dumps(evidence), encoding="utf-8",
+            json.dumps(evidence),
+            encoding="utf-8",
         )
     else:
         source = package / rows[0]["output_image_path"]

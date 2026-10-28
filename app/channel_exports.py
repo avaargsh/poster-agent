@@ -5,6 +5,7 @@ original square poster entirely (no SKU/price clipping), with a softly blurred
 background occupying unused canvas area. It requires no external AI calls and
 never changes the source version or its Acceptance Gate report.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,7 +51,8 @@ def render_variant(source_png: bytes, preset: str) -> Variant:
     base = Image.alpha_composite(base, tint)
 
     foreground = ImageOps.contain(
-        original, (width - 2 * MARGIN, height - 2 * MARGIN),
+        original,
+        (width - 2 * MARGIN, height - 2 * MARGIN),
         method=Image.Resampling.LANCZOS,
     )
     x = (width - foreground.width) // 2
@@ -59,13 +61,16 @@ def render_variant(source_png: bytes, preset: str) -> Variant:
     draw = ImageDraw.Draw(base)
     draw.rounded_rectangle(
         (x - 3, y - 3, x + foreground.width + 2, y + foreground.height + 2),
-        radius=4, fill=(246, 249, 255, 255),
+        radius=4,
+        fill=(246, 249, 255, 255),
     )
     base.paste(foreground.convert("RGBA"), (x, y))
     result = io.BytesIO()
     base.convert("RGB").save(result, format="PNG", optimize=True)
     return Variant(
-        png=result.getvalue(), width=width, height=height,
+        png=result.getvalue(),
+        width=width,
+        height=height,
         content_box=(x, y, x + foreground.width, y + foreground.height),
         source_sha256=source_hash,
     )

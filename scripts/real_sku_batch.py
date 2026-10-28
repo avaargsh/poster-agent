@@ -4,6 +4,7 @@ No paid model: the only permitted background mode is "local". By default
 only validate and write a plan. --apply creates real posters using the
 existing upload/ICC/PosterSpec/idempotency pipeline via FastAPI TestClient.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,20 +24,33 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app import storage
-from app.main import MAX_UPLOAD, app, read_upload
 from app.compositor import validate_square_layout
 from app.cutout_service import CutoutRejected, verify_candidate
+from app.main import MAX_UPLOAD, app, read_upload
 from app.schemas import PosterSpec
 
 REQUIRED = frozenset({"sku_id", "product_image", "title", "price"})
-OPTIONAL = frozenset({
-    "original_price", "subtitle", "cta", "style", "logo_image",
-    "layout_id", "product_align", "product_scale", "layer_layout",
-    "product_cutout_image",
-})
+OPTIONAL = frozenset(
+    {
+        "original_price",
+        "subtitle",
+        "cta",
+        "style",
+        "logo_image",
+        "layout_id",
+        "product_align",
+        "product_scale",
+        "layer_layout",
+        "product_cutout_image",
+    }
+)
 ALLOWED = REQUIRED | OPTIONAL
-IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
-               ".jpeg": "image/jpeg", ".webp": "image/webp"}
+IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
 SKU_ID = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 MAX_ROWS = 100
 SCHEMA = "m5g-1"
@@ -136,9 +150,13 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
                 if not isinstance(parsed_layer, dict):
                     raise BatchError("layer_layout 必须是 JSON 对象")
                 extra["layer_layout"] = parsed_layer
-            checked = PosterSpec.model_validate({
-                **data, "original_price": data["original_price"] or None, **extra,
-            })
+            checked = PosterSpec.model_validate(
+                {
+                    **data,
+                    "original_price": data["original_price"] or None,
+                    **extra,
+                }
+            )
             # Catch renderer-identical foreground collisions across the
             # entire SKU cohort before staging or creating the first poster.
             validate_square_layout(checked)
@@ -148,7 +166,9 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
             if "layer_layout" in extra:
                 data["layer_layout"] = json.dumps(
                     checked.layer_layout.model_dump(mode="json"),
-                    ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
                 )
             product = _source_file(row["product_image"], base)
             product_sha = _validated_image(product)
@@ -157,11 +177,11 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
             if (row.get("product_cutout_image") or "").strip():
                 cutout = _source_file(row["product_cutout_image"], base)
                 cutout_sha = _validated_image(cutout)
+
                 async def _read_validated(path):
                     blob = path.read_bytes()
-                    return await read_upload(UploadFile(
-                        file=io.BytesIO(blob), filename=path.name
-                    ))
+                    return await read_upload(UploadFile(file=io.BytesIO(blob), filename=path.name))
+
                 try:
                     original_img = asyncio.run(_read_validated(product))
                     candidate_img = asyncio.run(_read_validated(cutout))
@@ -177,18 +197,33 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
             # Scope the idempotency key to the manifest *path* + stable SKU ID;
             # edited inputs under the same ID must conflict, not create twice.
             key = "m5g_" + _sha((str(csv_path) + "\n" + sku).encode())[:56]
-            request_digest = _sha(json.dumps({
-                "sku_id": sku, "data": data,
-                "product_sha256": product_sha, "logo_sha256": logo_sha,
-                "product_cutout_sha256": cutout_sha,
-            }, ensure_ascii=False, sort_keys=True).encode())
-            prepared.append({
-                "sku_id": sku, "data": data, "product": product,
-                "logo": logo, "cutout": cutout,
-                "product_sha256": product_sha, "logo_sha256": logo_sha,
-                "cutout_sha256": cutout_sha, "idempotency_key": key,
-                "request_sha256": request_digest,
-            })
+            request_digest = _sha(
+                json.dumps(
+                    {
+                        "sku_id": sku,
+                        "data": data,
+                        "product_sha256": product_sha,
+                        "logo_sha256": logo_sha,
+                        "product_cutout_sha256": cutout_sha,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode()
+            )
+            prepared.append(
+                {
+                    "sku_id": sku,
+                    "data": data,
+                    "product": product,
+                    "logo": logo,
+                    "cutout": cutout,
+                    "product_sha256": product_sha,
+                    "logo_sha256": logo_sha,
+                    "cutout_sha256": cutout_sha,
+                    "idempotency_key": key,
+                    "request_sha256": request_digest,
+                }
+            )
         except (BatchError, ValidationError, OSError, ValueError) as exc:
             raise BatchError(f"CSV 第 {line} 行校验失败：{exc}") from exc
     return _sha(raw_csv), prepared
@@ -197,8 +232,7 @@ def preflight(csv_path: Path) -> tuple[str, list[dict]]:
 def _write_json_atomic(destination: Path, value: dict) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-    staging.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-                       encoding="utf-8")
+    staging.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(staging, destination)
 
 
@@ -241,8 +275,11 @@ def run_batch(
         state = json.loads(output.read_text(encoding="utf-8"))
         if state.get("manifest_sha256") != manifest_sha:
             raise BatchError("导入清单已经变化；请使用新批次目录，不允许覆盖已有记录")
-        if state.get("schema_version") != SCHEMA or state.get("mode") != "apply" or \
-                not isinstance(state.get("rows"), dict):
+        if (
+            state.get("schema_version") != SCHEMA
+            or state.get("mode") != "apply"
+            or not isinstance(state.get("rows"), dict)
+        ):
             raise BatchError("现有批次账本结构不合法，拒绝续跑")
         if set(state["rows"]) - set(expected_sku_ids):
             raise BatchError("现有批次账本包含当前 CSV 之外的 SKU")
@@ -257,8 +294,10 @@ def run_batch(
             raise BatchError("现有批次账本的预期 SKU 数量不一致")
     else:
         state = {
-            "schema_version": SCHEMA, "manifest_sha256": manifest_sha,
-            "mode": "apply", "rows": {},
+            "schema_version": SCHEMA,
+            "manifest_sha256": manifest_sha,
+            "mode": "apply",
+            "rows": {},
         }
     if apply:
         state["expected_sku_ids"] = expected_sku_ids
@@ -268,7 +307,8 @@ def run_batch(
         state["completed"] = False
 
     plan = {
-        "schema_version": SCHEMA, "manifest_sha256": manifest_sha,
+        "schema_version": SCHEMA,
+        "manifest_sha256": manifest_sha,
         "mode": "apply" if apply else "check",
         "total_skus": len(prepared),
         "no_paid_model": True,
@@ -281,13 +321,15 @@ def run_batch(
 
     def report(phase: str, item: dict, poster_id: str | None = None) -> None:
         if progress_callback is not None:
-            progress_callback({
-                "phase": phase,
-                "processed": len(state["rows"]),
-                "total": len(prepared),
-                "current_sku": item["sku_id"] if phase != "COMPLETED" else None,
-                "poster_id": poster_id,
-            })
+            progress_callback(
+                {
+                    "phase": phase,
+                    "processed": len(state["rows"]),
+                    "total": len(prepared),
+                    "current_sku": item["sku_id"] if phase != "COMPLETED" else None,
+                    "poster_id": poster_id,
+                }
+            )
 
     # The existing local-only FastAPI route owns upload validation, storage,
     # and idempotency. Web batches avoid re-running app startup recovery inside
@@ -309,7 +351,9 @@ def run_batch(
 
             files = _file_parts(item)
             result = client.post(
-                "/api/posters", files=files, data=item["data"],
+                "/api/posters",
+                files=files,
+                data=item["data"],
                 headers={"Idempotency-Key": item["idempotency_key"]},
             )
             if result.status_code != 201:
@@ -326,7 +370,8 @@ def run_batch(
             except FileNotFoundError as exc:
                 raise BatchError(f"{sku}：API 结果与本地海报存储不一致") from exc
             state["rows"][sku] = {
-                "poster_id": poster_id, "version": 1,
+                "poster_id": poster_id,
+                "version": 1,
                 "request_sha256": item["request_sha256"],
                 "product_sha256": item["product_sha256"],
                 "logo_sha256": item["logo_sha256"],
@@ -359,13 +404,15 @@ def run_batch(
         "poster_ids": {sku: row["poster_id"] for sku, row in state["rows"].items()},
     }
     if progress_callback is not None:
-        progress_callback({
-            "phase": "COMPLETED",
-            "processed": len(state["rows"]),
-            "total": len(prepared),
-            "current_sku": None,
-            "poster_id": None,
-        })
+        progress_callback(
+            {
+                "phase": "COMPLETED",
+                "processed": len(state["rows"]),
+                "total": len(prepared),
+                "current_sku": None,
+                "poster_id": None,
+            }
+        )
     return result
 
 
@@ -374,10 +421,12 @@ def main() -> int:
         description="Prepare real product SKUs offline; import only with --apply"
     )
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path,
-                        default=Path("data/eval_runs/m5g_import"))
-    parser.add_argument("--apply", action="store_true",
-                        help="Actually create local-background posters (no AI calls)")
+    parser.add_argument("--output-dir", type=Path, default=Path("data/eval_runs/m5g_import"))
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually create local-background posters (no AI calls)",
+    )
     args = parser.parse_args()
     try:
         result = run_batch(args.manifest, args.output_dir, apply=args.apply)

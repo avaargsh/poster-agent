@@ -7,6 +7,7 @@ accuracy, visual quality, or production pass rates.
 Positive class = defective visible field.  Detector positive = FAIL.
 UNVERIFIED is an abstention, never silently treated as PASS.
 """
+
 from __future__ import annotations
 
 import csv
@@ -65,7 +66,9 @@ class BenchmarkDataset(BaseModel):
             if set(case.truth_defects) - set(self.target_fields):
                 raise ValueError(f"{case.id}: ground truth outside target_fields")
         if self.kind == "human_annotated_real_images":
-            raise ValueError("Real-image benchmark requires a separate image/annotation loader; not supported here")
+            raise ValueError(
+                "Real-image benchmark requires a separate image/annotation loader; not supported here"
+            )
         return self
 
 
@@ -73,8 +76,7 @@ def _make_lines(case: BenchmarkCase) -> list[dict]:
     # The visible_text ground-truth annotation is deliberately NEVER passed to
     # the evaluator; only OCR transcripts are passed.
     return [
-        {"text": line, "score": 1.0} if isinstance(line, str)
-        else line.model_dump()
+        {"text": line, "score": 1.0} if isinstance(line, str) else line.model_dump()
         for line in case.ocr_lines
     ]
 
@@ -107,8 +109,12 @@ def metrics(outcomes: list[str]) -> dict:
         "assessed": assessed,
         "abstained": abstain_good + abstain_defect,
         "confusion": {
-            "TP": tp, "FP": fp, "FN": fn, "TN": tn,
-            "ABSTAIN_GOOD": abstain_good, "ABSTAIN_DEFECT": abstain_defect,
+            "TP": tp,
+            "FP": fp,
+            "FN": fn,
+            "TN": tn,
+            "ABSTAIN_GOOD": abstain_good,
+            "ABSTAIN_DEFECT": abstain_defect,
         },
         "coverage": _safe_ratio(assessed, assessed + abstain_good + abstain_defect),
         "precision_on_assessed": precision,
@@ -135,25 +141,39 @@ def run_dataset(dataset: BenchmarkDataset) -> tuple[dict, list[dict]]:
             predicted = result.status
             defective = field in case.truth_defects
             case_predictions.append(predicted)
-            rows.append({
-                "case_id": case.id, "category": case.category, "scenario": case.scenario,
-                "field": field, "truth_defective": defective, "prediction": predicted,
-                "outcome": _classification(predicted, defective),
-                "ocr_status": case.ocr_status,
-                "notes": result.detail,
-            })
+            rows.append(
+                {
+                    "case_id": case.id,
+                    "category": case.category,
+                    "scenario": case.scenario,
+                    "field": field,
+                    "truth_defective": defective,
+                    "prediction": predicted,
+                    "outcome": _classification(predicted, defective),
+                    "ocr_status": case.ocr_status,
+                    "notes": result.detail,
+                }
+            )
         verdict = (
-            "FAIL" if "FAIL" in case_predictions else
-            "UNVERIFIED" if "UNVERIFIED" in case_predictions else "PASS"
+            "FAIL"
+            if "FAIL" in case_predictions
+            else "UNVERIFIED"
+            if "UNVERIFIED" in case_predictions
+            else "PASS"
         )
-        rows.append({
-            "case_id": case.id, "category": case.category, "scenario": case.scenario,
-            "field": "__case__", "truth_defective": bool(case.truth_defects),
-            "prediction": verdict,
-            "outcome": _classification(verdict, bool(case.truth_defects)),
-            "ocr_status": case.ocr_status,
-            "notes": "case-level aggregate across target text fields",
-        })
+        rows.append(
+            {
+                "case_id": case.id,
+                "category": case.category,
+                "scenario": case.scenario,
+                "field": "__case__",
+                "truth_defective": bool(case.truth_defects),
+                "prediction": verdict,
+                "outcome": _classification(verdict, bool(case.truth_defects)),
+                "ocr_status": case.ocr_status,
+                "notes": "case-level aggregate across target text fields",
+            }
+        )
     fields = [r for r in rows if r["field"] != "__case__"]
     cases = [r for r in rows if r["field"] == "__case__"]
     report = {
@@ -178,7 +198,8 @@ def run_dataset(dataset: BenchmarkDataset) -> tuple[dict, list[dict]]:
                 "outcome": r["outcome"],
                 "scenario": r["scenario"],
             }
-            for r in rows if r["outcome"] in ("FP", "FN", "ABSTAIN_DEFECT")
+            for r in rows
+            if r["outcome"] in ("FP", "FN", "ABSTAIN_DEFECT")
         ],
     }
     return report, rows
@@ -199,7 +220,9 @@ def evaluate_file(source: Path, output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "benchmark_summary.json"
     details_path = output_dir / "benchmark_cases.csv"
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     with details_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
