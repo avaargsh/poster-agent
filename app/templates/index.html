@@ -364,6 +364,23 @@ pre{max-width:100%}
 <section id="batchResults" class="batch-results" hidden><h3>生成完成，接下来检查海报</h3>
 <p class="tip">可逐张审核，也可下载含方形和 4:5 图片的审核包。生成完成不代表审核通过。</p><div class="actions"><button id="reviewCurrentBatch" type="button" class="secondary" disabled>审核当前批次</button><button id="prepareM6Package" type="button" class="secondary" disabled>准备离线审核包</button><button id="downloadM6Package" type="button" class="secondary" disabled>下载审核包 ZIP</button></div>
 <p id="m6PackageStatus" class="tip" aria-live="polite">准备后可下载图片与待填审核表。</p>
+<div class="actions"><button id="openM6CutoutReview" type="button" class="secondary" disabled>逐 SKU 检查商品抠图</button></div>
+<section id="m6CutoutReviewPanel" class="mt" hidden aria-label="M6 透明抠图人工质量审核">
+<h4>商品抠图人工复核</h4>
+<p class="tip">左侧原图、右侧透明候选。在本地逐项检查主体轮廓、边缘与品牌标识。操作员评价会保留历史 CSV；来源哈希和原图保持冻结。</p>
+<div class="row"><label for="m6CutoutSku">选择 SKU</label><select id="m6CutoutSku"></select></div>
+<p id="m6CutoutStatus" class="tip" role="status" aria-live="polite"></p>
+<img id="m6CutoutComparison" style="width:100%;max-width:820px;border-radius:10px" alt="左侧商品原图、右侧棋盘背景透明抠图，供人工审核">
+<p id="m6CutoutMachineRisks" class="tip"></p>
+<div class="row"><label for="m6CutoutSubject">商品主体完整性</label><select id="m6CutoutSubject"><option value="">待核对</option><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>
+<div class="row"><label for="m6CutoutEdge">抠图边缘与残影</label><select id="m6CutoutEdge"><option value="">待核对</option><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>
+<div class="row"><label for="m6CutoutBrand">包装与品牌标识保真</label><select id="m6CutoutBrand"><option value="">待核对</option><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>
+<div class="row"><label for="m6CutoutDecision">操作员总评</label><select id="m6CutoutDecision"><option value="">待核对</option><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>
+<div class="row"><label for="m6CutoutReviewer">审核员标识</label><input id="m6CutoutReviewer" maxlength="80" placeholder="至少 2 个字符"></div>
+<div class="row"><label for="m6CutoutNotes">审核意见（FAIL 必填）</label><textarea id="m6CutoutNotes" maxlength="500" rows="2"></textarea></div>
+<div class="actions"><button id="m6CutoutSave" type="button" disabled>保存这条人工复核</button><button id="m6CutoutReload" type="button" class="secondary">重新加载最新审核表</button></div>
+<p class="tip">保存使用审核 CSV SHA-256 并发校验。操作员 PASS 是人工声明；模型真实性、授权和正式商品质量验收需要各自独立验证。</p>
+</section>
 <details class="disclosure"><summary>OCR 证据与标注工具</summary>
 <p id="m6OCRCaptureStatus" class="tip" aria-live="polite">OCR 尚未启动。先在本机配置 POSTER_M6_OCR_DET_MODEL_DIR 和 POSTER_M6_OCR_REC_MODEL_DIR，并预先安装 PaddleOCR 3.x、PaddlePaddle 与对应离线模型。</p>
 <div class="actions"><button id="captureM6OCR" type="button" class="secondary" disabled>显式运行本机 PaddleOCR（耗费 CPU/GPU）</button></div>
@@ -1825,6 +1842,7 @@ function resetBatchForNewFiles(){
   $('downloadM6Overlay').disabled=true;
   $('inspectM6OCR').disabled=true;
   resetM6OCRReview();
+  clearM6CutoutReview();
   $('m6OverlayStatus').textContent='先准备 M6 审核包并在本机采集 OCR 证据。';
   $('m6PackageStatus').textContent='批次尚未完成，不能生成 M6 审核包。';
   $('batchProgress').value=0;
@@ -2130,6 +2148,131 @@ $('applyBatch').addEventListener('click',async()=>{
   }
 });
 
+let m6CutoutReviewState=null;
+let m6CutoutReviewBatch=null;
+let m6CutoutReviewRequest=0;
+function clearM6CutoutReview(){
+  m6CutoutReviewRequest++;
+  m6CutoutReviewState=null;
+  m6CutoutReviewBatch=null;
+  $('m6CutoutReviewPanel').hidden=true;
+  $('openM6CutoutReview').disabled=true;
+  $('m6CutoutSave').disabled=true;
+  $('m6CutoutComparison').removeAttribute('src');
+  $('m6CutoutSku').replaceChildren();
+  $('m6CutoutStatus').textContent='';
+  $('m6CutoutMachineRisks').textContent='';
+}
+function drawM6CutoutReview(){
+  const state=m6CutoutReviewState;
+  if(!state||currentBatchId!==m6CutoutReviewBatch)return;
+  const sku=$('m6CutoutSku').value;
+  const row=state.rows.find(x=>x.sku_id===sku);
+  const active=row?.quality_state==='REVIEW_REQUIRED';
+  $('m6CutoutSave').disabled=!active;
+  $('m6CutoutComparison').removeAttribute('src');
+  if(active&&row.comparison_url){
+    $('m6CutoutComparison').src=row.comparison_url;
+  }
+  $('m6CutoutMachineRisks').textContent=active
+    ? '机器风险提示：'+(row.machine_risks||'未触发规则')+
+      ' · 主体覆盖率 '+row.foreground_fraction+
+      ' · 半透明比例 '+row.soft_alpha_fraction
+    : '此 SKU 未采用有效的透明抠图候选，当前无须抠图人工评价。';
+  for(const [id,key] of [
+    ['m6CutoutSubject','subject_integrity_review'],
+    ['m6CutoutEdge','edge_artifact_review'],
+    ['m6CutoutBrand','brand_mark_review'],
+    ['m6CutoutDecision','human_accept']
+  ]){
+    const value=row?.[key]||'';
+    $(id).value=['PASS','FAIL'].includes(value)?value:'';
+    $(id).disabled=!active;
+  }
+  $('m6CutoutReviewer').value=row?.reviewer_alias||'';
+  $('m6CutoutNotes').value=row?.reviewer_notes||'';
+  $('m6CutoutReviewer').disabled=!active;
+  $('m6CutoutNotes').disabled=!active;
+  $('m6CutoutStatus').textContent=sku+' · '+(row?.human_accept||'UNVERIFIED')+
+    ' · 已核对该批次的冻结来源文件。已记录的操作员评价仅供后续独立验收。';
+  $('m6CutoutReviewPanel').hidden=false;
+}
+async function loadM6CutoutReview(batchId,sku=null){
+  const sequence=++m6CutoutReviewRequest;
+  $('m6CutoutStatus').textContent='正在校验本地 M6 抠图来源与 SHA-256…';
+  $('m6CutoutSave').disabled=true;
+  try{
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-cutout-review');
+    const data=await response.json();
+    if(sequence!==m6CutoutReviewRequest||currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(data));
+    if(!Array.isArray(data.rows)||!data.rows.length)throw Error('没有有效的 SKU 审核记录');
+    m6CutoutReviewState=data;
+    m6CutoutReviewBatch=batchId;
+    const picker=$('m6CutoutSku');
+    const prior=sku||picker.value;
+    picker.replaceChildren();
+    for(const row of data.rows){
+      const opt=document.createElement('option');
+      opt.value=row.sku_id;opt.textContent=row.sku_id+
+        ' · '+(row.human_accept||'UNVERIFIED');picker.appendChild(opt);
+    }
+    picker.value=data.rows.some(x=>x.sku_id===prior)?prior:
+      (data.rows.find(x=>x.quality_state==='REVIEW_REQUIRED')||data.rows[0]).sku_id;
+    drawM6CutoutReview();
+  }catch(err){
+    if(sequence!==m6CutoutReviewRequest||currentBatchId!==batchId)return;
+    m6CutoutReviewState=null;
+    $('m6CutoutSave').disabled=true;
+    $('m6CutoutComparison').removeAttribute('src');
+    $('m6CutoutReviewPanel').hidden=false;
+    $('m6CutoutStatus').textContent='抠图审核来源校验失败：'+err.message+
+      '。如其他页面修改了审核表，请点击重新加载。';
+  }
+}
+$('openM6CutoutReview').addEventListener('click',()=>{
+  if(currentBatchId&&lastBatchStatus==='COMPLETED')
+    loadM6CutoutReview(currentBatchId);
+});
+$('m6CutoutReload').addEventListener('click',()=>{
+  if(currentBatchId)loadM6CutoutReview(currentBatchId);
+});
+$('m6CutoutSku').addEventListener('change',drawM6CutoutReview);
+$('m6CutoutSave').addEventListener('click',async()=>{
+  const state=m6CutoutReviewState;
+  if(!state||state.batch_id!==currentBatchId)return;
+  const batchId=state.batch_id,sku=$('m6CutoutSku').value;
+  const params={
+    expected_csv_sha256:state.csv_sha256,sku_id:sku,
+    subject_integrity_review:$('m6CutoutSubject').value,
+    edge_artifact_review:$('m6CutoutEdge').value,
+    brand_mark_review:$('m6CutoutBrand').value,
+    human_accept:$('m6CutoutDecision').value,
+    reviewer_alias:$('m6CutoutReviewer').value,
+    reviewer_notes:$('m6CutoutNotes').value,
+  };
+  $('m6CutoutSave').disabled=true;
+  try{
+    if(['subject_integrity_review','edge_artifact_review','brand_mark_review',
+         'human_accept'].some(key=>!['PASS','FAIL'].includes(params[key])))
+      throw Error('请完成主体、边缘、品牌和总评四项审核');
+    const response=await fetch('/api/batches/'+encodeURIComponent(batchId)+'/m6-cutout-review',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)
+    });
+    const result=await response.json();
+    if(currentBatchId!==batchId)return;
+    if(!response.ok)throw Error(errorText(result));
+    await loadM6CutoutReview(batchId,sku);
+    if(currentBatchId===batchId)$('m6CutoutStatus').textContent=
+      '人工审核已原子保存，原始 CSV 版本已留存。当前状态：'+result.status+
+      '。模型真实性与商品质量由独立验收确认。';
+  }catch(err){
+    if(currentBatchId!==batchId)return;
+    $('m6CutoutStatus').textContent='保存失败：'+err.message+
+      '。请核对输入；若审核表已变化，请重新加载。';
+    $('m6CutoutSave').disabled=true;
+  }
+});
 async function refreshM6PackageStatus(batchId){
   if(currentBatchId!==batchId)return;
   const label=$('m6PackageStatus');
@@ -2142,6 +2285,7 @@ async function refreshM6PackageStatus(batchId){
     label.title='本地审核目录：'+result.relative_directory;
     $('prepareM6Package').disabled=result.prepared;
     $('downloadM6Package').disabled=!result.prepared;
+    $('openM6CutoutReview').disabled=!result.prepared;
     if(result.prepared)refreshM6OverlayStatus(batchId);
     else{
       $('captureM6OCR').disabled=true;
@@ -2158,6 +2302,7 @@ async function refreshM6PackageStatus(batchId){
     if(currentBatchId===batchId){
       $('prepareM6Package').disabled=true;
       $('downloadM6Package').disabled=true;
+      $('openM6CutoutReview').disabled=true;
       $('captureM6OCR').disabled=true;
       $('m6OCRCaptureStatus').textContent='M6 审核包预检未通过，无法执行 OCR。';
       $('prepareM6Overlay').disabled=true;
@@ -2180,6 +2325,7 @@ $('prepareM6Package').addEventListener('click',async()=>{
     if(currentBatchId!==batchId)return;
     if(!response.ok)throw Error(errorText(result));
     $('downloadM6Package').disabled=false;
+    $('openM6CutoutReview').disabled=false;
     refreshM6OverlayStatus(batchId);
     label.textContent='离线审核包已准备好：'+result.batch_sku_count+' 个商品 · '+result.review_rows_created+' 条待审记录'+
       ' · 缺失输出 '+result.missing_output_count+
