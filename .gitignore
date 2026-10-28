@@ -44,3 +44,5 @@ data/**/*.pdf
 *.db
 /.idea/
 .workbuddy/
+.playwright-mcp/
+.qoder/
