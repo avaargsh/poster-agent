@@ -1852,6 +1852,8 @@ function resetBatchForNewFiles(){
 }
 function renderBatchState(state){
   if(!state || state.batch_id!==currentBatchId)return;
+  if(m6CutoutReviewBatch && m6CutoutReviewBatch!==state.batch_id)
+    clearM6CutoutReview();
   localStorage.setItem(BATCH_STORAGE_KEY,state.batch_id);
   lastBatchStatus=state.status;
   $('batchResults').hidden=state.status!=='COMPLETED';
