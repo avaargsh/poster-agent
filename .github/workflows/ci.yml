@@ -72,7 +72,9 @@ jobs:
         run: |
           uv lock --check
           uv sync --locked
-      - name: Ruff safety lint (no wholesale style rewrite)
+      - name: Check Python formatting
+        run: uv run --locked ruff format --check app tests scripts evals
+      - name: Ruff syntax, unused-name and import-order checks
         run: uv run --locked ruff check app tests scripts evals
       - name: Check tracked secrets and local customer data (no network)
         run: uv run --locked python -m scripts.check_repository_readiness

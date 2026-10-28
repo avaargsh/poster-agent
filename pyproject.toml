@@ -40,9 +40,8 @@ line-length = 100
 extend-exclude = ["data", ".venv", ".venv-ocr"]
 
 [tool.ruff.lint]
-# Guard against syntax and undefined-name bugs first, without reformatting
-# unrelated legacy modules as part of this dependency migration.
-select = ["E4", "E9", "F63", "F7", "F82"]
+# Keep syntax, unused-name and import-order checks aligned with CI.
+select = ["E4", "E9", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

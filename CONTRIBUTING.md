@@ -13,6 +13,7 @@
 ```bash
 uv python install 3.12
 uv sync --locked
+uv run --locked ruff format --check app tests scripts evals
 uv run --locked ruff check app tests scripts evals
 uv run --locked python -m pytest -q
 uv run --locked python -m scripts.check_repository_readiness
@@ -22,6 +23,23 @@ uv run --locked uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 无需手动创建 venv；运行前确保本机有中文字体。本地运行默认使用免费 `background_mode=local`。真实 Qwen API 可能收费，不能作为 CI 测试默认路径。
 
 PaddleOCR 是可选的模型依赖，不会在默认 `uv sync --locked` 下载推理模型。要运行真实 OCR，依照 [uv 手册](docs/uv-workflow.md) 单独准备平台专属 PaddlePaddle 环境；已保存 Linux CPU 单图和 Mac M1 本地程序样例的运行记录，见 README 的证据说明；这些记录不证明真实客户图片的识别准确率。
+
+## 代码规范
+
+Python 统一使用 Ruff，配置位于 `pyproject.toml`。按 Python 3.12、100 字符目标行宽、四空格缩进整理；标准库、第三方依赖及项目内导入分组排序。提交前执行：
+
+```bash
+uv run --locked ruff check --fix app tests scripts evals
+uv run --locked ruff format app tests scripts evals
+uv run --locked ruff check app tests scripts evals
+uv run --locked ruff format --check app tests scripts evals
+```
+
+格式检查、导入顺序、未使用名称和语法检查由 CI 持续执行。使用 `uv sync --locked` 保持本机 Ruff 版本与锁文件一致。不要为通过检查批量添加忽略规则；确需保留供外部调用的导入，应显式声明导出或就地说明理由。
+
+`.editorconfig` 统一 UTF-8、LF 与文件末尾换行，Markdown 保留有语义的行尾空格；`.gitattributes` 统一文本换行并将图片、字体和 PDF 标为二进制。JavaScript、HTML、JSON 和 YAML 使用两空格缩进。此轮未重写前端结构，也未新增 API、模型调用或依赖。
+
+格式整理与业务修改应分开提交。变更仍须通过完整测试；涉及工作台交互时，运行现有显式浏览器回归。
 
 ## PR 工作流与 CI 费用
 
