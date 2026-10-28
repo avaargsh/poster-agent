@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import csv
 import io
-import shutil
 import socket
 import subprocess
 import sys
 import time
+import tempfile
 from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
+
+from browser_support import browser_test_environment, chromium_launch_options
 
 
 def port_available():
@@ -28,13 +30,13 @@ def verify(condition, description):
         raise AssertionError(description)
 
 
-def main():
+def _run(env):
     port = port_available()
     origin = f"http://127.0.0.1:{port}"
     server = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app",
          "--host", "127.0.0.1", "--port", str(port), "--no-access-log"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, env=env,
     )
     try:
         for _ in range(80):
@@ -50,10 +52,7 @@ def main():
             raise RuntimeError("FastAPI did not start")
 
         with sync_playwright() as pw:
-            executable = shutil.which("google-chrome") or shutil.which(
-                "google-chrome-stable"
-            )
-            options = {"executable_path": executable} if executable else {}
+            options = chromium_launch_options()
             browser = pw.chromium.launch(
                 headless=True, args=["--no-sandbox"], **options
             )
@@ -120,6 +119,11 @@ def main():
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait(timeout=5)
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix="poster-browser-") as directory:
+        _run(browser_test_environment(directory))
 
 
 if __name__ == "__main__":

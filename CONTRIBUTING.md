@@ -1,6 +1,6 @@
 # Contributing to Poster Agent / 项目贡献指南
 
-> **状态说明（2026-10-23）：** 仓库当前为 **Public**，但尚未选择或添加开源许可证。公开可见不等于授予代码与素材的复制、修改或再分发许可；本页说明贡献流程，不代表项目已完成正式开源授权。
+> **状态说明（2026-10-28）：** 仓库已提供 Apache-2.0 许可证，见根目录 `LICENSE`。代码和素材权属、依赖许可及正式发布审查仍需独立完成，见 [发布准备清单](docs/open-source-release.md)。GitHub 当前状态本轮未联网复核。
 
 ## 贡献原则
 
@@ -21,7 +21,7 @@ uv run --locked uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 无需手动创建 venv；运行前确保本机有中文字体。本地运行默认使用免费 `background_mode=local`。真实 Qwen API 可能收费，不能作为 CI 测试默认路径。
 
-PaddleOCR 是可选的模型依赖，不会在默认 `uv sync --locked` 下载推理模型。要运行真实 OCR，依照 [uv 手册](docs/uv-workflow.md) 单独准备平台专属 PaddlePaddle 环境；仅 Linux CPU 单图曾经实测成功，不能据此声称 Mac M1 已实测成功。
+PaddleOCR 是可选的模型依赖，不会在默认 `uv sync --locked` 下载推理模型。要运行真实 OCR，依照 [uv 手册](docs/uv-workflow.md) 单独准备平台专属 PaddlePaddle 环境；已保存 Linux CPU 单图和 Mac M1 本地程序样例的运行记录，见 README 的证据说明；这些记录不证明真实客户图片的识别准确率。
 
 ## PR 工作流与 CI 费用
 

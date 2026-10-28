@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -18,6 +17,8 @@ from urllib.request import urlopen
 
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
+
+from browser_support import chromium_launch_options
 
 
 def _port():
@@ -72,10 +73,7 @@ def main():
             processed_buffer = io.BytesIO()
             processed.save(processed_buffer, format="PNG")
             with sync_playwright() as pw:
-                executable = shutil.which("google-chrome") or shutil.which(
-                    "google-chrome-stable"
-                )
-                opts = {"executable_path": executable} if executable else {}
+                opts = chromium_launch_options()
                 browser = pw.chromium.launch(
                     headless=True, args=["--no-sandbox"], **opts
                 )

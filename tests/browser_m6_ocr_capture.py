@@ -7,14 +7,16 @@ Never runs PaddleOCR, touches user assets or counts as model attestation.
 from __future__ import annotations
 
 import json
-import shutil
 import socket
 import subprocess
 import sys
 import time
+import tempfile
 from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
+
+from browser_support import browser_test_environment, chromium_launch_options
 
 
 def require(condition: bool, message: str):
@@ -28,13 +30,13 @@ def available_port():
         return s.getsockname()[1]
 
 
-def main():
+def _run(env):
     port = available_port()
     base_url = f"http://127.0.0.1:{port}"
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app",
          "--host", "127.0.0.1", "--port", str(port), "--no-access-log"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, env=env,
     )
     try:
         for attempt in range(90):
@@ -84,10 +86,9 @@ def main():
             )
 
         with sync_playwright() as playwright:
-            binary = shutil.which("google-chrome") or shutil.which("google-chrome-stable")
             browser = playwright.chromium.launch(
                 headless=True, args=["--no-sandbox"],
-                **({"executable_path": binary} if binary else {}),
+                **chromium_launch_options(),
             )
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -179,6 +180,11 @@ def main():
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix="poster-browser-") as directory:
+        _run(browser_test_environment(directory))
 
 
 if __name__ == "__main__":

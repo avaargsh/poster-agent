@@ -7,11 +7,11 @@
 使用固定的原图与授权登记、已成功执行的 M14 `cutout_trial.json`、M5g `batch_import_results.json` 和 M6 `m6_review_package/`，运行下面的命令。验证器逐 SKU 重读实际图片文件和创建凭据，检查 M14 输出清单与 M5g 输入 SHA-256 相同，再重放 M6 方形图片与 4:5 原生导出，校验其 SHA 和人工审核表的身份关系。所有文件保持原样，且不会启动模型、OCR 或付费服务。
 
 ```bash
-uv run --locked python -m scripts.verify_m14_lineage \\
-  --trial-dir data/eval_runs/u2netp_trial_001 \\
-  --source-manifest data/real_trial/real_skus.csv \\
-  --registry data/real_trial/m6_cohort_registry.csv \\
-  --m5g-journal data/eval_runs/m5g_trial_001/batch_import_results.json \\
+uv run --locked python -m scripts.verify_m14_lineage \
+  --trial-dir data/eval_runs/u2netp_trial_001 \
+  --source-manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
+  --m5g-journal data/eval_runs/m5g_trial_001/batch_import_results.json \
   --m6-package data/eval_runs/m5g_trial_001/m6_review_package
 ```
 
@@ -25,27 +25,30 @@ uv run --locked python -m scripts.verify_m14_lineage \\
 
 ```bash
 # 在仓库根目录执行（不自动下载模型，也不发送私有素材）
-export POSTER_CUTOUT_REMBG_HOME=\"$HOME/.rembg\"
-shasum -a 256 \"$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx\"
+export POSTER_CUTOUT_REMBG_HOME="$HOME/.rembg"
+shasum -a 256 "$POSTER_CUTOUT_REMBG_HOME/models/u2netp/u2netp.onnx"
 # 将人工核对过可信来源的 SHA-256 填入下面变量
 export POSTER_CUTOUT_MODEL_SHA256='<已核验的64位SHA256>'
 
 # 数据目录在 .gitignore 中；先填好授权登记表里的 AUTHORIZED/来源哈希/独立SKU审核
-uv run --locked python -m scripts.local_cutout_cohort \\
-  --manifest data/real_trial/real_skus.csv \\
-  --registry data/real_trial/m6_cohort_registry.csv \\
+uv run --locked python -m scripts.local_cutout_cohort \
+  --purpose quality_acceptance \
+  --manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
   --output-dir data/eval_runs/u2netp_trial_001
 
 # 清单/授权/模型全部就绪时，主动进行 20 SKU 本地推理
-uv run --locked python -m scripts.local_cutout_cohort \\
-  --manifest data/real_trial/real_skus.csv \\
-  --registry data/real_trial/m6_cohort_registry.csv \\
+uv run --locked python -m scripts.local_cutout_cohort \
+  --purpose quality_acceptance \
+  --manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
   --output-dir data/eval_runs/u2netp_trial_001 --apply
 
 # 只读验证已完成的生成账本、原图、抠图 PNG 和 M5g 清单
-uv run --locked python -m scripts.local_cutout_cohort \\
-  --manifest data/real_trial/real_skus.csv \\
-  --registry data/real_trial/m6_cohort_registry.csv \\
+uv run --locked python -m scripts.local_cutout_cohort \
+  --purpose quality_acceptance \
+  --manifest data/real_trial/real_skus.csv \
+  --registry data/real_trial/m6_cohort_registry.csv \
   --output-dir data/eval_runs/u2netp_trial_001 --verify
 ```
 
@@ -59,7 +62,13 @@ uv run --locked python -m scripts.local_cutout_cohort \\
 
 通过 `GET /api/batches/<batch_id>/m6-cutout-review` 可查看只读审核列表；`GET /api/batches/<batch_id>/m6-cutout-review/<sku_id>/comparison` 返回已验证对照 PNG；`POST /api/batches/<batch_id>/m6-cutout-review` 只允许更新当前 SKU 的人工审核字段。三种接口均使用现有本地网络限制和批次凭据门禁。下载 M6 ZIP 会包含最近一次有效的人工 CSV，`verify_m6_cutout_evidence` 可重新核对；原始图片和机器指标继续保持冻结。操作员标记 PASS 仍需独立的授权、真实模型执行、OCR 与商品质量验收。
 
-## 抠图候选的补充人工证据（M13）\n\nM6 准备包现在会额外产生 `m6_cutout_evidence.json`、`m6_cutout_reviews.csv`，以及每个实际使用抠图候选的 `images/<sku>-cutout-comparison.png`。左侧始终是原商品图，右侧是透明主体在棋盘背景上的实际像素。自动指标包括主体覆盖率、边缘接触比例、连通组件数量、半透明比例和原图保留区域 RGB 差异，全部只用于人工优先级；可视化呈现不推断商品真实性或切图质量合格。\n\n完成审核表时必须独立核对 subject_integrity_review（主体完整性）、edge_artifact_review（边缘与残影）、brand_mark_review（品牌与包装细节）；使用 PASS/FAIL，标记 reviewer_alias 和 UTC reviewed_at_utc，填写 human_accept。完整证据验证命令：`python -m scripts.verify_m6_cutout_evidence --package data/.../m6_review_package --journal data/.../batch_import_results.json`。要求 20 个独立 SKU，且验证会重读执行凭据、原始 PNG、抠图、对照图并重新计算诊断指标。断言是操作员声明，模型运行的真实 ONNX 来源需另行记录和独立验收；不要把此证据作为审核通过或实际运行真实性。\n\n## 1. 样本冻结
+## 抠图候选的补充人工证据（M13）
+
+M6 准备包现在会额外产生 `m6_cutout_evidence.json`、`m6_cutout_reviews.csv`，以及每个实际使用抠图候选的 `images/<sku>-cutout-comparison.png`。左侧始终是原商品图，右侧是透明主体在棋盘背景上的实际像素。自动指标包括主体覆盖率、边缘接触比例、连通组件数量、半透明比例和原图保留区域 RGB 差异，全部只用于人工优先级；可视化呈现不推断商品真实性或切图质量合格。
+
+完成审核表时必须独立核对 subject_integrity_review（主体完整性）、edge_artifact_review（边缘与残影）、brand_mark_review（品牌与包装细节）；使用 PASS/FAIL，标记 reviewer_alias 和 UTC reviewed_at_utc，填写 human_accept。完整证据验证命令：`python -m scripts.verify_m6_cutout_evidence --package data/.../m6_review_package --journal data/.../batch_import_results.json`。要求 20 个独立 SKU，且验证会重读执行凭据、原始 PNG、抠图、对照图并重新计算诊断指标。断言是操作员声明，模型运行的真实 ONNX 来源需另行记录和独立验收；不要把此证据作为审核通过或实际运行真实性。
+
+## 1. 样本冻结
 
 - 至少 20 个**不同 SKU**，每个 SKU 有合法使用的商品图片及可选 Logo；同 SKU 的多次生成不增加独立样本数。
 - 覆盖：透明/复杂背景、浅色/深色包装、长短中文标题、整数/小数价格、带/不带原价、不同 CTA 长度。

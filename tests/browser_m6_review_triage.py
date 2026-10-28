@@ -9,7 +9,6 @@ from __future__ import annotations
 import base64
 import json
 import socket
-import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
+
+from browser_support import chromium_launch_options
 
 SKU_IDS = ("sku-one", "sku-two", "sku-three")
 VARIANTS = ("square", "feed_4x5_native")
@@ -201,10 +202,7 @@ def main() -> None:
                     }]
                 }))
         with sync_playwright() as pw:
-            system_chrome = shutil.which("google-chrome") or shutil.which(
-                "google-chrome-stable"
-            )
-            launch = {"executable_path": system_chrome} if system_chrome else {}
+            launch = chromium_launch_options()
             browser = pw.chromium.launch(
                 headless=True, args=["--no-sandbox"], **launch
             )
