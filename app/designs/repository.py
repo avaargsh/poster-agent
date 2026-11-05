@@ -543,7 +543,7 @@ class DesignRepository:
         """
         if (
             not isinstance(run_id, str)
-            or not re.fullmatch(r"[a-zA-Z0-9_-]{8,128}", run_id)
+            or not re.fullmatch(r"[a-f0-9]{32}", run_id)
             or not isinstance(confirmed_spec_digest, str)
             or not re.fullmatch(r"[0-9a-f]{64}", confirmed_spec_digest)
         ):
@@ -551,17 +551,6 @@ class DesignRepository:
         try:
             with self._write_transaction() as connection:
                 document, _, _ = self._approval_snapshot(connection, document_id)
-                title_nodes = [
-                    node
-                    for node in document.nodes
-                    if isinstance(node, TextNode) and node.role == "title"
-                ]
-                if (
-                    len(title_nodes) != 1
-                    or title_nodes[0].plain_text != confirmed_title
-                    or document.facts.price != confirmed_price
-                ):
-                    raise InvalidCommandError()
                 existing = connection.execute(
                     """
                     SELECT brief_run_id, confirmed_spec_digest, linked_revision, linked_at
@@ -583,6 +572,17 @@ class DesignRepository:
                         "linked_at": existing["linked_at"],
                         "replayed": True,
                     }
+                title_nodes = [
+                    node
+                    for node in document.nodes
+                    if isinstance(node, TextNode) and node.role == "title"
+                ]
+                if (
+                    len(title_nodes) != 1
+                    or title_nodes[0].plain_text != confirmed_title
+                    or document.facts.price != confirmed_price
+                ):
+                    raise InvalidCommandError()
                 if document.revision != 1:
                     raise RevisionConflictError()
                 linked_at = _now()
