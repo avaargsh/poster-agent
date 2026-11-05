@@ -116,9 +116,7 @@ def test_brief_link_rejects_unapproved_or_changed_revision(
         assert client.get(url, headers=headers).json()["link"] is None
 
 
-def test_brief_link_rejects_mismatched_business_facts(
-    design_paths, product_bytes, monkeypatch
-):
+def test_brief_link_rejects_mismatched_business_facts(design_paths, product_bytes, monkeypatch):
     monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", "x" * 48)
     headers = {"Authorization": "Bearer " + "x" * 48}
     state = {
@@ -136,9 +134,9 @@ def test_brief_link_rejects_mismatched_business_facts(
         result = client.post(url, json=payload, headers=headers)
         assert result.status_code == 422
         assert result.json()["error"]["code"] == "INVALID_COMMAND"
-        state["confirmed_spec"] = PosterSpec(
-            title="双十一牙刷", price="200.00"
-        ).model_dump(mode="json")
+        state["confirmed_spec"] = PosterSpec(title="双十一牙刷", price="200.00").model_dump(
+            mode="json"
+        )
         result = client.post(url, json=payload, headers=headers)
         assert result.status_code == 422
         assert client.get(url, headers=headers).json()["link"] is None
