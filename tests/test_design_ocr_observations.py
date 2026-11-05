@@ -85,9 +85,7 @@ def test_ocr_preview_match_and_false_price_prefix_fail_closed(design_paths, prod
         assert by_field["price"]["status"] == "MISMATCH"
 
 
-def test_ocr_preview_missing_or_low_confidence_lines_remain_unverified(
-    design_paths, product_bytes
-):
+def test_ocr_preview_missing_or_low_confidence_lines_remain_unverified(design_paths, product_bytes):
     with TestClient(app) as client:
         doc = create_approved(client, product_bytes)
         url = f"/api/designs/{doc}/revisions/1/ocr-evaluation-preview"
