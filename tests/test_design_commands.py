@@ -142,6 +142,22 @@ def test_set_text_accepts_the_full_supported_length_and_keeps_line_limit(repo, d
     assert 1 <= len(title.lines) <= 12
 
 
+@pytest.mark.parametrize("text", ["Hello world", "A" + " " * 20 + "B", "  Hello  world  "])
+def test_narrow_text_box_preserves_spaces_without_blank_lines(repo, document, text):
+    narrowed = repo.execute(
+        document.document_id,
+        batch(1, TransformNode(node_id="title", width=50)),
+    ).document
+    updated = repo.execute(
+        document.document_id,
+        batch(narrowed.revision, SetText(node_id="title", text=text)),
+    ).document
+    title = node(updated, "title")
+    assert title.plain_text == text
+    assert all(line.text.strip() for line in title.lines)
+    assert len(title.lines) <= 12
+
+
 @pytest.mark.parametrize(
     "text",
     [

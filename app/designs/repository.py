@@ -62,6 +62,7 @@ from .models import (
 )
 from .rendering import ALLOWED_FORMATS, DesignRenderError, render_svg
 from .templates import create_template
+from .text_layout import split_text_chunks
 
 _DOCUMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ASSET_FILE_SUFFIX = ".bin"
@@ -747,10 +748,7 @@ class DesignRepository:
 
         base_width = max(1, int(node.width // max(node.font_size, 1.0)))
         characters_per_line = max(base_width, math.ceil(len(text) / 12))
-        chunks = [
-            text[index : index + characters_per_line]
-            for index in range(0, len(text), characters_per_line)
-        ]
+        chunks = split_text_chunks(text, characters_per_line)
         return [
             TextLine(
                 text=chunk,

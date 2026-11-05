@@ -92,6 +92,14 @@ def test_template_title_uses_explicit_line_coordinates():
             assert line.y > title.lines[index - 1].y
 
 
+def test_template_preserves_internal_spaces_across_line_boundaries():
+    text = "Hello" + " " * 24 + "world"
+    document = create_template(title=text, price=Decimal("99"), product_asset_id="product")
+    title = next(node for node in document.nodes if node.role == "title")
+    assert title.plain_text == text
+    assert all(line.text.strip() for line in title.lines)
+
+
 def test_template_is_deterministic_and_changes_identity_with_inputs():
     first = make_document()
     second = make_document()

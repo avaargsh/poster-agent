@@ -13,6 +13,7 @@ processes lock different inodes for the same logical path.
 from __future__ import annotations
 
 import os
+import stat
 import threading
 from pathlib import Path
 from typing import BinaryIO
@@ -102,6 +103,7 @@ class DesignManager:
 
             self._acquire_locks()
             try:
+                self._validate_database_file()
                 repository = DesignRepository(self.db_path, self.asset_dir)
             except DesignStorageBusy:
                 self._release_locks()
@@ -133,6 +135,7 @@ class DesignManager:
 
         import fcntl
 
+        self._validate_database_file()
         lock_paths = sorted(
             {_lock_path(self.db_path), _lock_path(self.asset_dir)},
             key=str,
@@ -156,6 +159,19 @@ class DesignManager:
                 self._release_locks()
                 raise DesignStorageUnavailable() from None
             self._lock_streams.append(stream)
+
+    def _validate_database_file(self) -> None:
+        # Filename-based locks cannot protect aliases of the same SQLite file.
+        # Check before locking and again before opening the repository. Keep
+        # this lazy so legacy requests never inspect or create design storage.
+        try:
+            metadata = self.db_path.lstat()
+        except FileNotFoundError:
+            return
+        except OSError:
+            raise DesignStorageUnavailable() from None
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise DesignStorageUnavailable()
 
     def _release_locks(self) -> None:
         streams, self._lock_streams = self._lock_streams, []

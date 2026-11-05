@@ -27,6 +27,7 @@ from .models import (
     format_price_text,
     validate_plain_text,
 )
+from .text_layout import split_text_chunks
 
 TITLE_MAX_CHARS = 35
 TITLE_LINE_MAX_CHARS = 12
@@ -53,10 +54,7 @@ class _TemplateTitle(BaseModel):
 
 
 def _wrap_title(title: str, *, x: float, first_y: float) -> list[TextLine]:
-    chunks = [
-        title[index : index + TITLE_LINE_MAX_CHARS]
-        for index in range(0, len(title), TITLE_LINE_MAX_CHARS)
-    ]
+    chunks = split_text_chunks(title, TITLE_LINE_MAX_CHARS)
     return [
         TextLine(text=chunk, x=x, y=first_y + index * TITLE_LINE_HEIGHT)
         for index, chunk in enumerate(chunks)
