@@ -58,9 +58,10 @@ def test_brief_link_auth_replay_conflict_and_restart(design_paths, product_bytes
         assert first.status_code == 201, first.text
         assert first.json()["linked_revision"] == 1
         assert first.json()["replayed"] is False
-        assert first.json()["confirmed_spec_digest"] == hashlib.sha256(
-            spec.model_dump_json().encode("utf-8")
-        ).hexdigest()
+        assert (
+            first.json()["confirmed_spec_digest"]
+            == hashlib.sha256(spec.model_dump_json().encode("utf-8")).hexdigest()
+        )
         assert client.post(url, json=payload, headers=headers).status_code == 200
         conflict = client.post(
             url, json={"brief_run_id": "another-approved-run-002"}, headers=headers
@@ -71,9 +72,12 @@ def test_brief_link_auth_replay_conflict_and_restart(design_paths, product_bytes
     with TestClient(app) as client:
         assert client.get(url, headers=headers).json()["link"]["brief_run_id"] == run_id
     with sqlite3.connect(design_paths["database"]) as db:
-        assert db.execute(
-            "SELECT COUNT(*) FROM design_brief_links WHERE document_id=?", (doc,)
-        ).fetchone()[0] == 1
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM design_brief_links WHERE document_id=?", (doc,)
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_brief_link_rejects_unapproved_or_changed_revision(
@@ -117,7 +121,9 @@ def test_brief_link_rejects_mismatched_business_facts(
 ):
     monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", "x" * 48)
     headers = {"Authorization": "Bearer " + "x" * 48}
-    state = {"confirmed_spec": PosterSpec(title="其他商品", price="199.90").model_dump(mode="json")}
+    state = {
+        "confirmed_spec": PosterSpec(title="其他商品", price="199.90").model_dump(mode="json")
+    }
     monkeypatch.setattr(
         design_routes,
         "get_run",
