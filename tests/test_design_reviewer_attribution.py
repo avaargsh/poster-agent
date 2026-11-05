@@ -133,7 +133,10 @@ def test_opt_in_reviewer_scopes_and_durable_attribution(
         assert history.json()["approvals"][0]["principal_id"] == "reviewer-one"
         assert restarted.get(protected_svg, headers=_headers(EXPORT_TOKEN)).status_code == 200
     with sqlite3.connect(local_design_paths) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM design_approval_attributions").fetchone()[0] == 1
+        assert (
+            connection.execute("SELECT COUNT(*) FROM design_approval_attributions").fetchone()[0]
+            == 1
+        )
 
 
 def test_legacy_approval_cannot_be_claimed_as_authenticated_evidence(
