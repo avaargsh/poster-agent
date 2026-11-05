@@ -62,6 +62,15 @@ jobs:
           echo 'BEGIN_UV_GENERATED_LOCK_DIFF'
           git diff -- uv.lock
           echo 'END_UV_GENERATED_LOCK_DIFF'
+      - name: Install Chinese fonts for existing image-generation regression
+        timeout-minutes: 4
+        run: |
+          if fc-list :lang=zh 2>/dev/null | grep -q .; then
+            echo "CJK fonts already available."
+          else
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
+          fi
       - name: Read and resume baseline checkpoints using upgraded LangGraph
         run: |
           set -euo pipefail
