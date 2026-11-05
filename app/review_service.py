@@ -72,9 +72,7 @@ def _view(run_id: str, graph) -> dict:
 def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> dict:
     """Admit Qwen extraction once for a stable request key, including lost replies."""
     if request.compiler == "qwen" and idempotency_key is None:
-        raise brief_request_store.InvalidReviewRequestKey(
-            "Qwen Brief 编译必须提供 Idempotency-Key"
-        )
+        raise brief_request_store.InvalidReviewRequestKey("Qwen Brief 编译必须提供 Idempotency-Key")
     run_id = uuid4().hex
     with LOCK:
         if idempotency_key is not None:
