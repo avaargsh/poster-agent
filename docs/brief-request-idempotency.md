@@ -5,11 +5,11 @@ PosterSpec approval semantics, image generation, or the DesignDocument store.
 
 ## Contract
 
-- `POST /api/briefs/runs` requires `Idempotency-Key` for `compiler=qwen` (HTTP 428 before dispatch). Demo mode keeps its former optional-key behavior.
+- Both `POST /api/briefs/runs` and the legacy `POST /api/briefs/compile` require `Idempotency-Key` for `compiler=qwen` (HTTP 428 before dispatch). Demo mode keeps its former optional-key behavior. The legacy Qwen compile endpoint now also returns the durable `run_id`.
 - Keys are 8–128 ASCII letters, digits, underscores or hyphens. Invalid keys return HTTP 422.
 - `brief_request_claims` lives in the existing `POSTER_CHECKPOINT_DB`. It atomically binds an idempotency key to the canonical request digest and one stable `run_id` **before** invoking LangGraph.
 - The same key and same request can return the original checkpointed draft (including after a lost HTTP reply). The same key with changed input returns HTTP 409. A replay does not call Qwen.
-- If no complete draft checkpoint exists, a replay returns HTTP 409 and retains `UNKNOWN`; it never retries the provider just because a client timed out.
+- If no complete draft checkpoint exists, a replay returns HTTP 409 and retains `UNKNOWN`; it never retries the provider just because a client timed out. Qwen HTTP 429 does not trigger an automatic second provider request.
 - The request ledger marks `COMPLETED` only after the existing graph checkpoint can be read. The ordinary graph approval flow remains separate.
 - After acquiring the single-worker filesystem lock, startup changes abandoned `RUNNING` claims to `UNKNOWN`. This does not prove provider failure, refund, or cancellation.
 
