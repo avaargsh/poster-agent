@@ -40,9 +40,13 @@ def test_qwen_key_replay_and_conflict_without_duplicate_compiler(tmp_path, monke
     monkeypatch.setattr(review_graph, "compile_brief", fake_compiler)
     headers = {"Idempotency-Key": "brief-qwen-test-001"}
     with TestClient(app) as client:
-        first = client.post("/api/briefs/runs", json={"brief": BRIEF, "compiler": "qwen"}, headers=headers)
+        first = client.post(
+            "/api/briefs/runs", json={"brief": BRIEF, "compiler": "qwen"}, headers=headers
+        )
         assert first.status_code == 201, first.text
-        second = client.post("/api/briefs/runs", json={"brief": BRIEF, "compiler": "qwen"}, headers=headers)
+        second = client.post(
+            "/api/briefs/runs", json={"brief": BRIEF, "compiler": "qwen"}, headers=headers
+        )
         assert second.status_code == 201, second.text
         assert second.json()["run_id"] == first.json()["run_id"]
         assert len(calls) == 1
