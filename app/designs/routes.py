@@ -215,6 +215,17 @@ def get_design_approval_target(document_id: str, request: Request):
         return _unexpected_error_response()
 
 
+@router.get("/api/designs/{document_id}/approvals")
+def get_design_approval_history(document_id: str, request: Request):
+    """Inspect recorded local approvals without granting export authorization."""
+    try:
+        return _manager(request).repository().approval_history(document_id)
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
 @router.post("/api/designs/{document_id}/approvals", status_code=201)
 def approve_design(document_id: str, decision: ApprovalRequest, request: Request):
     """Approve one exact current revision; same ID replay returns HTTP 200."""

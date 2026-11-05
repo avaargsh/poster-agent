@@ -301,3 +301,74 @@ def test_renderer_upgrade_invalidates_then_allows_fresh_approval(
             (first_id, "design-svg@1"),
             (second_id, "design-svg@2"),
         }
+
+
+def test_approval_history_tracks_superseded_revisions_and_restart(design_paths, product_bytes):
+    with TestClient(app) as client:
+        doc = create(client, product_bytes)["document_id"]
+        url = f"/api/designs/{doc}/approvals"
+        empty = client.get(url)
+        assert empty.status_code == 200
+        assert empty.json()["approvals"] == []
+        first = target(client, doc)
+        first_id = "approval-history-first-0001"
+        assert approve(client, doc, first, approval_id=first_id).status_code == 201
+        assert approve(client, doc, first, approval_id=first_id).status_code == 200
+
+        rows = client.get(url).json()["approvals"]
+        assert len(rows) == 1
+        assert rows[0]["is_current_head"] is True
+        assert rows[0]["matches_current_snapshot"] is True
+        assert rows[0]["spec_digest"] == first["spec_digest"]
+        assert rows[0]["asset_manifest_digest"] == first["asset_manifest_digest"]
+
+        updated = edit(client, doc, 1)
+        assert updated.status_code == 200, updated.text
+        next_target = target(client, doc)
+        assert next_target["revision"] == 2
+        rows = client.get(url).json()["approvals"]
+        assert len(rows) == 1
+        assert rows[0]["is_current_head"] is False
+        assert rows[0]["matches_current_snapshot"] is False
+        expect_error(export(client, doc, 2), 409, "APPROVAL_REQUIRED")
+
+        second_id = "approval-history-second-0001"
+        assert approve(client, doc, next_target, approval_id=second_id).status_code == 201
+        rows = client.get(url).json()["approvals"]
+        assert [row["approval_id"] for row in rows] == [first_id, second_id]
+        assert [row["is_current_head"] for row in rows] == [False, True]
+        assert [row["matches_current_snapshot"] for row in rows] == [False, True]
+        assert all(row["created_at"] for row in rows)
+
+    with TestClient(app) as restarted:
+        assert restarted.get(url).json()["approvals"] == rows
+        expect_error(restarted.get("/api/designs/does-not-exist/approvals"), 404, "NOT_FOUND")
+        expect_error(restarted.get("/api/designs/INVALID/approvals"), 404, "NOT_FOUND")
+
+
+def test_approval_history_renderer_change_does_not_resurrect_old_evidence(
+    design_paths, product_bytes, monkeypatch
+):
+    with TestClient(app) as client:
+        doc = create(client, product_bytes)["document_id"]
+        current = target(client, doc)
+        assert (
+            approve(client, doc, current, approval_id="approval-history-renderer-old").status_code
+            == 201
+        )
+        monkeypatch.setattr(approvals_module, "RENDERER_VERSION", "design-svg@2")
+        monkeypatch.setattr(repository_module, "RENDERER_VERSION", "design-svg@2")
+        url = f"/api/designs/{doc}/approvals"
+        rows = client.get(url).json()["approvals"]
+        assert len(rows) == 1
+        assert rows[0]["is_current_head"] is True
+        assert rows[0]["matches_current_snapshot"] is False
+        expect_error(export(client, doc, 1), 409, "APPROVAL_REQUIRED")
+        upgraded = target(client, doc)
+        assert (
+            approve(client, doc, upgraded, approval_id="approval-history-renderer-new").status_code
+            == 201
+        )
+        rows = client.get(url).json()["approvals"]
+        assert len(rows) == 2
+        assert [row["matches_current_snapshot"] for row in rows] == [False, True]

@@ -580,6 +580,57 @@ class DesignRepository:
         except sqlite3.Error:
             raise StorageError() from None
 
+    def approval_history(self, document_id: str) -> dict:
+        """Read persisted local acknowledgements, including superseded revisions.
+
+        This is a database record history, not tamper-proof audit or reviewer
+        authentication. No old record grants export rights to a new head.
+        """
+        try:
+            with self._connect() as connection:
+                # Keep the head, digests and approval rows on one SQLite
+                # read snapshot even if a concurrent command advances the head.
+                connection.execute("BEGIN")
+                document, spec_digest, asset_digest = self._approval_snapshot(
+                    connection, document_id
+                )
+                rows = connection.execute(
+                    """
+                    SELECT revision, approval_id, spec_digest,
+                           asset_manifest_digest, renderer_version, created_at
+                    FROM design_approvals
+                    WHERE document_id = ?
+                    ORDER BY revision ASC, created_at ASC, approval_id ASC
+                    """,
+                    (document_id,),
+                ).fetchall()
+                entries = []
+                for record in rows:
+                    is_current = record["revision"] == document.revision
+                    matches_current = is_current and self._approval_matches(
+                        record, spec_digest, asset_digest
+                    )
+                    entries.append(
+                        {
+                            "revision": record["revision"],
+                            "approval_id": record["approval_id"],
+                            "spec_digest": record["spec_digest"],
+                            "asset_manifest_digest": record["asset_manifest_digest"],
+                            "renderer_version": record["renderer_version"],
+                            "created_at": record["created_at"],
+                            "is_current_head": is_current,
+                            "matches_current_snapshot": matches_current,
+                        }
+                    )
+                return {
+                    "document_id": document.document_id,
+                    "current_revision": document.revision,
+                    "current_renderer_version": RENDERER_VERSION,
+                    "approvals": entries,
+                }
+        except sqlite3.Error:
+            raise StorageError() from None
+
     def approve(self, document_id: str, request: ApprovalRequest) -> dict:
         """Atomically bind one local operator acknowledgement to the exact head."""
         try:
