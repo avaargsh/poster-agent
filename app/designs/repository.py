@@ -984,9 +984,13 @@ class DesignRepository:
                         missing_fields.append(role)
                     else:
                         expected[role] = matching[0].plain_text
+                record = self._approval_record(connection, document_id, revision)
+                if record is None:
+                    raise ApprovalRequiredError()
                 return {
                     "document_id": document_id,
                     "revision": revision,
+                    "approval_id": record["approval_id"],
                     "spec_digest": spec_digest,
                     "asset_manifest_digest": asset_digest,
                     "renderer_version": RENDERER_VERSION,
