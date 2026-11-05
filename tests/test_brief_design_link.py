@@ -138,3 +138,43 @@ def test_brief_link_rejects_mismatched_business_facts(design_paths, product_byte
         result = client.post(url, json=payload, headers=headers)
         assert result.status_code == 422
         assert client.get(url, headers=headers).json()["link"] is None
+
+
+def test_link_replay_after_edit_keeps_original_revision(design_paths, product_bytes, monkeypatch):
+    monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", "x" * 48)
+    headers = {"Authorization": "Bearer " + "x" * 48}
+    spec = PosterSpec(title="双十一牙刷", price="199.90")
+    monkeypatch.setattr(
+        design_routes,
+        "get_run",
+        lambda rid: {
+            "status": "APPROVED",
+            "pending_approval": False,
+            "confirmed_spec": spec.model_dump(mode="json"),
+        },
+    )
+    with TestClient(app) as client:
+        doc = create(client, product_bytes)["document_id"]
+        url = f"/api/designs/{doc}/brief-link"
+        payload = {"brief_run_id": "a" * 32}
+        first = client.post(url, json=payload, headers=headers)
+        assert first.status_code == 201, first.text
+        edited = client.post(
+            f"/api/designs/{doc}/commands",
+            json={
+                "command_id": "cmd-brief-after-link-0001",
+                "expected_revision": 1,
+                "actor": "user",
+                "operations": [{"op": "set_text", "node_id": "title", "text": "新的商品标题"}],
+            },
+        )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["document"]["revision"] == 2
+        replay = client.post(url, json=payload, headers=headers)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["replayed"] is True
+        assert replay.json()["linked_revision"] == 1
+        conflict = client.post(url, json={"brief_run_id": "b" * 32}, headers=headers)
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+        assert client.get(url, headers=headers).json()["link"]["linked_revision"] == 1
