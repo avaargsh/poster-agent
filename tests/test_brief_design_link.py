@@ -36,7 +36,7 @@ def test_brief_link_auth_replay_conflict_and_restart(design_paths, product_bytes
     token = "x" * 48
     monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", token)
     spec = PosterSpec(title="双十一牙刷", price="199.90")
-    run_id = "brief-approved-run-001"
+    run_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     monkeypatch.setattr(
         design_routes,
         "get_run",
@@ -64,7 +64,7 @@ def test_brief_link_auth_replay_conflict_and_restart(design_paths, product_bytes
         )
         assert client.post(url, json=payload, headers=headers).status_code == 200
         conflict = client.post(
-            url, json={"brief_run_id": "another-approved-run-002"}, headers=headers
+            url, json={"brief_run_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, headers=headers
         )
         assert conflict.status_code == 409
         assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
@@ -95,7 +95,7 @@ def test_brief_link_rejects_unapproved_or_changed_revision(
     with TestClient(app) as client:
         doc = create(client, product_bytes)["document_id"]
         url = f"/api/designs/{doc}/brief-link"
-        payload = {"brief_run_id": "brief-approved-run-001"}
+        payload = {"brief_run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         result = client.post(url, json=payload, headers=headers)
         assert result.status_code == 409
         assert result.json()["error"]["code"] == "BRIEF_NOT_APPROVED"
@@ -128,7 +128,7 @@ def test_brief_link_rejects_mismatched_business_facts(design_paths, product_byte
     with TestClient(app) as client:
         doc = create(client, product_bytes)["document_id"]
         url = f"/api/designs/{doc}/brief-link"
-        payload = {"brief_run_id": "brief-approved-run-001"}
+        payload = {"brief_run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         result = client.post(url, json=payload, headers=headers)
         assert result.status_code == 422
         assert result.json()["error"]["code"] == "INVALID_COMMAND"
