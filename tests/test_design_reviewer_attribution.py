@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 REVIEWER_TOKEN = "reviewer-secret-" + "A" * 40
 EXPORT_TOKEN = "exporter-secret-" + "B" * 40
 AUDIT_TOKEN = "auditor-secret-" + "C" * 40
