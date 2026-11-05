@@ -71,3 +71,15 @@ def test_fingerprint_stable_across_dict_order():
     assert store.fingerprint({"brief": "文字", "compiler": "qwen"}) == store.fingerprint(
         {"compiler": "qwen", "brief": "文字"}
     )
+
+
+def test_recovery_marks_only_abandoned_claims_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv("POSTER_CHECKPOINT_DB", str(tmp_path / "checkpoints.sqlite3"))
+    assert store.recover_abandoned() == 0  # Do not create a new DB on startup.
+    first_id, second_id = uuid4().hex, uuid4().hex
+    store.claim("brief-running-001", "hash-a", first_id)
+    store.claim("brief-completed-001", "hash-b", second_id)
+    store.complete("brief-completed-001", second_id)
+    assert store.recover_abandoned() == 1
+    assert store.get("brief-running-001")["status"] == "UNKNOWN"
+    assert store.get("brief-completed-001")["status"] == "COMPLETED"
