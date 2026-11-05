@@ -35,6 +35,7 @@ from .errors import (
     StorageError,
 )
 from .models import MAX_ASSET_BYTES, DesignDocument
+from .ocr_observations import OCRObservationRequest, assess_unattested
 from .rendering import render_svg
 from .reviewer_auth import ReviewerAccessError, reviewer_for_request
 from .service import (
@@ -443,5 +444,37 @@ def get_design_ocr_target(
         return _unexpected_error_response()
     return JSONResponse(
         content=target,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.post("/api/designs/{document_id}/revisions/{revision}/ocr-evaluation-preview")
+def evaluate_design_ocr_observations(
+    document_id: str,
+    payload: OCRObservationRequest,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Compare declared observations only; never attest OCR execution or publish."""
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        target = (
+            _manager(request)
+            .repository()
+            .ocr_target(
+                document_id,
+                revision,
+                required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+            )
+        )
+        report = assess_unattested(target, payload)
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=report,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
