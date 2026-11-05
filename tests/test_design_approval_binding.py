@@ -352,9 +352,10 @@ def test_approval_history_renderer_change_does_not_resurrect_old_evidence(
     with TestClient(app) as client:
         doc = create(client, product_bytes)["document_id"]
         current = target(client, doc)
-        assert approve(
-            client, doc, current, approval_id="approval-history-renderer-old"
-        ).status_code == 201
+        assert (
+            approve(client, doc, current, approval_id="approval-history-renderer-old").status_code
+            == 201
+        )
         monkeypatch.setattr(approvals_module, "RENDERER_VERSION", "design-svg@2")
         monkeypatch.setattr(repository_module, "RENDERER_VERSION", "design-svg@2")
         url = f"/api/designs/{doc}/approvals"
@@ -364,9 +365,10 @@ def test_approval_history_renderer_change_does_not_resurrect_old_evidence(
         assert rows[0]["matches_current_snapshot"] is False
         expect_error(export(client, doc, 1), 409, "APPROVAL_REQUIRED")
         upgraded = target(client, doc)
-        assert approve(
-            client, doc, upgraded, approval_id="approval-history-renderer-new"
-        ).status_code == 201
+        assert (
+            approve(client, doc, upgraded, approval_id="approval-history-renderer-new").status_code
+            == 201
+        )
         rows = client.get(url).json()["approvals"]
         assert len(rows) == 2
         assert [row["matches_current_snapshot"] for row in rows] == [False, True]
