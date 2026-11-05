@@ -1,7 +1,7 @@
 import asyncio
 
-import pytest
 import httpx
+import pytest
 
 from app import brief_compiler
 
