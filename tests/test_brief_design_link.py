@@ -110,3 +110,29 @@ def test_brief_link_rejects_unapproved_or_changed_revision(
         assert result.status_code == 409
         assert result.json()["error"]["code"] == "REVISION_CONFLICT"
         assert client.get(url, headers=headers).json()["link"] is None
+
+
+def test_brief_link_rejects_mismatched_business_facts(
+    design_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", "x" * 48)
+    headers = {"Authorization": "Bearer " + "x" * 48}
+    state = {"confirmed_spec": PosterSpec(title="其他商品", price="199.90").model_dump(mode="json")}
+    monkeypatch.setattr(
+        design_routes,
+        "get_run",
+        lambda rid: {"status": "APPROVED", "pending_approval": False, **state},
+    )
+    with TestClient(app) as client:
+        doc = create(client, product_bytes)["document_id"]
+        url = f"/api/designs/{doc}/brief-link"
+        payload = {"brief_run_id": "brief-approved-run-001"}
+        result = client.post(url, json=payload, headers=headers)
+        assert result.status_code == 422
+        assert result.json()["error"]["code"] == "INVALID_COMMAND"
+        state["confirmed_spec"] = PosterSpec(
+            title="双十一牙刷", price="200.00"
+        ).model_dump(mode="json")
+        result = client.post(url, json=payload, headers=headers)
+        assert result.status_code == 422
+        assert client.get(url, headers=headers).json()["link"] is None
