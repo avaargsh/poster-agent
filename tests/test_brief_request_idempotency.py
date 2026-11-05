@@ -119,3 +119,28 @@ def test_lost_response_after_checkpoint_reuses_original_run(tmp_path, monkeypatc
         assert reused.json()["pending_approval"] is True
         assert client.get("/api/briefs/runs/by-key/" + key).json()["status"] == "COMPLETED"
     assert len(calls) == 1
+
+
+def test_legacy_compile_qwen_uses_the_same_durable_admission(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    calls = []
+
+    async def fake_compiler(request):
+        calls.append(request.brief)
+        return await compile_brief(BriefRequest(brief=request.brief, compiler="demo"))
+
+    monkeypatch.setattr(review_graph, "compile_brief", fake_compiler)
+    payload = {"brief": BRIEF, "compiler": "qwen"}
+    headers = {"Idempotency-Key": "brief-legacy-qwen-001"}
+    with TestClient(app) as client:
+        missing = client.post("/api/briefs/compile", json=payload)
+        assert missing.status_code == 428
+        first = client.post("/api/briefs/compile", json=payload, headers=headers)
+        assert first.status_code == 200, first.text
+        second = client.post("/api/briefs/compile", json=payload, headers=headers)
+        assert second.status_code == 200, second.text
+        assert first.json()["run_id"] == second.json()["run_id"]
+        assert first.json()["draft"] == second.json()["draft"]
+        assert len(calls) == 1
+        free = client.post("/api/briefs/compile", json={"brief": BRIEF, "compiler": "demo"})
+        assert free.status_code == 200
