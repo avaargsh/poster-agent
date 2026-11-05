@@ -359,6 +359,7 @@ class DesignRepository:
         title: str,
         price: Decimal,
         product_bytes: bytes,
+        cta: str | None = None,
     ) -> DesignDocument:
         """Validate the product and persist a new unique design at revision 1."""
 
@@ -374,6 +375,7 @@ class DesignRepository:
                 title=title,
                 price=price,
                 product_asset_id="product",
+                cta=cta,
             )
         except (ValidationError, TypeError, ValueError):
             raise InvalidCommandError() from None
@@ -547,6 +549,7 @@ class DesignRepository:
         confirmed_spec_digest: str,
         confirmed_title: str,
         confirmed_price: Decimal,
+        confirmed_cta: str | None = None,
     ) -> dict:
         """Bind a validated approved Brief snapshot to an existing design.
 
@@ -597,6 +600,14 @@ class DesignRepository:
                     or document.facts.price != confirmed_price
                 ):
                     raise InvalidCommandError()
+                if confirmed_cta is not None:
+                    cta_nodes = [
+                        node
+                        for node in document.nodes
+                        if isinstance(node, TextNode) and node.role == "cta"
+                    ]
+                    if cta_nodes and cta_nodes[0].plain_text != confirmed_cta:
+                        raise InvalidCommandError()
                 linked_at = _now()
                 connection.execute(
                     """

@@ -53,6 +53,21 @@ class _TemplateTitle(BaseModel):
         return value
 
 
+class _TemplateCTA(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: Annotated[str, StringConstraints(min_length=1, max_length=12)]
+
+    @field_validator("value")
+    @classmethod
+    def normalized_cta(cls, value: str) -> str:
+        validate_plain_text(value)
+        result = value.strip()
+        if not result:
+            raise ValueError("CTA cannot be blank")
+        return result
+
+
 def _wrap_title(title: str, *, x: float, first_y: float) -> list[TextLine]:
     chunks = split_text_chunks(title, TITLE_LINE_MAX_CHARS)
     return [
@@ -65,7 +80,9 @@ def _price_font_size(text: str) -> float:
     return 88 if len(text) <= 9 else 64
 
 
-def create_template(*, title: str, price: Decimal, product_asset_id: str) -> DesignDocument:
+def create_template(
+    *, title: str, price: Decimal, product_asset_id: str, cta: str | None = None
+) -> DesignDocument:
     """Create the fixed 1024 x 1024 promotional template.
 
     The product must be supplied by the caller as an immutable asset id.  No
@@ -76,6 +93,7 @@ def create_template(*, title: str, price: Decimal, product_asset_id: str) -> Des
     clean_title = _TemplateTitle(value=title).value
     facts = BusinessFacts(price=price)
     price_text = format_price_text(facts.price, facts.currency)
+    clean_cta = _TemplateCTA(value=cta).value if cta is not None else None
 
     title_node = TextNode(
         node_id="title",
@@ -124,13 +142,34 @@ def create_template(*, title: str, price: Decimal, product_asset_id: str) -> Des
         lines=[TextLine(text=price_text, x=72, y=840)],
     )
 
-    document_key = "|".join((TEMPLATE_ID, clean_title, str(facts.price), product_asset_id))
+    cta_nodes: list[TextNode] = []
+    if clean_cta is not None:
+        cta_nodes.append(
+            TextNode(
+                node_id="cta",
+                role="cta",
+                x=72,
+                y=900,
+                width=456,
+                height=78,
+                font_family=FONT_FAMILY,
+                font_weight=700,
+                font_size=36,
+                color="#f8fafc",
+                lines=[TextLine(text=clean_cta, x=72, y=962)],
+            )
+        )
+
+    key_parts = [TEMPLATE_ID, clean_title, str(facts.price), product_asset_id]
+    if clean_cta is not None:
+        key_parts.append(clean_cta)
+    document_key = "|".join(key_parts)
     document_id = f"doc_{uuid.uuid5(uuid.NAMESPACE_URL, 'poster-agent/design/' + document_key).hex}"
 
     return DesignDocument(
         document_id=document_id,
         page=Page(width=1024, height=1024, background="#0b1f3a"),
-        nodes=[accent_node, product_node, title_node, price_node],
+        nodes=[accent_node, product_node, title_node, price_node, *cta_nodes],
         asset_refs=[AssetRef(asset_id=product_asset_id)],
         font_refs=[
             FontRef(family=FONT_FAMILY, weight=400),
