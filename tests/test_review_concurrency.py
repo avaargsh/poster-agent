@@ -7,6 +7,7 @@ compiler is replaced with a deterministic, explicitly gated local stub.
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
 
+from app import brief_request_store
 from app.brief_compiler import BriefRequest, compile_brief
 from app.review_service import ReviewConflict, create_run, decide_run, get_run
 from app.schemas import PosterSpec
@@ -102,9 +103,7 @@ def test_inflight_same_key_replay_waits_and_never_reextracts(tmp_path, monkeypat
         first = pool.submit(create_run, _qwen_request(), idempotency_key="review-same-key-01")
         try:
             assert started.wait(timeout=10)
-            second = pool.submit(
-                create_run, _qwen_request(), idempotency_key="review-same-key-01"
-            )
+            second = pool.submit(create_run, _qwen_request(), idempotency_key="review-same-key-01")
         finally:
             release.set()
         first_result, second_result = first.result(timeout=10), second.result(timeout=10)
@@ -136,3 +135,54 @@ def test_parallel_conflicting_approvals_have_one_terminal_winner(tmp_path, monke
     final = get_run(original["run_id"])
     assert final["status"] == "APPROVED"
     assert final["confirmed_spec"] == accepted[0]["confirmed_spec"]
+
+
+def test_same_key_replay_cannot_overtake_original_claim(tmp_path, monkeypatch):
+    _configure(monkeypatch, tmp_path)
+    claimed = Event()
+    allow_original = Event()
+    second_entered = Event()
+    replay_claimed = Event()
+    calls = []
+    original_claim = brief_request_store.claim
+
+    def gated_claim(key, request_hash, run_id):
+        result = original_claim(key, request_hash, run_id)
+        if result["claimed"]:
+            claimed.set()
+            assert allow_original.wait(timeout=12), "Original admission gate not released"
+        else:
+            replay_claimed.set()
+        return result
+
+    async def compiler(request):
+        calls.append(request.brief)
+        return await compile_brief(BriefRequest(brief=request.brief, compiler="demo"))
+
+    def retry():
+        second_entered.set()
+        return create_run(_qwen_request(), idempotency_key="review-claim-race-01")
+
+    monkeypatch.setattr(brief_request_store, "claim", gated_claim)
+    monkeypatch.setattr(review_graph, "compile_brief", compiler)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        original = pool.submit(create_run, _qwen_request(), idempotency_key="review-claim-race-01")
+        try:
+            assert claimed.wait(timeout=10)
+            duplicate = pool.submit(retry)
+            assert second_entered.wait(timeout=10)
+            # The retry must wait on the request key, not observe an empty
+            # checkpoint while the first claimant has yet to enter its Graph.
+            assert not replay_claimed.wait(timeout=0.5)
+            assert not duplicate.done()
+        finally:
+            allow_original.set()
+        original_result = original.result(timeout=10)
+        duplicate_result = duplicate.result(timeout=10)
+
+    assert replay_claimed.is_set()
+    assert original_result["run_id"] == duplicate_result["run_id"]
+    assert original_result["pending_approval"] is True
+    assert len(calls) == 1
+    assert brief_request_store.get("review-claim-race-01")["status"] == "COMPLETED"
