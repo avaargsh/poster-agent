@@ -50,8 +50,7 @@ def test_explicit_cta_becomes_rendered_text_and_ocr_target_field(design_paths, p
         assert created.status_code == 201, created.text
         doc = created.json()["document"]
         ctanodes = [
-            node for node in doc["nodes"]
-            if node["node_type"] == "text" and node["role"] == "cta"
+            node for node in doc["nodes"] if node["node_type"] == "text" and node["role"] == "cta"
         ]
         assert len(ctanodes) == 1
         assert "".join(line["text"] for line in ctanodes[0]["lines"]) == "立即抢购"
@@ -59,7 +58,7 @@ def test_explicit_cta_becomes_rendered_text_and_ocr_target_field(design_paths, p
         assert ctanodes[0]["y"] + ctanodes[0]["height"] <= doc["page"]["height"]
         preview = client.get(f"/api/designs/{doc['document_id']}/revisions/1/preview.svg")
         assert preview.status_code == 200
-        assert b"data-node-id=\"cta\"" in preview.content
+        assert b'data-node-id="cta"' in preview.content
         assert "立即抢购" in preview.text
 
         approve(client, doc["document_id"])
