@@ -164,17 +164,17 @@ def test_legacy_checkpoint_survives_new_request_ledger_startup(tmp_path, monkeyp
         restored = client.get(f"/api/briefs/runs/{run_id}")
         assert restored.status_code == 200
         assert restored.json()["pending_approval"] is True
-        rejected = client.post(
-            f"/api/briefs/runs/{run_id}/decision", json={"approved": False}
-        )
+        rejected = client.post(f"/api/briefs/runs/{run_id}/decision", json={"approved": False})
         assert rejected.status_code == 200
         assert rejected.json()["status"] == "REJECTED"
 
     with sqlite3.connect(checkpoint_db) as conn:
-        assert conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name='brief_request_claims'"
-        ).fetchone() is not None
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='brief_request_claims'"
+            ).fetchone()
+            is not None
+        )
 
 
 def test_replay_refuses_mismatched_checkpoint_request(tmp_path, monkeypatch):
