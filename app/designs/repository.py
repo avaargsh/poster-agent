@@ -973,6 +973,7 @@ class DesignRepository:
                     required_policy_digest=required_policy_digest,
                 )
                 expected: dict[str, str] = {}
+                missing_fields: list[str] = []
                 for role in ("title", "price", "cta"):
                     matching = [
                         node
@@ -980,8 +981,11 @@ class DesignRepository:
                         if isinstance(node, TextNode) and node.role == role and node.visible
                     ]
                     if len(matching) != 1 or not matching[0].plain_text:
-                        raise ApprovalRequiredError()
-                    expected[role] = matching[0].plain_text
+                        # A missing or hidden field must never be fabricated
+                        # from an unrelated Brief or default PosterSpec.
+                        missing_fields.append(role)
+                    else:
+                        expected[role] = matching[0].plain_text
                 return {
                     "document_id": document_id,
                     "revision": revision,
@@ -990,6 +994,7 @@ class DesignRepository:
                     "renderer_version": RENDERER_VERSION,
                     "svg_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
                     "expected_fields": expected,
+                    "missing_fields": missing_fields,
                     "ocr_status": "NOT_RUN",
                     "runtime_attested": False,
                     "quality_verified": False,
