@@ -406,17 +406,53 @@ $('clearBrief').addEventListener('click', resetReview);
 $('compileBrief').addEventListener('click', async () => {
   const brief = $('briefText').value.trim();
   if(brief.length < 8) { $('compileStatus').textContent='Brief 至少输入 8 个字符'; return; }
+  const compiler=$('briefCompiler').value;
+  const fp=JSON.stringify({brief,compiler});
+  let requestKey=null;
+  if(compiler==='qwen'){
+    let saved=null;
+    try{saved=JSON.parse(localStorage.getItem('poster-last-brief-request')||'null');}catch(e){}
+    requestKey=(saved && saved.fp===fp && saved.status!=='COMPLETED')
+      ? saved.key : crypto.randomUUID();
+    localStorage.setItem('poster-last-brief-request',
+      JSON.stringify({key:requestKey,fp,status:'PENDING'}));
+  }
   $('compileBrief').disabled=true;
   $('compileStatus').textContent='正在编译并保存检查点…';
   try {
+    const headers={'Content-Type':'application/json'};
+    if(requestKey)headers['Idempotency-Key']=requestKey;
     const response = await fetch('/api/briefs/runs',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({brief,compiler:$('briefCompiler').value})
+      method:'POST',headers,body:JSON.stringify({brief,compiler})
     });
     const json=await response.json();
     if(!response.ok)throw Error(errorText(json));
+    if(requestKey)localStorage.setItem('poster-last-brief-request',
+      JSON.stringify({key:requestKey,fp,status:'COMPLETED'}));
     showRun(json);
   } catch(err) {
+    if(requestKey){
+      try{
+        const claim=await fetch('/api/briefs/runs/by-key/'+encodeURIComponent(requestKey));
+        if(claim.ok){
+          const record=await claim.json();
+          if(record.status==='COMPLETED'){
+            const resumed=await fetch('/api/briefs/runs/'+encodeURIComponent(record.run_id));
+            if(resumed.ok){
+              localStorage.setItem('poster-last-brief-request',
+                JSON.stringify({key:requestKey,fp,status:'COMPLETED'}));
+              showRun(await resumed.json());
+              return;
+            }
+          }
+          if(record.status==='RUNNING'||record.status==='UNKNOWN'){
+            $('compileStatus').textContent='原 Brief 请求仍在处理或结果未知。请保留当前输入，不要换键重试。run_id='+record.run_id;
+            $('compileStatus').className='tip bad';
+            return;
+          }
+        }
+      }catch(recoveryErr){}
+    }
     $('compileStatus').textContent=err.message;
     $('compileStatus').className='tip bad';
   } finally { $('compileBrief').disabled=false; }
