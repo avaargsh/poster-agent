@@ -27,7 +27,6 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from .approvals import ApprovalRequest, snapshot_digests
-from .reviewer_auth import ReviewerContext
 from .commands import (
     CommandBatch,
     CommandResult,
@@ -67,6 +66,7 @@ from .models import (
     format_price_text,
 )
 from .rendering import ALLOWED_FORMATS, DesignRenderError, render_svg
+from .reviewer_auth import ReviewerContext
 from .templates import create_template
 from .text_layout import split_text_chunks
 
