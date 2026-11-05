@@ -11,13 +11,22 @@ module-level repository.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Path, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.review_service import ReviewNotFound, get_run
+from app.schemas import PosterSpec
 
 from .approvals import ApprovalRequest
 from .commands import CommandBatch
@@ -202,6 +211,61 @@ def get_design_revision(
         "document": document.model_dump(mode="json"),
         "preview_url": _preview_url(document),
     }
+
+
+class BriefLinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brief_run_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,128}$")
+
+
+def _brief_link_token_valid(request: Request) -> bool:
+    """Local operator credential, not an authenticated reviewer identity."""
+    expected = os.environ.get("POSTER_BRIEF_LINK_TOKEN", "")
+    authorization = request.headers.get("authorization", "")
+    if len(expected) < 32 or not authorization.startswith("Bearer "):
+        return False
+    provided = authorization.removeprefix("Bearer ")
+    return hmac.compare_digest(provided, expected)
+
+
+@router.post("/api/designs/{document_id}/brief-link", status_code=201)
+def bind_design_brief(document_id: str, payload: BriefLinkRequest, request: Request):
+    """Link only an approved Brief checkpoint; never infer design approval."""
+    if not _brief_link_token_valid(request):
+        return _error_response(401, "BRIEF_LINK_UNAUTHORIZED", "operator token required")
+    try:
+        run = get_run(payload.brief_run_id)
+        if run["status"] != "APPROVED" or run["pending_approval"]:
+            return _error_response(409, "BRIEF_NOT_APPROVED", "Brief is not approved")
+        spec = PosterSpec.model_validate(run["confirmed_spec"])
+        digest = hashlib.sha256(
+            spec.model_dump_json().encode("utf-8")
+        ).hexdigest()
+        result = _manager(request).repository().bind_brief_run(
+            document_id, run_id=payload.brief_run_id, confirmed_spec_digest=digest
+        )
+    except ReviewNotFound:
+        return _error_response(404, "BRIEF_NOT_FOUND", "Brief checkpoint not found")
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+    if result["replayed"]:
+        return JSONResponse(status_code=200, content=result)
+    return result
+
+
+@router.get("/api/designs/{document_id}/brief-link")
+def get_design_brief_link(document_id: str, request: Request):
+    if not _brief_link_token_valid(request):
+        return _error_response(401, "BRIEF_LINK_UNAUTHORIZED", "operator token required")
+    try:
+        return {"link": _manager(request).repository().brief_link(document_id)}
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
 
 
 @router.get("/api/designs/{document_id}/approval-target")
