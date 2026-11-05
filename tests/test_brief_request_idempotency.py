@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app import brief_request_store
 from app.brief_compiler import BriefRequest, compile_brief
 from app.main import app
+from app.review_service import config, open_graph
 from app.workflows import review_graph
 
 BRIEF = "主标题：双十一电动牙刷，活动价199元，原价399元，风格：科技蓝色"
@@ -83,3 +84,34 @@ def test_unresolved_claim_never_dispatches_provider(tmp_path, monkeypatch):
         assert record.json()["status"] == "UNKNOWN"
         assert record.json()["run_id"] == run_id
     assert calls == []
+
+
+def test_lost_response_after_checkpoint_reuses_original_run(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    request = BriefRequest(brief=BRIEF, compiler="qwen")
+    run_id = uuid4().hex
+    digest = brief_request_store.fingerprint(request.model_dump(mode="json"))
+    key = "brief-qwen-lost-ack-001"
+    brief_request_store.claim(key, digest, run_id)
+    calls = []
+
+    async def fake_compiler(payload):
+        calls.append(payload.brief)
+        return await compile_brief(BriefRequest(brief=payload.brief, compiler="demo"))
+
+    monkeypatch.setattr(review_graph, "compile_brief", fake_compiler)
+    # Simulate a crash after LangGraph committed the approval checkpoint, but
+    # before the request ledger was marked COMPLETED or the HTTP reply delivered.
+    with open_graph() as graph:
+        graph.invoke({"request": request.model_dump(mode="json")}, config(run_id))
+    with TestClient(app) as client:
+        reused = client.post(
+            "/api/briefs/runs",
+            json=request.model_dump(mode="json"),
+            headers={"Idempotency-Key": key},
+        )
+        assert reused.status_code == 201, reused.text
+        assert reused.json()["run_id"] == run_id
+        assert reused.json()["pending_approval"] is True
+        assert client.get("/api/briefs/runs/by-key/" + key).json()["status"] == "COMPLETED"
+    assert len(calls) == 1
