@@ -25,9 +25,7 @@ async def compile_brief_endpoint(
         try:
             # Sync Graph extraction runs in a worker thread; never block the
             # FastAPI event loop with the network-backed compilation node.
-            result = await run_in_threadpool(
-                create_run, request, idempotency_key=idempotency_key
-            )
+            result = await run_in_threadpool(create_run, request, idempotency_key=idempotency_key)
         except brief_request_store.InvalidReviewRequestKey as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (brief_request_store.ReviewRequestConflict, ReviewConflict) as exc:
