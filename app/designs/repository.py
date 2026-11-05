@@ -734,7 +734,8 @@ class DesignRepository:
                     """
                     SELECT approval.revision, approval.approval_id, approval.spec_digest,
                            approval.asset_manifest_digest, approval.renderer_version,
-                           approval.created_at, attribution.principal_id, attribution.policy_digest
+                           approval.created_at, attribution.principal_id,
+                           attribution.policy_digest, attribution.recorded_at AS attributed_at
                     FROM design_approvals AS approval
                     LEFT JOIN design_approval_attributions AS attribution
                       ON attribution.document_id = approval.document_id
@@ -761,6 +762,7 @@ class DesignRepository:
                             "created_at": record["created_at"],
                             "principal_id": record["principal_id"],
                             "policy_digest": record["policy_digest"],
+                            "attributed_at": record["attributed_at"],
                             "is_current_head": is_current,
                             "matches_current_snapshot": matches_current,
                         }
