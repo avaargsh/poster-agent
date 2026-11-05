@@ -117,6 +117,12 @@ def test_ocr_preview_missing_or_low_confidence_lines_remain_unverified(design_pa
         )
         assert malformed.status_code == 422
 
+        forged = client.post(
+            url,
+            json={"lines": [], "runtime_attested": True, "release_ready": True},
+        )
+        assert forged.status_code == 422
+
 
 def test_ocr_preview_rejects_stale_head_and_obeys_export_scope(
     design_paths, product_bytes, monkeypatch
@@ -167,3 +173,38 @@ def test_ocr_preview_rejects_stale_head_and_obeys_export_scope(
         stale = client.post(url, json={"lines": []}, headers=exporter_headers)
         assert stale.status_code == 409
         assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
+
+
+def test_even_all_declared_field_matches_never_attest_runtime_or_release():
+    from app.designs.ocr_observations import OCRObservationRequest, assess_unattested
+
+    target = {
+        "document_id": "doc-example",
+        "revision": 1,
+        "approval_id": "approval-example",
+        "svg_sha256": "a" * 64,
+        "expected_fields": {
+            "title": "双十一牙刷",
+            "price": "¥199.90",
+            "cta": "立即抢购",
+        },
+        "missing_fields": [],
+        "ocr_status": "NOT_RUN",
+        "runtime_attested": False,
+        "quality_verified": False,
+        "release_ready": False,
+    }
+    observations = OCRObservationRequest(
+        lines=[
+            {"text": "双十一牙刷", "score": 0.99},
+            {"text": "活动价 ¥199.90元", "score": 0.98},
+            {"text": "立即抢购", "score": 0.97},
+        ]
+    )
+    result = assess_unattested(target, observations)
+    assert result["declared_consistency"] == "MATCHES_EXPECTED"
+    assert all(check["status"] == "MATCHED" for check in result["field_checks"])
+    assert result["ocr_status"] == "OBSERVATIONS_UNATTESTED"
+    assert result["runtime_attested"] is False
+    assert result["quality_verified"] is False
+    assert result["release_ready"] is False
