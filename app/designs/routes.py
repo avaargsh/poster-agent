@@ -426,10 +426,14 @@ def get_design_ocr_target(
     """Read a frozen, approved SVG input description; never claim OCR acceptance."""
     try:
         reviewer = reviewer_for_request(request, "export")
-        target = _manager(request).repository().ocr_target(
-            document_id,
-            revision,
-            required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+        target = (
+            _manager(request)
+            .repository()
+            .ocr_target(
+                document_id,
+                revision,
+                required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+            )
         )
     except ReviewerAccessError as exc:
         return _error_response(exc.status, exc.code, exc.message)
