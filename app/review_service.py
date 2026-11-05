@@ -16,6 +16,7 @@ from uuid import uuid4
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+from app import brief_request_store
 from app.brief_compiler import BriefRequest
 from app.schemas import PosterSpec
 from app.workflows.review_graph import make_review_graph
@@ -68,16 +69,44 @@ def _view(run_id: str, graph) -> dict:
     }
 
 
-def create_run(request: BriefRequest) -> dict:
+def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> dict:
+    """Admit Qwen extraction once for a stable request key, including lost replies."""
+    if request.compiler == "qwen" and idempotency_key is None:
+        raise brief_request_store.InvalidReviewRequestKey(
+            "Qwen Brief 编译必须提供 Idempotency-Key"
+        )
     run_id = uuid4().hex
     with LOCK:
-        with open_graph() as graph:
-            # Note: the approval node interrupts; compile results are checkpointed.
-            graph.invoke({"request": request.model_dump(mode="json")}, config(run_id))
-            result = _view(run_id, graph)
-            if not result["pending_approval"]:
-                raise RuntimeError("编译流程未正确进入人工审核节点")
-            return result
+        if idempotency_key is not None:
+            request_hash = brief_request_store.fingerprint(request.model_dump(mode="json"))
+            claim = brief_request_store.claim(idempotency_key, request_hash, run_id)
+            run_id = claim["run_id"]
+            if not claim["claimed"]:
+                # Only inspect a previous checkpoint; never repeat the extraction.
+                with open_graph() as graph:
+                    try:
+                        result = _view(run_id, graph)
+                    except ReviewNotFound as exc:
+                        brief_request_store.mark_unknown(idempotency_key, run_id)
+                        raise ReviewConflict(
+                            f"原 Brief 请求结果未确认（run_id={run_id}），不会自动重新调用模型"
+                        ) from exc
+                brief_request_store.complete(idempotency_key, run_id)
+                return result
+        try:
+            with open_graph() as graph:
+                graph.invoke({"request": request.model_dump(mode="json")}, config(run_id))
+                result = _view(run_id, graph)
+                if not result["pending_approval"]:
+                    raise RuntimeError("编译流程未正确进入人工审核节点")
+        except BaseException:
+            # Even a transport failure can follow accepted/provider-billed work.
+            if idempotency_key is not None:
+                brief_request_store.mark_unknown(idempotency_key, run_id)
+            raise
+        if idempotency_key is not None:
+            brief_request_store.complete(idempotency_key, run_id)
+        return result
 
 
 def get_run(run_id: str) -> dict:
