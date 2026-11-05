@@ -1,7 +1,9 @@
 import asyncio
 
+import httpx
 import pytest
 
+from app import brief_compiler
 from app.brief_compiler import BriefCompilerError, BriefRequest, compile_brief
 
 
@@ -64,3 +66,25 @@ def test_qwen_json_object_schema_mock(monkeypatch):
     assert result.fields.original_price == 399
     assert result.fields.style == "科技蓝"
     assert result.requires_confirmation
+
+
+def test_qwen_429_does_not_retry_a_potentially_billable_request(monkeypatch):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-only-placeholder")
+    monkeypatch.setenv(
+        "QWEN_CHAT_ENDPOINT",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    )
+    calls = []
+    original_client = httpx.AsyncClient
+
+    def fake_client(**kwargs):
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(429, request=request, json={"error": "rate limited"})
+
+        return original_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(brief_compiler.httpx, "AsyncClient", fake_client)
+    with pytest.raises(BriefCompilerError):
+        asyncio.run(brief_compiler._qwen_extract("主标题：双十一电动牙刷，活动价199元"))
+    assert len(calls) == 1
