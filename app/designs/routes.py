@@ -240,7 +240,11 @@ def bind_design_brief(document_id: str, payload: BriefLinkRequest, request: Requ
         spec = PosterSpec.model_validate(run["confirmed_spec"])
         digest = hashlib.sha256(spec.model_dump_json().encode("utf-8")).hexdigest()
         result = _manager(request).repository().bind_brief_run(
-            document_id, run_id=payload.brief_run_id, confirmed_spec_digest=digest
+            document_id,
+            run_id=payload.brief_run_id,
+            confirmed_spec_digest=digest,
+            confirmed_title=spec.title,
+            confirmed_price=spec.price,
         )
     except ReviewNotFound:
         return _error_response(404, "BRIEF_NOT_FOUND", "Brief checkpoint not found")
