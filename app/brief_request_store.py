@@ -34,7 +34,9 @@ class ReviewRequestNotFound(LookupError):
 
 def validate_key(key: str) -> None:
     if not _VALID_KEY.fullmatch(key):
-        raise InvalidReviewRequestKey("Idempotency-Key 必须是 8–128 位 ASCII 字母、数字、下划线或短横线")
+        raise InvalidReviewRequestKey(
+            "Idempotency-Key 必须是 8–128 位 ASCII 字母、数字、下划线或短横线"
+        )
 
 
 def fingerprint(request: dict) -> str:
@@ -154,8 +156,7 @@ def recover_abandoned() -> int:
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         cursor = conn.execute(
-            "UPDATE brief_request_claims SET status='UNKNOWN', updated_at=? "
-            "WHERE status='RUNNING'",
+            "UPDATE brief_request_claims SET status='UNKNOWN', updated_at=? WHERE status='RUNNING'",
             (_now(),),
         )
         return cursor.rowcount
