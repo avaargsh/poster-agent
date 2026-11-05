@@ -90,6 +90,32 @@ class NothingToRedoError(DesignError):
         return "there is nothing to redo"
 
 
+class ApprovalRequiredError(DesignError):
+    """Current revision is not approved for the protected export endpoint."""
+
+    code = "APPROVAL_REQUIRED"
+
+    @property
+    def default_message(self) -> str:
+        return "current design revision requires explicit approval"
+
+
+class ApprovalDigestConflictError(DesignError):
+    code = "APPROVAL_DIGEST_CONFLICT"
+
+    @property
+    def default_message(self) -> str:
+        return "design approval snapshot digest mismatch"
+
+
+class ApprovalConflictError(DesignError):
+    code = "APPROVAL_CONFLICT"
+
+    @property
+    def default_message(self) -> str:
+        return "this design revision already has a different approval"
+
+
 class StorageError(DesignError):
     code = "STORAGE_ERROR"
 
