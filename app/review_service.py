@@ -1,7 +1,8 @@
-"""Persistence boundary for M2b: SQLite checkpointer + one-process serialization.
+"""Persistence boundary for M2b: SQLite checkpoints and per-run serialization.
 
-Deliberately single-process. Multi-worker production requires a transactional DB,
-explicit ownership and authorization, and per-task locking across workers.
+This service is deliberately single-process: the worker's exclusive filesystem
+lock owns its SQLite files. Multi-worker production would require a transactional
+DB, distributed run ownership, and authorization.
 """
 
 from __future__ import annotations
@@ -21,8 +22,10 @@ from app.brief_compiler import BriefRequest
 from app.schemas import PosterSpec
 from app.workflows.review_graph import make_review_graph
 
-LOCK = threading.RLock()
 _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
+# The registry guard protects only lock bookkeeping, never network-backed work.
+_LOCAL_LOCK_GUARD = threading.Lock()
+_LOCAL_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
 
 
 class ReviewNotFound(LookupError):
@@ -53,6 +56,33 @@ def config(run_id: str) -> dict:
     return {"configurable": {"thread_id": run_id}}
 
 
+@contextmanager
+def _local_lock(token: str):
+    """Serialize one run or request key, reclaiming its lock after all waiters."""
+    with _LOCAL_LOCK_GUARD:
+        current = _LOCAL_LOCKS.get(token)
+        lock, refs = current if current is not None else (threading.RLock(), 0)
+        _LOCAL_LOCKS[token] = (lock, refs + 1)
+    try:
+        with lock:
+            yield
+    finally:
+        with _LOCAL_LOCK_GUARD:
+            lock, refs = _LOCAL_LOCKS[token]
+            if refs == 1:
+                del _LOCAL_LOCKS[token]
+            else:
+                _LOCAL_LOCKS[token] = (lock, refs - 1)
+
+
+@contextmanager
+def _run_lock(run_id: str):
+    """Serialize only operations on the same canonical LangGraph run."""
+    config(run_id)  # Reject invalid IDs before allocating local lock entries.
+    with _local_lock(f"run:{run_id}"):
+        yield
+
+
 def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> dict:
     snapshot = graph.get_state(config(run_id))
     values = snapshot.values or {}
@@ -77,29 +107,48 @@ def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> di
 
 
 def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> dict:
-    """Admit Qwen extraction once for a stable request key, including lost replies."""
+    """Admit a stable Brief request before its Qwen network side effect."""
     if request.compiler == "qwen" and idempotency_key is None:
         raise brief_request_store.InvalidReviewRequestKey("Qwen Brief 编译必须提供 Idempotency-Key")
+    if idempotency_key is None:
+        return _create_run_after_admission(request, None)
+
+    # This same-key lock covers the claim-to-run-lock handoff. Without it, a
+    # concurrent replay could find an empty checkpoint before the original
+    # owner acquired its run lock and incorrectly mark the claim UNKNOWN.
+    brief_request_store.validate_key(idempotency_key)
+    with _local_lock(f"request:{idempotency_key}"):
+        return _create_run_after_admission(request, idempotency_key)
+
+
+def _create_run_after_admission(request: BriefRequest, idempotency_key: str | None) -> dict:
     run_id = uuid4().hex
-    with LOCK:
-        if idempotency_key is not None:
-            request_hash = brief_request_store.fingerprint(request.model_dump(mode="json"))
-            claim = brief_request_store.claim(idempotency_key, request_hash, run_id)
-            run_id = claim["run_id"]
-            if not claim["claimed"]:
-                # Only inspect a previous checkpoint; never repeat the extraction.
-                with open_graph() as graph:
-                    try:
-                        result = _view(run_id, graph, expected_request_hash=request_hash)
-                    except (ReviewNotFound, ReviewConflict) as exc:
-                        brief_request_store.mark_unknown(idempotency_key, run_id)
-                        if isinstance(exc, ReviewConflict):
-                            raise
-                        raise ReviewConflict(
-                            f"原 Brief 请求结果未确认（run_id={run_id}），不会自动重新调用模型"
-                        ) from exc
-                brief_request_store.complete(idempotency_key, run_id)
-                return result
+    claim = None
+    request_hash = None
+    if idempotency_key is not None:
+        request_hash = brief_request_store.fingerprint(request.model_dump(mode="json"))
+        # The SQLite transaction claims ownership without holding a process-wide
+        # lock while a different run waits on its LLM provider.
+        claim = brief_request_store.claim(idempotency_key, request_hash, run_id)
+        run_id = claim["run_id"]
+
+    with _run_lock(run_id):
+        if claim is not None and not claim["claimed"]:
+            # The original call on THIS run has finished (or failed) because
+            # the lock serializes same-run callers, including concurrent replays.
+            with open_graph() as graph:
+                try:
+                    result = _view(run_id, graph, expected_request_hash=request_hash)
+                except (ReviewNotFound, ReviewConflict) as exc:
+                    brief_request_store.mark_unknown(idempotency_key, run_id)
+                    if isinstance(exc, ReviewConflict):
+                        raise
+                    raise ReviewConflict(
+                        f"原 Brief 请求结果未确认（run_id={run_id}），不会自动重新调用模型"
+                    ) from exc
+            brief_request_store.complete(idempotency_key, run_id)
+            return result
+
         try:
             with open_graph() as graph:
                 graph.invoke({"request": request.model_dump(mode="json")}, config(run_id))
@@ -117,7 +166,7 @@ def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> 
 
 
 def get_run(run_id: str) -> dict:
-    with LOCK:
+    with _run_lock(run_id):
         with open_graph() as graph:
             return _view(run_id, graph)
 
@@ -125,7 +174,7 @@ def get_run(run_id: str) -> dict:
 def decide_run(run_id: str, approved: bool, spec: PosterSpec | None) -> dict:
     if approved and spec is None:
         raise ValueError("审核通过前必须提供完整 PosterSpec")
-    with LOCK:
+    with _run_lock(run_id):
         with open_graph() as graph:
             before = _view(run_id, graph)
             if not before["pending_approval"]:
