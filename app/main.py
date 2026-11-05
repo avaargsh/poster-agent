@@ -22,7 +22,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from . import execution_store, storage, worker_lock
+from . import brief_request_store, execution_store, storage, worker_lock
 from .acceptance_routes import router as acceptance_router
 from .batch_import_routes import router as batch_import_router
 from .brief_routes import router as brief_router
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
     # A second worker must never reconcile an execution that is still active.
     with worker_lock.single_worker():
         execution_store.recover_incomplete()
+        brief_request_store.recover_abandoned()
         # Design storage is lazy: this only captures process configuration.
         # Locks and SQLite are created on the first /api/designs request.
         design_manager = create_design_manager()
