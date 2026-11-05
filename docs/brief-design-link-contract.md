@@ -7,7 +7,7 @@
 checkpoint currently reports `APPROVED`, has no pending approval, and
 contains a parseable `PosterSpec`. The server hashes the normalized confirmed
 specification, then writes a one-time link to an existing **revision 1**
-DesignDocument. Exact replays return 200; conflicting run IDs or digests fail
+DesignDocument. The confirmed Brief title and price must match the revision-1 design's title and price; a mismatch is rejected. Exact replays return 200; conflicting run IDs or digests fail
 409. A design edited before first binding cannot be retroactively linked.
 
 `GET /api/designs/{document_id}/brief-link` returns the persisted run ID,
