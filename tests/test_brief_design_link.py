@@ -3,12 +3,33 @@
 import hashlib
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.designs.routes as design_routes
 from app.main import app
 from app.schemas import PosterSpec
-from tests.test_design_approval_binding import create, design_paths  # noqa: F401
+
+
+@pytest.fixture
+def design_paths(tmp_path, monkeypatch):
+    paths = {"database": tmp_path / "designs.sqlite3", "assets": tmp_path / "design-assets"}
+    monkeypatch.setenv("POSTER_DATA_DIR", str(tmp_path / "posters"))
+    monkeypatch.setenv("POSTER_EXECUTION_DB", str(tmp_path / "executions.sqlite3"))
+    monkeypatch.setenv("POSTER_CHECKPOINT_DB", str(tmp_path / "checkpoints.sqlite3"))
+    monkeypatch.setenv("POSTER_DESIGN_DB", str(paths["database"]))
+    monkeypatch.setenv("POSTER_DESIGN_ASSET_DIR", str(paths["assets"]))
+    return paths
+
+
+def create(client, product_bytes):
+    response = client.post(
+        "/api/designs",
+        data={"title": "双十一牙刷", "price": "199.90"},
+        files={"product": ("toothbrush.png", product_bytes, "image/png")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["document"]
 
 
 def test_brief_link_auth_replay_conflict_and_restart(design_paths, product_bytes, monkeypatch):
