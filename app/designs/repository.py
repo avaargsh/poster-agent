@@ -588,6 +588,9 @@ class DesignRepository:
         """
         try:
             with self._connect() as connection:
+                # Keep the head, digests and approval rows on one SQLite
+                # read snapshot even if a concurrent command advances the head.
+                connection.execute("BEGIN")
                 document, spec_digest, asset_digest = self._approval_snapshot(
                     connection, document_id
                 )
