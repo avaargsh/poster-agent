@@ -15,7 +15,6 @@ import hashlib
 import hmac
 import logging
 import os
-import re
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
@@ -239,9 +238,7 @@ def bind_design_brief(document_id: str, payload: BriefLinkRequest, request: Requ
         if run["status"] != "APPROVED" or run["pending_approval"]:
             return _error_response(409, "BRIEF_NOT_APPROVED", "Brief is not approved")
         spec = PosterSpec.model_validate(run["confirmed_spec"])
-        digest = hashlib.sha256(
-            spec.model_dump_json().encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha256(spec.model_dump_json().encode("utf-8")).hexdigest()
         result = _manager(request).repository().bind_brief_run(
             document_id, run_id=payload.brief_run_id, confirmed_spec_digest=digest
         )
