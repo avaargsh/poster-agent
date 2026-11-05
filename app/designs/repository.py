@@ -904,42 +904,104 @@ class DesignRepository:
         except sqlite3.Error:
             raise StorageError() from None
 
+    def _approved_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        document_id: str,
+        revision: int,
+        *,
+        required_policy_digest: str | None,
+    ) -> tuple[DesignDocument, str, str, str]:
+        """Use a single serialized SQLite snapshot for all protected outputs."""
+        document, spec_digest, asset_digest = self._approval_snapshot(connection, document_id)
+        if revision != document.revision:
+            raise RevisionConflictError()
+        record = self._approval_record(connection, document_id, revision)
+        if record is None or not self._approval_matches(record, spec_digest, asset_digest):
+            raise ApprovalRequiredError()
+        attribution = connection.execute(
+            """
+            SELECT policy_digest FROM design_approval_attributions
+            WHERE document_id = ? AND approval_id = ?
+            """,
+            (document_id, record["approval_id"]),
+        ).fetchone()
+        if required_policy_digest is not None:
+            if attribution is None or not hmac.compare_digest(
+                attribution["policy_digest"], required_policy_digest
+            ):
+                raise ApprovalRequiredError()
+        elif attribution is not None:
+            # Do not downgrade an authenticated approval to anonymous export.
+            raise ApprovalRequiredError()
+        self._assert_bound_assets(document)
+        self._assert_assets_indexed(connection, document)
+        svg = render_svg(document, assets=self.read_assets(document))
+        return document, spec_digest, asset_digest, svg
+
     def approved_svg(
         self, document_id: str, revision: int, *, required_policy_digest: str | None = None
     ) -> str:
-        """Export the current head; authenticated approvals require their exact policy."""
+        """Export the currently approved head, never stale or unverified history."""
         if type(revision) is not int or revision < 1:
             raise NotFoundError()
         try:
             with self._write_transaction() as connection:
-                document, spec_digest, asset_digest = self._approval_snapshot(
-                    connection, document_id
+                return self._approved_snapshot(
+                    connection,
+                    document_id,
+                    revision,
+                    required_policy_digest=required_policy_digest,
+                )[3]
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def ocr_target(
+        self, document_id: str, revision: int, *, required_policy_digest: str | None = None
+    ) -> dict:
+        """Freeze an OCR input target without asserting that OCR ran or passed."""
+        if type(revision) is not int or revision < 1:
+            raise NotFoundError()
+        try:
+            with self._write_transaction() as connection:
+                document, spec_digest, asset_digest, svg = self._approved_snapshot(
+                    connection,
+                    document_id,
+                    revision,
+                    required_policy_digest=required_policy_digest,
                 )
-                if revision != document.revision:
-                    raise RevisionConflictError()
+                expected: dict[str, str] = {}
+                missing_fields: list[str] = []
+                for role in ("title", "price", "cta"):
+                    matching = [
+                        node
+                        for node in document.nodes
+                        if isinstance(node, TextNode) and node.role == role and node.visible
+                    ]
+                    if len(matching) != 1 or not matching[0].plain_text:
+                        # A missing or hidden field must never be fabricated
+                        # from an unrelated Brief or default PosterSpec.
+                        missing_fields.append(role)
+                    else:
+                        expected[role] = matching[0].plain_text
                 record = self._approval_record(connection, document_id, revision)
-                if record is None or not self._approval_matches(record, spec_digest, asset_digest):
+                if record is None:
                     raise ApprovalRequiredError()
-                attribution = connection.execute(
-                    """
-                    SELECT policy_digest FROM design_approval_attributions
-                    WHERE document_id = ? AND approval_id = ?
-                    """,
-                    (document_id, record["approval_id"]),
-                ).fetchone()
-                if required_policy_digest is not None:
-                    if attribution is None or not hmac.compare_digest(
-                        attribution["policy_digest"], required_policy_digest
-                    ):
-                        raise ApprovalRequiredError()
-                elif attribution is not None:
-                    # Do not export a previously authenticated approval after
-                    # local reviewer configuration is accidentally disabled.
-                    raise ApprovalRequiredError()
-                self._assert_bound_assets(document)
-                self._assert_assets_indexed(connection, document)
-                assets = self.read_assets(document)
-                return render_svg(document, assets=assets)
+                return {
+                    "document_id": document_id,
+                    "revision": revision,
+                    "approval_id": record["approval_id"],
+                    "spec_digest": spec_digest,
+                    "asset_manifest_digest": asset_digest,
+                    "renderer_version": RENDERER_VERSION,
+                    "svg_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+                    "expected_fields": expected,
+                    "missing_fields": missing_fields,
+                    "ocr_status": "NOT_RUN",
+                    "runtime_attested": False,
+                    "quality_verified": False,
+                    "release_ready": False,
+                }
         except sqlite3.Error:
             raise StorageError() from None
 
