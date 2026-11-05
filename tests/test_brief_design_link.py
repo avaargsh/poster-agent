@@ -119,9 +119,7 @@ def test_brief_link_rejects_unapproved_or_changed_revision(
 def test_brief_link_rejects_mismatched_business_facts(design_paths, product_bytes, monkeypatch):
     monkeypatch.setenv("POSTER_BRIEF_LINK_TOKEN", "x" * 48)
     headers = {"Authorization": "Bearer " + "x" * 48}
-    state = {
-        "confirmed_spec": PosterSpec(title="其他商品", price="199.90").model_dump(mode="json")
-    }
+    state = {"confirmed_spec": PosterSpec(title="其他商品", price="199.90").model_dump(mode="json")}
     monkeypatch.setattr(
         design_routes,
         "get_run",
