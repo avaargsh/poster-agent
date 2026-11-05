@@ -53,9 +53,7 @@ def error(response, code):
     assert response.json()["error"]["code"] == code
 
 
-def test_ocr_target_requires_current_approved_revision_and_frozen_svg(
-    design_paths, product_bytes
-):
+def test_ocr_target_requires_current_approved_revision_and_frozen_svg(design_paths, product_bytes):
     with TestClient(app) as client:
         doc = create(client, product_bytes)
         url = f"/api/designs/{doc}/revisions/1/ocr-target"
@@ -103,9 +101,7 @@ def test_ocr_target_requires_current_approved_revision_and_frozen_svg(
         assert fresh.json()["release_ready"] is False
 
 
-def test_ocr_target_inherits_approval_export_auth_scope(
-    design_paths, product_bytes, monkeypatch
-):
+def test_ocr_target_inherits_approval_export_auth_scope(design_paths, product_bytes, monkeypatch):
     reviewer = "reviewer-key-" + "R" * 40
     exporter = "exporter-key-" + "E" * 40
     monkeypatch.setenv(
