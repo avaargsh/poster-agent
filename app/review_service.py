@@ -24,8 +24,8 @@ from app.workflows.review_graph import make_review_graph
 
 _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
 # The registry guard protects only lock bookkeeping, never network-backed work.
-_RUN_LOCK_GUARD = threading.Lock()
-_RUN_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
+_LOCAL_LOCK_GUARD = threading.Lock()
+_LOCAL_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
 
 
 class ReviewNotFound(LookupError):
@@ -57,27 +57,31 @@ def config(run_id: str) -> dict:
 
 
 @contextmanager
-def _run_lock(run_id: str):
-    """Serialize one review thread without blocking unrelated network requests.
-
-    Reference counts include active holders and waiters, preventing removal
-    while another caller is waiting. Completed run locks are reclaimed.
-    """
-    config(run_id)  # Validate before adding a user-supplied ID to the registry.
-    with _RUN_LOCK_GUARD:
-        current = _RUN_LOCKS.get(run_id)
+def _local_lock(token: str):
+    """Serialize one run or request key, reclaiming its lock after all waiters."""
+    with _LOCAL_LOCK_GUARD:
+        current = _LOCAL_LOCKS.get(token)
         lock, refs = current if current is not None else (threading.RLock(), 0)
-        _RUN_LOCKS[run_id] = (lock, refs + 1)
+        _LOCAL_LOCKS[token] = (lock, refs + 1)
     try:
         with lock:
             yield
     finally:
-        with _RUN_LOCK_GUARD:
-            lock, refs = _RUN_LOCKS[run_id]
+        with _LOCAL_LOCK_GUARD:
+            lock, refs = _LOCAL_LOCKS[token]
             if refs == 1:
-                del _RUN_LOCKS[run_id]
+                del _LOCAL_LOCKS[token]
             else:
-                _RUN_LOCKS[run_id] = (lock, refs - 1)
+                _LOCAL_LOCKS[token] = (lock, refs - 1)
+
+
+@contextmanager
+def _run_lock(run_id: str):
+    """Serialize only operations on the same canonical LangGraph run."""
+    config(run_id)  # Reject invalid IDs before allocating local lock entries.
+    with _local_lock(f"run:{run_id}"):
+        yield
+
 
 
 def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> dict:
@@ -104,9 +108,21 @@ def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> di
 
 
 def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> dict:
-    """Admit Qwen extraction once for a stable request key, including lost replies."""
+    """Admit a stable Brief request before its Qwen network side effect."""
     if request.compiler == "qwen" and idempotency_key is None:
         raise brief_request_store.InvalidReviewRequestKey("Qwen Brief 编译必须提供 Idempotency-Key")
+    if idempotency_key is None:
+        return _create_run_after_admission(request, None)
+
+    # This same-key lock covers the claim-to-run-lock handoff. Without it, a
+    # concurrent replay could find an empty checkpoint before the original
+    # owner acquired its run lock and incorrectly mark the claim UNKNOWN.
+    brief_request_store.validate_key(idempotency_key)
+    with _local_lock(f"request:{idempotency_key}"):
+        return _create_run_after_admission(request, idempotency_key)
+
+
+def _create_run_after_admission(request: BriefRequest, idempotency_key: str | None) -> dict:
     run_id = uuid4().hex
     claim = None
     request_hash = None
