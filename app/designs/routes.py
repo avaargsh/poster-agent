@@ -36,6 +36,7 @@ from .errors import (
 )
 from .models import MAX_ASSET_BYTES, DesignDocument
 from .rendering import render_svg
+from .reviewer_auth import ReviewerAccessError, reviewer_for_request
 from .service import (
     DesignManager,
     DesignStorageBusy,
@@ -287,7 +288,10 @@ def get_design_approval_target(document_id: str, request: Request):
 def get_design_approval_history(document_id: str, request: Request):
     """Inspect recorded local approvals without granting export authorization."""
     try:
+        reviewer_for_request(request, "audit.read")
         return _manager(request).repository().approval_history(document_id)
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc)
     except Exception:
@@ -298,7 +302,10 @@ def get_design_approval_history(document_id: str, request: Request):
 def approve_design(document_id: str, decision: ApprovalRequest, request: Request):
     """Approve one exact current revision; same ID replay returns HTTP 200."""
     try:
-        result = _manager(request).repository().approve(document_id, decision)
+        reviewer = reviewer_for_request(request, "approve")
+        result = _manager(request).repository().approve(document_id, decision, reviewer=reviewer)
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc)
     except Exception:
@@ -382,7 +389,18 @@ def export_approved_design(
 ):
     """Protected export, separate from the public draft preview endpoint."""
     try:
-        svg = _manager(request).repository().approved_svg(document_id, revision)
+        reviewer = reviewer_for_request(request, "export")
+        svg = (
+            _manager(request)
+            .repository()
+            .approved_svg(
+                document_id,
+                revision,
+                required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+            )
+        )
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
     except Exception:

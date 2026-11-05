@@ -66,6 +66,7 @@ from .models import (
     format_price_text,
 )
 from .rendering import ALLOWED_FORMATS, DesignRenderError, render_svg
+from .reviewer_auth import ReviewerContext
 from .templates import create_template
 from .text_layout import split_text_chunks
 
@@ -139,6 +140,17 @@ CREATE TABLE IF NOT EXISTS design_approvals (
     PRIMARY KEY (document_id, approval_id),
     UNIQUE (document_id, revision, renderer_version),
     FOREIGN KEY (document_id, revision) REFERENCES revisions(document_id, revision)
+);
+
+CREATE TABLE IF NOT EXISTS design_approval_attributions (
+    document_id TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    policy_digest TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (document_id, approval_id),
+    FOREIGN KEY (document_id, approval_id)
+        REFERENCES design_approvals(document_id, approval_id)
 );
 """
 
@@ -720,11 +732,17 @@ class DesignRepository:
                 )
                 rows = connection.execute(
                     """
-                    SELECT revision, approval_id, spec_digest,
-                           asset_manifest_digest, renderer_version, created_at
-                    FROM design_approvals
-                    WHERE document_id = ?
-                    ORDER BY revision ASC, created_at ASC, approval_id ASC
+                    SELECT approval.revision, approval.approval_id, approval.spec_digest,
+                           approval.asset_manifest_digest, approval.renderer_version,
+                           approval.created_at, attribution.principal_id,
+                           attribution.policy_digest, attribution.recorded_at AS attributed_at
+                    FROM design_approvals AS approval
+                    LEFT JOIN design_approval_attributions AS attribution
+                      ON attribution.document_id = approval.document_id
+                     AND attribution.approval_id = approval.approval_id
+                    WHERE approval.document_id = ?
+                    ORDER BY approval.revision ASC, approval.created_at ASC,
+                             approval.approval_id ASC
                     """,
                     (document_id,),
                 ).fetchall()
@@ -742,6 +760,9 @@ class DesignRepository:
                             "asset_manifest_digest": record["asset_manifest_digest"],
                             "renderer_version": record["renderer_version"],
                             "created_at": record["created_at"],
+                            "principal_id": record["principal_id"],
+                            "policy_digest": record["policy_digest"],
+                            "attributed_at": record["attributed_at"],
                             "is_current_head": is_current,
                             "matches_current_snapshot": matches_current,
                         }
@@ -755,8 +776,14 @@ class DesignRepository:
         except sqlite3.Error:
             raise StorageError() from None
 
-    def approve(self, document_id: str, request: ApprovalRequest) -> dict:
-        """Atomically bind one local operator acknowledgement to the exact head."""
+    def approve(
+        self,
+        document_id: str,
+        request: ApprovalRequest,
+        *,
+        reviewer: ReviewerContext | None = None,
+    ) -> dict:
+        """Atomically bind local acknowledgement and optional reviewer attribution."""
         try:
             with self._write_transaction() as connection:
                 document, spec_digest, asset_digest = self._approval_snapshot(
@@ -784,6 +811,29 @@ class DesignRepository:
                     )
                 ):
                     raise IdempotencyConflictError()
+
+                attribution = connection.execute(
+                    """
+                    SELECT principal_id, policy_digest FROM design_approval_attributions
+                    WHERE document_id = ? AND approval_id = ?
+                    """,
+                    (document_id, request.approval_id),
+                ).fetchone()
+                if existing_by_key is not None:
+                    if reviewer is None and attribution is not None:
+                        raise IdempotencyConflictError()
+                    if reviewer is not None and (
+                        attribution is None
+                        or not hmac.compare_digest(
+                            attribution["principal_id"], reviewer.principal_id
+                        )
+                        or not hmac.compare_digest(
+                            attribution["policy_digest"], reviewer.policy_digest
+                        )
+                    ):
+                        # Never retroactively attach an identity to an older
+                        # anonymous approval, or let a different principal replay.
+                        raise IdempotencyConflictError()
 
                 if not (
                     hmac.compare_digest(request.spec_digest, spec_digest)
@@ -824,6 +874,22 @@ class DesignRepository:
                             _now(),
                         ),
                     )
+                    if reviewer is not None:
+                        connection.execute(
+                            """
+                            INSERT INTO design_approval_attributions
+                                (document_id, approval_id, principal_id,
+                                 policy_digest, recorded_at)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                document_id,
+                                request.approval_id,
+                                reviewer.principal_id,
+                                reviewer.policy_digest,
+                                _now(),
+                            ),
+                        )
                 return {
                     "document_id": document_id,
                     "revision": document.revision,
@@ -831,13 +897,17 @@ class DesignRepository:
                     "spec_digest": spec_digest,
                     "asset_manifest_digest": asset_digest,
                     "renderer_version": RENDERER_VERSION,
+                    "principal_id": reviewer.principal_id if reviewer is not None else None,
+                    "policy_digest": reviewer.policy_digest if reviewer is not None else None,
                     "replayed": replayed,
                 }
         except sqlite3.Error:
             raise StorageError() from None
 
-    def approved_svg(self, document_id: str, revision: int) -> str:
-        """Render only the currently approved head, not stale history."""
+    def approved_svg(
+        self, document_id: str, revision: int, *, required_policy_digest: str | None = None
+    ) -> str:
+        """Export the current head; authenticated approvals require their exact policy."""
         if type(revision) is not int or revision < 1:
             raise NotFoundError()
         try:
@@ -849,6 +919,22 @@ class DesignRepository:
                     raise RevisionConflictError()
                 record = self._approval_record(connection, document_id, revision)
                 if record is None or not self._approval_matches(record, spec_digest, asset_digest):
+                    raise ApprovalRequiredError()
+                attribution = connection.execute(
+                    """
+                    SELECT policy_digest FROM design_approval_attributions
+                    WHERE document_id = ? AND approval_id = ?
+                    """,
+                    (document_id, record["approval_id"]),
+                ).fetchone()
+                if required_policy_digest is not None:
+                    if attribution is None or not hmac.compare_digest(
+                        attribution["policy_digest"], required_policy_digest
+                    ):
+                        raise ApprovalRequiredError()
+                elif attribution is not None:
+                    # Do not export a previously authenticated approval after
+                    # local reviewer configuration is accidentally disabled.
                     raise ApprovalRequiredError()
                 self._assert_bound_assets(document)
                 self._assert_assets_indexed(connection, document)
