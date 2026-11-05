@@ -572,6 +572,8 @@ class DesignRepository:
                         "linked_at": existing["linked_at"],
                         "replayed": True,
                     }
+                if document.revision != 1:
+                    raise RevisionConflictError()
                 title_nodes = [
                     node
                     for node in document.nodes
@@ -583,8 +585,6 @@ class DesignRepository:
                     or document.facts.price != confirmed_price
                 ):
                     raise InvalidCommandError()
-                if document.revision != 1:
-                    raise RevisionConflictError()
                 linked_at = _now()
                 connection.execute(
                     """
