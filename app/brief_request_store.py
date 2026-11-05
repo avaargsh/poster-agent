@@ -140,3 +140,18 @@ def get(key: str) -> dict:
     if row is None:
         raise ReviewRequestNotFound("未找到该 Brief 请求")
     return dict(row)
+
+
+def recover_abandoned() -> int:
+    """Under the existing exclusive worker lock, mark interrupted claims UNKNOWN."""
+    path = Path(os.getenv("POSTER_CHECKPOINT_DB", "data/checkpoints.sqlite3")).resolve()
+    if not path.is_file():
+        return 0
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.execute(
+            "UPDATE brief_request_claims SET status='UNKNOWN', updated_at=? "
+            "WHERE status='RUNNING'",
+            (_now(),),
+        )
+        return cursor.rowcount
