@@ -7,9 +7,12 @@ Qwen Brief extraction previously held the same `RLock` as unrelated
 
 ## Lock ownership
 
-- `create_run` first executes the durable SQLite admission transaction
-  (`Idempotency-Key` -> request digest + stable `run_id`); this does **not**
-  hold a process-global lock over the potentially billable model request.
+- `create_run` serializes callers with the **same** Idempotency-Key
+  through a local request-key lock, then executes the durable SQLite admission
+  transaction (key -> request digest + stable `run_id`). The request-key
+  lock covers the claim-to-run-lock handoff so a duplicate cannot see an empty
+  checkpoint before the first owner begins. Independent request keys do **not**
+  hold a process-global lock over potentially billable model calls.
 - `create_run`, `get_run`, and `decide_run` serialize only on their
   **canonical `run_id`**. An unrelated run can read or advance while Qwen is
   waiting. Each graph call keeps its independent SQLite connection.
@@ -50,5 +53,5 @@ uv run --locked python -m pytest -q
 The concurrency tests use real SQLite `SqliteSaver` and LangGraph state,
 a controlled Qwen stub, concurrent worker threads, and bounded waits. They
 cover independent reads/approval while another Qwen request is blocked,
-parallel different-key Qwen compilers, same-key replay, and conflicting
-same-run approval. No external provider or model is called.
+parallel different-key Qwen compilers, same-key replay, the admission-to-run
+lock handoff race, and conflicting same-run approval. No external provider or model is called.
