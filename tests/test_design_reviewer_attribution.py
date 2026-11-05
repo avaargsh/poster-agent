@@ -218,3 +218,22 @@ def test_policy_rotation_invalidates_prior_authenticated_export(
             409,
             "IDEMPOTENCY_CONFLICT",
         )
+
+
+def test_reviewer_policy_is_snapshot_at_startup_and_cannot_downgrade_at_runtime(
+    local_design_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setenv("POSTER_DESIGN_REVIEWERS_JSON", _policy())
+    with TestClient(app) as client:
+        document_id = _create(client, product_bytes)
+        url = f"/api/designs/{document_id}/approvals"
+        payload = _approve_payload(client, document_id)
+        monkeypatch.delenv("POSTER_DESIGN_REVIEWERS_JSON")
+        _error(client.post(url, json=payload), 401, "DESIGN_REVIEWER_UNAUTHENTICATED")
+        approved = client.post(url, json=payload, headers=_headers(REVIEWER_TOKEN))
+        assert approved.status_code == 201, approved.text
+
+    # A previously attributed approval never falls back to anonymous export.
+    with TestClient(app) as downgraded:
+        protected_svg = f"/api/designs/{document_id}/revisions/1/approved.svg"
+        _error(downgraded.get(protected_svg), 409, "APPROVAL_REQUIRED")
