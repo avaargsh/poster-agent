@@ -66,6 +66,8 @@ def test_ocr_target_requires_current_approved_revision_and_frozen_svg(design_pat
         assert svg.status_code == 200, svg.text
         assert payload["document_id"] == doc
         assert payload["revision"] == 1
+        current_approval = client.get(f"/api/designs/{doc}/approval-target").json()
+        assert payload["approval_id"] == current_approval["approval_id"]
         assert payload["spec_digest"] == approved["spec_digest"]
         assert payload["asset_manifest_digest"] == approved["asset_manifest_digest"]
         assert payload["renderer_version"] == approved["renderer_version"]
