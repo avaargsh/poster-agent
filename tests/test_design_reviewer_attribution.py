@@ -126,6 +126,7 @@ def test_opt_in_reviewer_scopes_and_durable_attribution(
         assert len(entries) == 1
         assert entries[0]["principal_id"] == "reviewer-one"
         assert entries[0]["policy_digest"] == first.json()["policy_digest"]
+        assert entries[0]["attributed_at"]
 
     with TestClient(app) as restarted:
         history = restarted.get(approvals, headers=_headers(AUDIT_TOKEN))
@@ -163,6 +164,7 @@ def test_legacy_approval_cannot_be_claimed_as_authenticated_evidence(
         )
         history = protected.get(approvals, headers=_headers(AUDIT_TOKEN)).json()["approvals"]
         assert history[0]["principal_id"] is None
+        assert history[0]["attributed_at"] is None
 
 
 def test_invalid_policy_and_digest_as_bearer_never_authorize(
