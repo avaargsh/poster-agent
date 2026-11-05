@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import warnings
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
@@ -73,6 +74,9 @@ async def lifespan(app: FastAPI):
         # Design storage is lazy: this only captures process configuration.
         # Locks and SQLite are created on the first /api/designs request.
         design_manager = create_design_manager()
+        # Freeze local reviewer policy per server lifespan. Runtime env changes
+        # must never silently enable or disable HTTP approval authorization.
+        app.state.design_reviewer_policy_raw = os.environ.get("POSTER_DESIGN_REVIEWERS_JSON")
         app.state.design_manager = design_manager
         try:
             yield
