@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS assets (
     FOREIGN KEY (document_id) REFERENCES designs(document_id)
 );
 
+CREATE TABLE IF NOT EXISTS design_brief_links (
+    document_id TEXT PRIMARY KEY,
+    brief_run_id TEXT NOT NULL,
+    confirmed_spec_digest TEXT NOT NULL,
+    linked_revision INTEGER NOT NULL,
+    linked_at TEXT NOT NULL,
+    FOREIGN KEY (document_id, linked_revision) REFERENCES revisions(document_id, revision)
+);
+
 CREATE TABLE IF NOT EXISTS design_approvals (
     document_id TEXT NOT NULL,
     revision INTEGER NOT NULL,
@@ -515,6 +524,101 @@ class DesignRepository:
         except DesignRenderError:
             raise AssetInvalidError() from None
         return assets
+
+    # -------------------------------------------------------- Brief provenance
+
+    def bind_brief_run(
+        self, document_id: str, *, run_id: str, confirmed_spec_digest: str
+    ) -> dict:
+        """Bind a validated approved Brief snapshot to an existing design.
+
+        The caller must validate the authoritative Brief checkpoint first.
+        This stores provenance only; it never grants export or approval rights.
+        """
+        if (
+            not isinstance(run_id, str)
+            or not re.fullmatch(r"[a-zA-Z0-9_-]{8,128}", run_id)
+            or not isinstance(confirmed_spec_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", confirmed_spec_digest)
+        ):
+            raise InvalidCommandError()
+        try:
+            with self._write_transaction() as connection:
+                document, _, _ = self._approval_snapshot(connection, document_id)
+                existing = connection.execute(
+                    """
+                    SELECT brief_run_id, confirmed_spec_digest, linked_revision, linked_at
+                    FROM design_brief_links WHERE document_id = ?
+                    """,
+                    (document_id,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        existing["brief_run_id"] != run_id
+                        or existing["confirmed_spec_digest"] != confirmed_spec_digest
+                    ):
+                        raise IdempotencyConflictError()
+                    return {
+                        "document_id": document_id,
+                        "brief_run_id": run_id,
+                        "confirmed_spec_digest": confirmed_spec_digest,
+                        "linked_revision": existing["linked_revision"],
+                        "linked_at": existing["linked_at"],
+                        "replayed": True,
+                    }
+                if document.revision != 1:
+                    raise RevisionConflictError()
+                linked_at = _now()
+                connection.execute(
+                    """
+                    INSERT INTO design_brief_links
+                        (document_id, brief_run_id, confirmed_spec_digest,
+                         linked_revision, linked_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (document_id, run_id, confirmed_spec_digest, 1, linked_at),
+                )
+                return {
+                    "document_id": document_id,
+                    "brief_run_id": run_id,
+                    "confirmed_spec_digest": confirmed_spec_digest,
+                    "linked_revision": 1,
+                    "linked_at": linked_at,
+                    "replayed": False,
+                }
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def brief_link(self, document_id: str) -> dict | None:
+        """Return stored provenance, not a live checkpoint authorization."""
+        if not _valid_document_id(document_id):
+            raise NotFoundError()
+        try:
+            with self._connect() as connection:
+                if connection.execute(
+                    "SELECT 1 FROM designs WHERE document_id = ?", (document_id,)
+                ).fetchone() is None:
+                    raise NotFoundError()
+                row = connection.execute(
+                    """
+                    SELECT brief_run_id, confirmed_spec_digest, linked_revision, linked_at
+                    FROM design_brief_links WHERE document_id = ?
+                    """,
+                    (document_id,),
+                ).fetchone()
+                return (
+                    {
+                        "document_id": document_id,
+                        "brief_run_id": row["brief_run_id"],
+                        "confirmed_spec_digest": row["confirmed_spec_digest"],
+                        "linked_revision": row["linked_revision"],
+                        "linked_at": row["linked_at"],
+                    }
+                    if row is not None
+                    else None
+                )
+        except sqlite3.Error:
+            raise StorageError() from None
 
     # -------------------------------------------------------- local approvals
 
