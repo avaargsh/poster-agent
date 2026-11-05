@@ -9,7 +9,7 @@ The target's fields are computed while holding one repository SQLite transaction
 preventing a concurrent design revision from mixing the approval of one head
 with the rendered SVG hash of another:
 
-- `document_id` and exact `revision`
+- `document_id`, exact `revision` and persisted `approval_id`
 - `spec_digest` and `asset_manifest_digest` from the stored design
 - `renderer_version`
 - `svg_sha256` over UTF-8 bytes of the **actual currently approved SVG**
