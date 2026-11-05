@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from .models import validate_plain_text
 
@@ -25,6 +25,7 @@ class OCRObservation(BaseModel):
     text: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     score: Annotated[float, Field(strict=True, ge=0, le=1, allow_inf_nan=False)]
 
+    @field_validator("text")
     @classmethod
     def check_text(cls, value: str) -> str:
         return validate_plain_text(value)
@@ -48,11 +49,7 @@ def _price_matches(observed: str, expected: str) -> bool:
 
 def assess_unattested(target: dict, observations: OCRObservationRequest) -> dict:
     """Compare declared text only; absence, mismatch and missing design block."""
-    texts = [
-        _normalize(line.text)
-        for line in observations.lines
-        if line.score >= _SCORE_MIN
-    ]
+    texts = [_normalize(line.text) for line in observations.lines if line.score >= _SCORE_MIN]
     checks: list[dict] = []
     all_matched = True
     for field in _CORE_FIELDS:
