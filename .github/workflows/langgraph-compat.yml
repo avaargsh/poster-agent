@@ -1,0 +1,77 @@
+name: LangGraph checkpoint migration
+
+# Explicit, cost-controlled compatibility gate. Never run on every push.
+on:
+  pull_request:
+    types: [labeled]
+    branches: [main]
+    paths:
+      - "app/**"
+      - "scripts/langgraph_checkpoint_compat.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/langgraph-compat.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: langgraph-compat-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  migration:
+    if: ${{ github.event.label.name == 'ci:compat' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact proposed source and baseline history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup pinned uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.10.0"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Seed actual old-version SQLite checkpoints
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          BASE_DIR="$RUNNER_TEMP/poster-lg-baseline"
+          mkdir -p "$BASE_DIR"
+          cp pyproject.toml README.md "$BASE_DIR/"
+          git show "$BASE_SHA:uv.lock" > "$BASE_DIR/uv.lock"
+          uv sync --project "$BASE_DIR" --locked
+          PYTHONPATH="$GITHUB_WORKSPACE" "$BASE_DIR/.venv/bin/python" \
+            -m scripts.langgraph_checkpoint_compat seed \
+            --database "$RUNNER_TEMP/review-compat.sqlite3" \
+            --manifest "$RUNNER_TEMP/review-compat.json"
+      - name: Regenerate proposed lock using uv, not manual package edits
+        run: |
+          set -euo pipefail
+          uv lock \
+            --upgrade-package 'langgraph==1.2.19' \
+            --upgrade-package 'langgraph-checkpoint==4.3.1' \
+            --upgrade-package 'langgraph-checkpoint-sqlite==3.1.3'
+          uv lock --check
+          echo 'BEGIN_UV_GENERATED_LOCK_DIFF'
+          git diff -- uv.lock
+          echo 'END_UV_GENERATED_LOCK_DIFF'
+      - name: Read and resume baseline checkpoints using upgraded LangGraph
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          uv run --locked ruff format --check scripts/langgraph_checkpoint_compat.py
+          uv run --locked ruff check scripts/langgraph_checkpoint_compat.py
+          uv run --locked python -m scripts.langgraph_checkpoint_compat verify \
+            --database "$RUNNER_TEMP/review-compat.sqlite3" \
+            --manifest "$RUNNER_TEMP/review-compat.json"
+          uv run --locked python -m pytest \
+            tests/test_review_workflow.py \
+            tests/test_brief_request_store.py \
+            tests/test_brief_request_idempotency.py -q
