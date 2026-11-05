@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
         finally:
             design_manager.close()
             app.state.design_manager = None
+            app.state.design_reviewer_policy_raw = None
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)
