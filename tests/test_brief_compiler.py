@@ -4,7 +4,6 @@ import httpx
 import pytest
 
 from app import brief_compiler
-
 from app.brief_compiler import BriefCompilerError, BriefRequest, compile_brief
 
 
