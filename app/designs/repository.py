@@ -913,9 +913,7 @@ class DesignRepository:
         required_policy_digest: str | None,
     ) -> tuple[DesignDocument, str, str, str]:
         """Use a single serialized SQLite snapshot for all protected outputs."""
-        document, spec_digest, asset_digest = self._approval_snapshot(
-            connection, document_id
-        )
+        document, spec_digest, asset_digest = self._approval_snapshot(connection, document_id)
         if revision != document.revision:
             raise RevisionConflictError()
         record = self._approval_record(connection, document_id, revision)
