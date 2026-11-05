@@ -272,3 +272,41 @@ def test_concurrent_first_requests_initialize_one_repository(tmp_path, monkeypat
     assert len(repositories) == 8
     assert len({id(repository) for repository in repositories}) == 1
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("link_type", ["symlink", "hardlink"])
+def test_database_alias_cannot_bypass_a_real_process_owner(tmp_path, link_type):
+    db_path = tmp_path / "designs.sqlite3"
+    holder = start_holder(db_path, tmp_path / "owner-assets")
+    alias = tmp_path / "alias.sqlite3"
+    contender = DesignManager(alias, tmp_path / "other-assets")
+    try:
+        if link_type == "symlink":
+            alias.symlink_to(db_path)
+        else:
+            os.link(db_path, alias)
+        with pytest.raises(DesignStorageUnavailable):
+            contender.repository()
+    finally:
+        contender.close()
+        stop_holder(holder)
+
+    alias.unlink()
+    reopened = DesignManager(db_path, tmp_path / "owner-assets")
+    try:
+        assert reopened.repository() is not None
+    finally:
+        reopened.close()
+
+
+def test_dangling_database_symlink_does_not_create_its_target(tmp_path):
+    target = tmp_path / "target.sqlite3"
+    alias = tmp_path / "alias.sqlite3"
+    alias.symlink_to(target)
+    manager = DesignManager(alias, tmp_path / "assets")
+    try:
+        with pytest.raises(DesignStorageUnavailable):
+            manager.repository()
+        assert not target.exists()
+    finally:
+        manager.close()
