@@ -390,10 +390,14 @@ def export_approved_design(
     """Protected export, separate from the public draft preview endpoint."""
     try:
         reviewer = reviewer_for_request(request, "export")
-        svg = _manager(request).repository().approved_svg(
-            document_id,
-            revision,
-            required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+        svg = (
+            _manager(request)
+            .repository()
+            .approved_svg(
+                document_id,
+                revision,
+                required_policy_digest=reviewer.policy_digest if reviewer is not None else None,
+            )
         )
     except ReviewerAccessError as exc:
         return _error_response(exc.status, exc.code, exc.message)
