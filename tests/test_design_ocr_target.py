@@ -70,11 +70,13 @@ def test_ocr_target_requires_current_approved_revision_and_frozen_svg(design_pat
         assert payload["asset_manifest_digest"] == approved["asset_manifest_digest"]
         assert payload["renderer_version"] == approved["renderer_version"]
         assert payload["svg_sha256"] == hashlib.sha256(svg.content).hexdigest()
+        # The current DesignDocument template has no CTA text node.
+        # Report it as missing rather than inventing a PosterSpec default.
         assert payload["expected_fields"] == {
             "title": "双十一牙刷",
             "price": "¥199.90",
-            "cta": "立即抢购",
         }
+        assert payload["missing_fields"] == ["cta"]
         assert payload["ocr_status"] == "NOT_RUN"
         assert payload["runtime_attested"] is False
         assert payload["quality_verified"] is False
