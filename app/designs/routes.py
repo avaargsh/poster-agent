@@ -21,7 +21,6 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Path, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.review_service import ReviewNotFound, get_run
