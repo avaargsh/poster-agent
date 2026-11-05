@@ -528,7 +528,8 @@ class DesignRepository:
     # -------------------------------------------------------- Brief provenance
 
     def bind_brief_run(
-        self, document_id: str, *, run_id: str, confirmed_spec_digest: str
+        self, document_id: str, *, run_id: str, confirmed_spec_digest: str,
+        confirmed_title: str, confirmed_price: Decimal,
     ) -> dict:
         """Bind a validated approved Brief snapshot to an existing design.
 
@@ -545,6 +546,16 @@ class DesignRepository:
         try:
             with self._write_transaction() as connection:
                 document, _, _ = self._approval_snapshot(connection, document_id)
+                title_nodes = [
+                    node for node in document.nodes if isinstance(node, TextNode)
+                    and node.role == "title"
+                ]
+                if (
+                    len(title_nodes) != 1
+                    or title_nodes[0].plain_text != confirmed_title
+                    or document.facts.price != confirmed_price
+                ):
+                    raise InvalidCommandError()
                 existing = connection.execute(
                     """
                     SELECT brief_run_id, confirmed_spec_digest, linked_revision, linked_at
