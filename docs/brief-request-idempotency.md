@@ -10,7 +10,7 @@ PosterSpec approval semantics, image generation, or the DesignDocument store.
 - `brief_request_claims` lives in the existing `POSTER_CHECKPOINT_DB`. It atomically binds an idempotency key to the canonical request digest and one stable `run_id` **before** invoking LangGraph.
 - The same key and same request can return the original checkpointed draft (including after a lost HTTP reply). The same key with changed input returns HTTP 409. A replay does not call Qwen.
 - If no complete draft checkpoint exists, a replay returns HTTP 409 and retains `UNKNOWN`; it never retries the provider just because a client timed out. Qwen HTTP 429 does not trigger an automatic second provider request.
-- The request ledger marks `COMPLETED` only after the existing graph checkpoint can be read. The ordinary graph approval flow remains separate.
+- The request ledger marks `COMPLETED` only after the existing graph checkpoint can be read **and** its stored input request fingerprint matches the claimed request. Mismatch remains `UNKNOWN` and returns HTTP 409. The ordinary graph approval flow remains separate.
 - After acquiring the single-worker filesystem lock, startup changes abandoned `RUNNING` claims to `UNKNOWN`. This does not prove provider failure, refund, or cancellation.
 
 `GET /api/briefs/runs/by-key/{key}` returns the original `run_id`, claim
@@ -49,7 +49,9 @@ uv run --locked ruff format --check app tests scripts evals
 
 Relevant failure injection: concurrent same-key requests; response lost after
 checkpoint commit; missing checkpoint after claim; process restart and UNKNOWN;
-key conflict; repeat approval without changing the confirmed spec.
+key conflict; mismatched checkpoint request; old SQLite checkpoint schema
+upgrade with pending human approval; repeat approval without changing the
+confirmed spec.
 
 This branch does **not** change LangGraph/Checkpoint versions. A separate
 compatibility PR must replay real old-format checkpoints on the proposed
