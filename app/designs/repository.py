@@ -528,8 +528,13 @@ class DesignRepository:
     # -------------------------------------------------------- Brief provenance
 
     def bind_brief_run(
-        self, document_id: str, *, run_id: str, confirmed_spec_digest: str,
-        confirmed_title: str, confirmed_price: Decimal,
+        self,
+        document_id: str,
+        *,
+        run_id: str,
+        confirmed_spec_digest: str,
+        confirmed_title: str,
+        confirmed_price: Decimal,
     ) -> dict:
         """Bind a validated approved Brief snapshot to an existing design.
 
@@ -547,8 +552,9 @@ class DesignRepository:
             with self._write_transaction() as connection:
                 document, _, _ = self._approval_snapshot(connection, document_id)
                 title_nodes = [
-                    node for node in document.nodes if isinstance(node, TextNode)
-                    and node.role == "title"
+                    node
+                    for node in document.nodes
+                    if isinstance(node, TextNode) and node.role == "title"
                 ]
                 if (
                     len(title_nodes) != 1
@@ -606,9 +612,12 @@ class DesignRepository:
             raise NotFoundError()
         try:
             with self._connect() as connection:
-                if connection.execute(
-                    "SELECT 1 FROM designs WHERE document_id = ?", (document_id,)
-                ).fetchone() is None:
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM designs WHERE document_id = ?", (document_id,)
+                    ).fetchone()
+                    is None
+                ):
                     raise NotFoundError()
                 row = connection.execute(
                     """
