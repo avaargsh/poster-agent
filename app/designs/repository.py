@@ -26,6 +26,7 @@ from typing import Iterator
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
+from .approvals import ApprovalRequest, snapshot_digests
 from .commands import (
     CommandBatch,
     CommandResult,
@@ -39,6 +40,9 @@ from .commands import (
     Undo,
 )
 from .errors import (
+    ApprovalConflictError,
+    ApprovalDigestConflictError,
+    ApprovalRequiredError,
     AssetInvalidError,
     IdempotencyConflictError,
     InvalidCommandError,
@@ -51,6 +55,7 @@ from .errors import (
 )
 from .models import (
     MAX_ASSET_BYTES,
+    RENDERER_VERSION,
     AssetRef,
     BusinessFacts,
     DesignDocument,
@@ -112,6 +117,19 @@ CREATE TABLE IF NOT EXISTS assets (
     byte_size INTEGER NOT NULL,
     PRIMARY KEY (document_id, asset_id),
     FOREIGN KEY (document_id) REFERENCES designs(document_id)
+);
+
+CREATE TABLE IF NOT EXISTS design_approvals (
+    document_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    approval_id TEXT NOT NULL,
+    spec_digest TEXT NOT NULL,
+    asset_manifest_digest TEXT NOT NULL,
+    renderer_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (document_id, approval_id),
+    UNIQUE (document_id, revision, renderer_version),
+    FOREIGN KEY (document_id, revision) REFERENCES revisions(document_id, revision)
 );
 """
 
@@ -497,6 +515,172 @@ class DesignRepository:
         except DesignRenderError:
             raise AssetInvalidError() from None
         return assets
+
+    # -------------------------------------------------------- local approvals
+
+    def _approval_snapshot(
+        self, connection: sqlite3.Connection, document_id: str
+    ) -> tuple[DesignDocument, str, str]:
+        if not _valid_document_id(document_id):
+            raise NotFoundError()
+        row = connection.execute(
+            "SELECT revision FROM heads WHERE document_id = ?", (document_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError()
+        document = self._load_revision(connection, document_id, row["revision"])
+        spec_digest, asset_digest = snapshot_digests(document)
+        return document, spec_digest, asset_digest
+
+    @staticmethod
+    def _approval_record(
+        connection: sqlite3.Connection, document_id: str, revision: int
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            """
+            SELECT approval_id, spec_digest, asset_manifest_digest,
+                   renderer_version, created_at
+            FROM design_approvals
+            WHERE document_id = ? AND revision = ? AND renderer_version = ?
+            """,
+            (document_id, revision, RENDERER_VERSION),
+        ).fetchone()
+
+    @staticmethod
+    def _approval_matches(record: sqlite3.Row, spec_digest: str, asset_digest: str) -> bool:
+        return (
+            hmac.compare_digest(record["spec_digest"], spec_digest)
+            and hmac.compare_digest(record["asset_manifest_digest"], asset_digest)
+            and hmac.compare_digest(record["renderer_version"], RENDERER_VERSION)
+        )
+
+    def approval_target(self, document_id: str) -> dict:
+        """Expose current immutable digests; historical approvals never carry forward."""
+        try:
+            with self._write_transaction() as connection:
+                document, spec_digest, asset_digest = self._approval_snapshot(
+                    connection, document_id
+                )
+                record = self._approval_record(connection, document_id, document.revision)
+                approved = record is not None and self._approval_matches(
+                    record, spec_digest, asset_digest
+                )
+                if approved:
+                    # Do not advertise export-readiness if indexed bytes are corrupt.
+                    self.read_assets(document)
+                return {
+                    "document_id": document.document_id,
+                    "revision": document.revision,
+                    "spec_digest": spec_digest,
+                    "asset_manifest_digest": asset_digest,
+                    "renderer_version": RENDERER_VERSION,
+                    "approved": approved,
+                    "approval_id": record["approval_id"] if approved else None,
+                }
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def approve(self, document_id: str, request: ApprovalRequest) -> dict:
+        """Atomically bind one local operator acknowledgement to the exact head."""
+        try:
+            with self._write_transaction() as connection:
+                document, spec_digest, asset_digest = self._approval_snapshot(
+                    connection, document_id
+                )
+                if request.expected_revision != document.revision:
+                    raise RevisionConflictError()
+
+                existing_by_key = connection.execute(
+                    """
+                    SELECT revision, spec_digest, asset_manifest_digest, renderer_version
+                    FROM design_approvals
+                    WHERE document_id = ? AND approval_id = ?
+                    """,
+                    (document_id, request.approval_id),
+                ).fetchone()
+                if existing_by_key is not None and (
+                    existing_by_key["revision"] != request.expected_revision
+                    or not hmac.compare_digest(
+                        existing_by_key["renderer_version"], RENDERER_VERSION
+                    )
+                    or not hmac.compare_digest(existing_by_key["spec_digest"], request.spec_digest)
+                    or not hmac.compare_digest(
+                        existing_by_key["asset_manifest_digest"], request.asset_manifest_digest
+                    )
+                ):
+                    raise IdempotencyConflictError()
+
+                if not (
+                    hmac.compare_digest(request.spec_digest, spec_digest)
+                    and hmac.compare_digest(request.asset_manifest_digest, asset_digest)
+                ):
+                    raise ApprovalDigestConflictError()
+
+                existing = self._approval_record(connection, document_id, document.revision)
+                if existing is not None and existing["approval_id"] != request.approval_id:
+                    raise ApprovalConflictError()
+                if existing is not None and not self._approval_matches(
+                    existing, spec_digest, asset_digest
+                ):
+                    raise ApprovalDigestConflictError()
+
+                # Verify complete asset bytes against their immutable refs before
+                # recording approval, even if an idempotent replay already exists.
+                self._assert_bound_assets(document)
+                self._assert_assets_indexed(connection, document)
+                self.read_assets(document)
+
+                replayed = existing is not None
+                if not replayed:
+                    connection.execute(
+                        """
+                        INSERT INTO design_approvals
+                            (document_id, revision, approval_id, spec_digest,
+                             asset_manifest_digest, renderer_version, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            document_id,
+                            document.revision,
+                            request.approval_id,
+                            spec_digest,
+                            asset_digest,
+                            RENDERER_VERSION,
+                            _now(),
+                        ),
+                    )
+                return {
+                    "document_id": document_id,
+                    "revision": document.revision,
+                    "approval_id": request.approval_id,
+                    "spec_digest": spec_digest,
+                    "asset_manifest_digest": asset_digest,
+                    "renderer_version": RENDERER_VERSION,
+                    "replayed": replayed,
+                }
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def approved_svg(self, document_id: str, revision: int) -> str:
+        """Render only the currently approved head, not stale history."""
+        if type(revision) is not int or revision < 1:
+            raise NotFoundError()
+        try:
+            with self._write_transaction() as connection:
+                document, spec_digest, asset_digest = self._approval_snapshot(
+                    connection, document_id
+                )
+                if revision != document.revision:
+                    raise RevisionConflictError()
+                record = self._approval_record(connection, document_id, revision)
+                if record is None or not self._approval_matches(record, spec_digest, asset_digest):
+                    raise ApprovalRequiredError()
+                self._assert_bound_assets(document)
+                self._assert_assets_indexed(connection, document)
+                assets = self.read_assets(document)
+                return render_svg(document, assets=assets)
+        except sqlite3.Error:
+            raise StorageError() from None
 
     # ----------------------------------------------------------------- execute
 

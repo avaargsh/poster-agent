@@ -19,6 +19,7 @@ from fastapi import APIRouter, File, Form, Path, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 
+from .approvals import ApprovalRequest
 from .commands import CommandBatch
 from .errors import (
     AssetInvalidError,
@@ -48,6 +49,9 @@ _DOMAIN_STATUS = {
     "NOTHING_TO_UNDO": 409,
     "NOTHING_TO_REDO": 409,
     "INVALID_COMMAND": 422,
+    "APPROVAL_REQUIRED": 409,
+    "APPROVAL_DIGEST_CONFLICT": 409,
+    "APPROVAL_CONFLICT": 409,
 }
 
 
@@ -200,6 +204,31 @@ def get_design_revision(
     }
 
 
+@router.get("/api/designs/{document_id}/approval-target")
+def get_design_approval_target(document_id: str, request: Request):
+    """Return current server-calculated digests for explicit local review."""
+    try:
+        return _manager(request).repository().approval_target(document_id)
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
+@router.post("/api/designs/{document_id}/approvals", status_code=201)
+def approve_design(document_id: str, decision: ApprovalRequest, request: Request):
+    """Approve one exact current revision; same ID replay returns HTTP 200."""
+    try:
+        result = _manager(request).repository().approve(document_id, decision)
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+    if result["replayed"]:
+        return JSONResponse(status_code=200, content=result)
+    return result
+
+
 @router.post("/api/designs/{document_id}/commands")
 def execute_design_commands(
     document_id: str,
@@ -251,6 +280,31 @@ def preview_design_revision(
     except DesignError as exc:
         # A persisted asset that no longer matches its index/hash is a storage
         # integrity conflict, not an invalid user upload.
+        return _design_error_response(exc, asset_invalid_status=409)
+    except Exception:
+        return _unexpected_error_response()
+
+    return Response(
+        content=svg,
+        media_type="image/svg+xml; charset=utf-8",
+        headers={
+            "Content-Security-Policy": _PREVIEW_CSP,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/api/designs/{document_id}/revisions/{revision}/approved.svg")
+def export_approved_design(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Protected export, separate from the public draft preview endpoint."""
+    try:
+        svg = _manager(request).repository().approved_svg(document_id, revision)
+    except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
     except Exception:
         return _unexpected_error_response()
