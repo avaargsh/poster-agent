@@ -39,6 +39,8 @@ from .cutout_service import (
     png_sha256,
     verify_candidate,
 )
+from .designs.routes import router as design_router
+from .designs.service import create_design_manager
 from .human_review_routes import router as human_review_router
 from .image_provider import ImageProviderError, generate_ai_background
 from .layout_collision import repair_square_layout
@@ -62,12 +64,20 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(app: FastAPI):
     # Claim exclusive ownership before inspecting abandoned RUNNING tasks.
     # A second worker must never reconcile an execution that is still active.
     with worker_lock.single_worker():
         execution_store.recover_incomplete()
-        yield
+        # Design storage is lazy: this only captures process configuration.
+        # Locks and SQLite are created on the first /api/designs request.
+        design_manager = create_design_manager()
+        app.state.design_manager = design_manager
+        try:
+            yield
+        finally:
+            design_manager.close()
+            app.state.design_manager = None
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)
@@ -202,6 +212,7 @@ app.include_router(m6_overlay_router)
 app.include_router(m6_review_sidecar_router)
 app.include_router(review_draft_router)
 app.include_router(m6_ocr_capture_router)
+app.include_router(design_router)
 MAX_UPLOAD = 10 * 1024 * 1024
 # These limits apply to the *decoded* image, not the compressed upload size.
 # Enforce them BEFORE image.load() to prevent high-memory decompression.
