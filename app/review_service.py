@@ -53,11 +53,18 @@ def config(run_id: str) -> dict:
     return {"configurable": {"thread_id": run_id}}
 
 
-def _view(run_id: str, graph) -> dict:
+def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> dict:
     snapshot = graph.get_state(config(run_id))
     values = snapshot.values or {}
     if not values.get("draft"):
         raise ReviewNotFound("未找到该审核任务")
+    if expected_request_hash is not None:
+        stored_request = values.get("request")
+        if (
+            not isinstance(stored_request, dict)
+            or brief_request_store.fingerprint(stored_request) != expected_request_hash
+        ):
+            raise ReviewConflict("原 Brief Checkpoint 的请求摘要不匹配，拒绝重放")
     status = values.get("status", "WAITING_CONFIRMATION")
     return {
         "run_id": run_id,
@@ -83,7 +90,7 @@ def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> 
                 # Only inspect a previous checkpoint; never repeat the extraction.
                 with open_graph() as graph:
                     try:
-                        result = _view(run_id, graph)
+                        result = _view(run_id, graph, expected_request_hash=request_hash)
                     except ReviewNotFound as exc:
                         brief_request_store.mark_unknown(idempotency_key, run_id)
                         raise ReviewConflict(
