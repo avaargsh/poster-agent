@@ -91,8 +91,10 @@ def create_run(request: BriefRequest, *, idempotency_key: str | None = None) -> 
                 with open_graph() as graph:
                     try:
                         result = _view(run_id, graph, expected_request_hash=request_hash)
-                    except ReviewNotFound as exc:
+                    except (ReviewNotFound, ReviewConflict) as exc:
                         brief_request_store.mark_unknown(idempotency_key, run_id)
+                        if isinstance(exc, ReviewConflict):
+                            raise
                         raise ReviewConflict(
                             f"原 Brief 请求结果未确认（run_id={run_id}），不会自动重新调用模型"
                         ) from exc
