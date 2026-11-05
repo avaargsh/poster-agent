@@ -113,7 +113,11 @@ def complete(key: str, run_id: str) -> None:
                 "SELECT run_id,status FROM brief_request_claims WHERE idempotency_key=?",
                 (key,),
             ).fetchone()
-            if existing is None or existing["run_id"] != run_id or existing["status"] != "COMPLETED":
+            if (
+                existing is None
+                or existing["run_id"] != run_id
+                or existing["status"] != "COMPLETED"
+            ):
                 raise ReviewRequestConflict("Brief 请求完成状态冲突")
 
 
