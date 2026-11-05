@@ -214,7 +214,7 @@ def get_design_revision(
 class BriefLinkRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    brief_run_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,128}$")
+    brief_run_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
 def _brief_link_token_valid(request: Request) -> bool:
