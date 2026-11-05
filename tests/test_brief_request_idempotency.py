@@ -1,5 +1,6 @@
 """HTTP contract: Qwen requests are admitted once, and replay never re-extracts."""
 
+import sqlite3
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -144,3 +145,56 @@ def test_legacy_compile_qwen_uses_the_same_durable_admission(tmp_path, monkeypat
         assert len(calls) == 1
         free = client.post("/api/briefs/compile", json={"brief": BRIEF, "compiler": "demo"})
         assert free.status_code == 200
+
+
+def test_legacy_checkpoint_survives_new_request_ledger_startup(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    run_id = uuid4().hex
+    request = BriefRequest(brief=BRIEF, compiler="demo")
+    with open_graph() as graph:
+        graph.invoke({"request": request.model_dump(mode="json")}, config(run_id))
+    checkpoint_db = tmp_path / "checkpoints.sqlite3"
+    with sqlite3.connect(checkpoint_db) as conn:
+        legacy_tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    assert "brief_request_claims" not in legacy_tables
+
+    with TestClient(app) as client:
+        restored = client.get(f"/api/briefs/runs/{run_id}")
+        assert restored.status_code == 200
+        assert restored.json()["pending_approval"] is True
+        rejected = client.post(
+            f"/api/briefs/runs/{run_id}/decision", json={"approved": False}
+        )
+        assert rejected.status_code == 200
+        assert rejected.json()["status"] == "REJECTED"
+
+    with sqlite3.connect(checkpoint_db) as conn:
+        assert conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='brief_request_claims'"
+        ).fetchone() is not None
+
+
+def test_replay_refuses_mismatched_checkpoint_request(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    original = BriefRequest(brief=BRIEF, compiler="qwen")
+    run_id = uuid4().hex
+    key = "brief-qwen-mismatch-001"
+    brief_request_store.claim(
+        key, brief_request_store.fingerprint(original.model_dump(mode="json")), run_id
+    )
+    alternate = BriefRequest(brief=BRIEF + "（其他请求）", compiler="demo")
+    with open_graph() as graph:
+        graph.invoke({"request": alternate.model_dump(mode="json")}, config(run_id))
+
+    with TestClient(app) as client:
+        replay = client.post(
+            "/api/briefs/runs",
+            json=original.model_dump(mode="json"),
+            headers={"Idempotency-Key": key},
+        )
+        assert replay.status_code == 409
+        assert "Checkpoint" in replay.json()["detail"]
+        assert client.get("/api/briefs/runs/by-key/" + key).json()["status"] == "UNKNOWN"
