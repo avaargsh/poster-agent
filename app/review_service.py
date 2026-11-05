@@ -83,7 +83,6 @@ def _run_lock(run_id: str):
         yield
 
 
-
 def _view(run_id: str, graph, *, expected_request_hash: str | None = None) -> dict:
     snapshot = graph.get_state(config(run_id))
     values = snapshot.values or {}
