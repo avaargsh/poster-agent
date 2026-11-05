@@ -117,11 +117,13 @@ def _create_document(
     title: str,
     price: Decimal,
     product_bytes: bytes,
+    cta: str | None = None,
 ) -> DesignDocument:
     return manager.repository().create(
         title=title,
         price=price,
         product_bytes=product_bytes,
+        cta=cta,
     )
 
 
@@ -131,6 +133,7 @@ async def create_design(
     product: Annotated[UploadFile, File(description="商品图片")],
     title: Annotated[str, Form()],
     price: Annotated[str, Form()],
+    cta: Annotated[str | None, Form()] = None,
 ):
     try:
         manager = _manager(request)
@@ -163,6 +166,7 @@ async def create_design(
             title,
             price_value,
             raw,
+            cta,
         )
     except DesignError as exc:
         # Every ASSET_INVALID raised during create concerns the uploaded bytes;
@@ -249,6 +253,7 @@ def bind_design_brief(document_id: str, payload: BriefLinkRequest, request: Requ
                 confirmed_spec_digest=digest,
                 confirmed_title=spec.title,
                 confirmed_price=spec.price,
+                confirmed_cta=spec.cta,
             )
         )
     except ReviewNotFound:
