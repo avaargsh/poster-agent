@@ -6,7 +6,7 @@ Authority: GitHub PR state, exact head SHA and associated Actions runs.
 
 ## Inventory at audit cutoff (19 PRs before governance PR #21; #14 is an issue)
 
-| PR | Exact head (prefix) | Disposition | Quick CI on that head | Formal review submission |
+| PR | Exact head (prefix) | Disposition | PR run associated with head (merge-ref checkout) | Formal review submission |
 | --- | --- | --- | --- | --- |
 | [#1](https://github.com/avaargsh/poster-agent/pull/1) | `9d34b665` | merged | [success](https://github.com/avaargsh/poster-agent/actions/runs/41941837842) | none |
 | [#2](https://github.com/avaargsh/poster-agent/pull/2) | `4a0d6e44` | merged | [success](https://github.com/avaargsh/poster-agent/actions/runs/41947213270) | none |
@@ -29,7 +29,7 @@ Authority: GitHub PR state, exact head SHA and associated Actions runs.
 | [#20](https://github.com/avaargsh/poster-agent/pull/20) | `8d3c348e` | open Draft; stacked on #18 | [new integration test run](https://github.com/avaargsh/poster-agent/actions/runs/42313440950) pending at audit | none |
 
 At this inventory cutoff, seventeen PRs were merged and two remained Draft.\nGovernance PR #21 was opened **after** this inventory snapshot and is deliberately\nnot counted in the historical table. No observed closed-unmerged PR.
-A passing individual head Quick CI does **not** prove a passing merged-tree CI.
+Historical PR CI used the default `actions/checkout@v4` PR merge ref (e.g. #18 tested `b9d10d88...`, not source head `c34b4890...`). A successful workflow **associated with** a PR head is therefore not independent exact-source-head evidence, nor does it prove the latest post-drift merge tree.
 Formal COMMENTED review also does **not** equal APPROVED independent review.
 The audit does not establish a real-production OCR run or release authorization.
 
@@ -54,8 +54,11 @@ The audit does not establish a real-production OCR run or release authorization.
 1. Check open/Draft status, exact **40-character head SHA**, base SHA,
    changed-file diff, direct parent dependency and whether either moved.
 2. For each head, explicitly trigger locked Python 3.12 Quick CI by Ready
-   or `ci:run` label; record run/job completion. Never reuse a green run for
-   a previous SHA. Skipped jobs are **not** passing evidence.
+   or `ci:run` label. The updated workflow first tests the **PR merge ref**
+   with its observed checkout SHA, then checks out the **exact source head SHA**
+   and repeats the locked quick suite. Record BOTH SHAs and run/job completion.
+   Old green merge-ref-only runs cannot be described as source-head-tested.
+   Skipped jobs are **not** passing evidence.
 3. After parent update/rebase, inspect the **actual merge tree** and run
    relevant integration tests on that exact result before merging a child.
    Avoid force-pushing stale bases without a lease and reconciliation.
