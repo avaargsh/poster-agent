@@ -20,10 +20,16 @@ forces `runtime_attested=false`, `quality_verified=false`,
 - Only loopback access is supported; normal local origin/Host checks remain
   in force. Never expose this API through a public reverse proxy.
 - Explicit operator provisioning is required for CairoSVG, PaddleOCR,
-  PaddlePaddle, model weights and matching fonts. First-use PaddleOCR may try
-  downloading models; run only in an operator-controlled offline network with
-  models already provisioned and validated. Default CI uses injected local
-  raster/model outputs and downloads no OCR models.
+  PaddlePaddle, model weights and matching fonts. **DesignDocument OCR requires
+  `POSTER_DESIGN_OCR_MODEL_CONFIG_JSON`** with pinned local detection and
+  recognition model directory digests, captured at service startup. Missing or
+  changed models fail before durable admission and model inference.
+  See [offline model pins](design-ocr-offline-model-pins.md).
+- Both model directories are passed explicitly to the PaddleOCR 3.3 adapter;
+  a missing default model path must not trigger implicit model selection.
+  This reduces accidental model downloads but **does not itself enforce
+  network isolation**; isolate the process at OS/container/firewall level.
+  Default CI uses synthetic local models, not real weights, and downloads none.
 
 ## Request and durable identity
 
@@ -59,11 +65,22 @@ SQLite admission, status lookup and non-model raster work are not held under
 this lock. This is not a distributed execution lease or evidence of model
 correctness; only the supported single-worker loopback deployment is in scope.
 
+The durable operation also stores `model_profile_sha256`, the SHA-256 of
+the operator's canonical pinned model profile. Replays with a different
+profile digest do not match the original idempotency fingerprint. Existing
+local databases are migrated additively; historic records without a model
+profile retain a `null` digest and cannot acquire model provenance
+retroactively. The model bundle is rechecked immediately before and after
+inference; drift or unreadable weights after admission yields
+`UNKNOWN / MODEL_PROFILE_CHANGED`, with no retained observations.
+
 The terminal update again validates the current approved snapshot. Successful
 local adapter output is bounded to at most 200 lines of plain text, confidence,
 and optional 4-integer bounding boxes. Valid results are stored alongside
 sanitized diagnostic package/platform telemetry, with `model_weights_sha256`
-explicitly `null` because model weights are not independently verified.
+explicitly `null`: a locally computed full-tree digest binds files in the
+journal but is **not** an independent authenticated model signature or
+a guarantee that the loaded inference weights equal those files.
 
 ## Status and replay semantics
 

@@ -27,6 +27,7 @@ from .errors import (
     StorageError,
 )
 from .models import PAGE_MAX_SIZE, RENDERER_VERSION, validate_plain_text
+from .ocr_model_policy import LocalOCRModelProfile, OCRModelProfileError, load_model_profile
 from .rasterization import rasterize_svg
 from .repository import DesignRepository, _now
 
@@ -90,7 +91,12 @@ def _canonical_json(value: object) -> str:
 
 
 def _request_fingerprint(
-    document_id: str, revision: int, payload: OCRRunRequest, principal: str, policy: str
+    document_id: str,
+    revision: int,
+    payload: OCRRunRequest,
+    principal: str,
+    policy: str,
+    model_profile_sha256: str,
 ) -> str:
     value = {
         "document_id": document_id,
@@ -100,6 +106,7 @@ def _request_fingerprint(
         "png_sha256": payload.png_sha256,
         "principal_id": principal,
         "policy_digest": policy,
+        "model_profile_sha256": model_profile_sha256,
     }
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -118,6 +125,7 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
         "svg_sha256": row["svg_sha256"],
         "png_sha256": row["png_sha256"],
         "rasterizer": row["rasterizer"],
+        "model_profile_sha256": row["model_profile_sha256"],
         "status": row["status"],
         "reason": row["reason"],
         "observations": (
@@ -203,6 +211,7 @@ class OCRRunJournal:
         policy: str,
         fingerprint: str,
         rasterizer: str,
+        model_profile_sha256: str,
     ) -> tuple[dict, bool]:
         """Atomically claim an operation after rechecking current approval."""
         try:
@@ -237,8 +246,9 @@ class OCRRunJournal:
                         operation_id, document_id, revision, approval_id,
                         principal_id, policy_digest, request_fingerprint,
                         spec_digest, asset_manifest_digest, renderer_version,
-                        svg_sha256, png_sha256, rasterizer, status, started_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EXECUTING', ?)
+                        svg_sha256, png_sha256, rasterizer, model_profile_sha256,
+                        status, started_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EXECUTING', ?)
                     """,
                     (
                         payload.operation_id,
@@ -254,6 +264,7 @@ class OCRRunJournal:
                         payload.svg_sha256,
                         payload.png_sha256,
                         rasterizer,
+                        model_profile_sha256,
                         _now(),
                     ),
                 )
@@ -322,10 +333,17 @@ class OCRRunJournal:
             raise StorageError() from None
 
 
-def _recognize_serialized(image: Path) -> list[dict]:
-    """Keep local cached PaddleOCR inference single-flight within this worker."""
+def _recognize_serialized(
+    image: Path, *, profile: LocalOCRModelProfile | None = None
+) -> list[dict]:
+    """Keep cached PaddleOCR single-flight; design runs use pinned dirs only."""
     with _LOCAL_OCR_ENGINE_LOCK:
-        return recognize(image)
+        if profile is None:
+            return recognize(image)  # legacy/test adapter, not the design execution path
+        return recognize(
+            image,
+            model_dirs=(profile.detector_dir, profile.recognizer_dir, profile.fingerprint),
+        )
 
 
 def _capture_model_output(rows: object) -> tuple[list[dict], dict]:
@@ -361,10 +379,14 @@ def submit_ocr_run(
     *,
     principal: str,
     policy: str,
+    model_config_raw: str | None,
 ) -> tuple[dict, bool]:
     """Explicit synchronous operation; retries never re-invoke an admitted run."""
+    profile = load_model_profile(model_config_raw)
     journal = OCRRunJournal(repository)
-    fingerprint = _request_fingerprint(document_id, revision, payload, principal, policy)
+    fingerprint = _request_fingerprint(
+        document_id, revision, payload, principal, policy, profile.fingerprint
+    )
     existing = journal.get(
         document_id,
         revision,
@@ -395,6 +417,7 @@ def submit_ocr_run(
         policy=policy,
         fingerprint=fingerprint,
         rasterizer=raster.rasterizer,
+        model_profile_sha256=profile.fingerprint,
     )
     if not new:
         return admitted, False
@@ -405,8 +428,16 @@ def submit_ocr_run(
         with TemporaryDirectory(prefix="poster-design-ocr-") as folder:
             image = Path(folder) / "approved.png"
             image.write_bytes(raster.png)
-            rows = _recognize_serialized(image)
+            if load_model_profile(model_config_raw) != profile:
+                raise OCRModelProfileError("local OCR model profile changed before inference")
+            rows = _recognize_serialized(image, profile=profile)
             observations, runtime = _capture_model_output(rows)
+            if load_model_profile(model_config_raw) != profile:
+                raise OCRModelProfileError("local OCR model profile changed during inference")
+    except OCRModelProfileError:
+        result = journal.finish(
+            payload.operation_id, status="UNKNOWN", reason="MODEL_PROFILE_CHANGED"
+        )
     except OCRUnavailable:
         result = journal.finish(
             payload.operation_id, status="UNAVAILABLE", reason="MODEL_UNAVAILABLE"

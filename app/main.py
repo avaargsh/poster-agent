@@ -78,6 +78,9 @@ async def lifespan(app: FastAPI):
         # must never silently enable or disable HTTP approval authorization.
         app.state.design_reviewer_policy_raw = os.environ.get("POSTER_DESIGN_REVIEWERS_JSON")
         app.state.design_ocr_runs_enabled = os.environ.get("POSTER_DESIGN_OCR_RUNS_ENABLED") == "1"
+        app.state.design_ocr_model_profile_raw = os.environ.get(
+            "POSTER_DESIGN_OCR_MODEL_CONFIG_JSON"
+        )
         app.state.design_manager = design_manager
         try:
             yield
@@ -86,6 +89,7 @@ async def lifespan(app: FastAPI):
             app.state.design_manager = None
             app.state.design_reviewer_policy_raw = None
             app.state.design_ocr_runs_enabled = False
+            app.state.design_ocr_model_profile_raw = None
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)

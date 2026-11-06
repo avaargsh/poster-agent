@@ -12,6 +12,7 @@ from PIL import Image
 
 import app.designs.ocr_runs as ocr_runs
 import app.designs.rasterization as rasterization
+from app.designs.ocr_model_policy import model_directory_sha256
 from app.main import app
 from app.ocr_provider import OCRLines, OCRUnavailable
 
@@ -27,6 +28,24 @@ def ocr_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTER_DESIGN_DB", str(tmp_path / "designs.sqlite3"))
     monkeypatch.setenv("POSTER_DESIGN_ASSET_DIR", str(tmp_path / "design-assets"))
     monkeypatch.setenv("POSTER_DESIGN_OCR_RUNS_ENABLED", "1")
+    detector = tmp_path / "local-detector"
+    recognizer = tmp_path / "local-recognizer"
+    for root in (detector, recognizer):
+        root.mkdir()
+        (root / "inference.json").write_text('{"fake":"model"}', encoding="utf-8")
+        (root / "weights.bin").write_bytes(b"synthetic-not-real-ocr-model")
+    monkeypatch.setenv(
+        "POSTER_DESIGN_OCR_MODEL_CONFIG_JSON",
+        json.dumps(
+            {
+                "schema_version": 1,
+                "text_detection_model_dir": str(detector),
+                "text_recognition_model_dir": str(recognizer),
+                "text_detection_sha256": model_directory_sha256(detector),
+                "text_recognition_sha256": model_directory_sha256(recognizer),
+            }
+        ),
+    )
     monkeypatch.setenv(
         "POSTER_DESIGN_REVIEWERS_JSON",
         json.dumps(
@@ -108,7 +127,7 @@ def test_explicit_ocr_run_is_journaled_idempotent_and_survives_restart(
 ):
     seen = []
 
-    def fake_recognize(path):
+    def fake_recognize(path, **kwargs):
         seen.append(path.read_bytes())
         return _ocr_lines()
 
@@ -123,6 +142,7 @@ def test_explicit_ocr_run_is_journaled_idempotent_and_survives_restart(
         assert data["svg_sha256"] == payload["svg_sha256"]
         assert data["approval_id"].startswith("approval-")
         assert data["principal_id"] == "exporter"
+        assert len(data["model_profile_sha256"]) == 64
         assert len(data["observations"]) == 3
         assert data["runtime_attested"] is False
         assert data["quality_verified"] is False
@@ -157,7 +177,7 @@ def test_disabled_or_missing_export_identity_never_invokes_model(
 ):
     invoked = []
 
-    def model(path):
+    def model(path, **kwargs):
         invoked.append(1)
         return _ocr_lines()
 
@@ -181,7 +201,7 @@ def test_change_during_ocr_preserves_unknown_without_retry(ocr_paths, product_by
         doc, payload = _prepare(client, product_bytes)
         seen = []
 
-        def racing_recognize(path):
+        def racing_recognize(path, **kwargs):
             seen.append(1)
             changed = client.post(
                 f"/api/designs/{doc}/commands",
@@ -209,7 +229,7 @@ def test_change_during_ocr_preserves_unknown_without_retry(ocr_paths, product_by
 
 
 def test_abandoned_executing_is_unknown_after_restart(ocr_paths, product_bytes, monkeypatch):
-    monkeypatch.setattr(ocr_runs, "recognize", lambda path: _ocr_lines())
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: _ocr_lines())
     with TestClient(app) as client:
         doc, payload = _prepare(client, product_bytes)
         assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
@@ -222,7 +242,7 @@ def test_abandoned_executing_is_unknown_after_restart(ocr_paths, product_bytes, 
             (payload["operation_id"],),
         )
     model_calls = []
-    monkeypatch.setattr(ocr_runs, "recognize", lambda path: model_calls.append(1))
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: model_calls.append(1))
     with TestClient(app) as restarted:
         lookup = restarted.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
         assert lookup.status_code == 200
@@ -245,7 +265,7 @@ def test_missing_target_or_missing_engine_never_fabricates_execution(
 
         complete_doc, valid_payload = _prepare(client, product_bytes)
 
-        def unavailable(path):
+        def unavailable(path, **kwargs):
             raise OCRUnavailable("model unavailable")
 
         monkeypatch.setattr(ocr_runs, "recognize", unavailable)
@@ -260,7 +280,7 @@ def test_invalid_model_result_is_unknown_not_verified(ocr_paths, product_bytes, 
     monkeypatch.setattr(
         ocr_runs,
         "recognize",
-        lambda path: OCRLines(
+        lambda path, **kwargs: OCRLines(
             [{"text": "spoofed", "score": None, "bbox": [0, 0, 20, 20]}],
             {"attested": True},
         ),
@@ -272,3 +292,76 @@ def test_invalid_model_result_is_unknown_not_verified(ocr_paths, product_bytes, 
         assert response.json()["status"] == "UNKNOWN"
         assert response.json()["observations"] == []
         assert response.json()["release_ready"] is False
+
+
+def test_missing_model_profile_rejects_before_journal_admission(
+    ocr_paths, product_bytes, monkeypatch
+):
+    # Configuration is frozen at lifespan startup, not mutable per request.
+    monkeypatch.delenv("POSTER_DESIGN_OCR_MODEL_CONFIG_JSON")
+    calls = []
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: calls.append(1))
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        rejected = client.post(_url(doc), json=payload, headers=_headers())
+        assert rejected.status_code == 503
+        assert rejected.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        assert calls == []
+    with sqlite3.connect(ocr_paths) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM design_ocr_runs").fetchone()[0] == 0
+
+
+def test_changed_local_model_is_not_used_or_journaled(ocr_paths, product_bytes, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: calls.append(1))
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        (ocr_paths.parent / "local-detector" / "weights.bin").write_bytes(b"tampered!")
+        rejected = client.post(_url(doc), json=payload, headers=_headers())
+        assert rejected.status_code == 503
+        assert rejected.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        assert calls == []
+    with sqlite3.connect(ocr_paths) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM design_ocr_runs").fetchone()[0] == 0
+
+
+def test_model_mutation_during_inference_remains_unknown(ocr_paths, product_bytes, monkeypatch):
+    received_model_dirs = []
+
+    def mutate_model_after_admission(path, **kwargs):
+        received_model_dirs.append(kwargs["model_dirs"])
+        (ocr_paths.parent / "local-recognizer" / "weights.bin").write_bytes(b"mutated-in-flight")
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", mutate_model_after_admission)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        result = client.post(_url(doc), json=payload, headers=_headers())
+        assert result.status_code == 201, result.text
+        assert result.json()["status"] == "UNKNOWN"
+        assert result.json()["reason"] == "MODEL_PROFILE_CHANGED"
+        assert result.json()["observations"] == []
+        assert result.json()["release_ready"] is False
+        assert len(received_model_dirs) == 1
+        assert received_model_dirs[0][0].endswith("local-detector")
+        assert received_model_dirs[0][1].endswith("local-recognizer")
+
+
+def test_old_sqlite_journal_without_model_column_migrates_in_place(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert created.json()["status"] == "EXECUTED"
+
+    with sqlite3.connect(ocr_paths) as conn:
+        conn.execute("ALTER TABLE design_ocr_runs DROP COLUMN model_profile_sha256")
+    with TestClient(app) as restarted:
+        recorded = restarted.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert recorded.status_code == 200, recorded.text
+        assert recorded.json()["status"] == "EXECUTED"
+        assert recorded.json()["model_profile_sha256"] is None
+        assert recorded.json()["release_ready"] is False
