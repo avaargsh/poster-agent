@@ -55,7 +55,6 @@ def _engine():
         raise OCRUnavailable("PaddleOCR 模型无法初始化，请检查本机 CPU/模型依赖") from exc
 
 
-
 @lru_cache(maxsize=4)
 def _local_engine(detector_dir: str, recognizer_dir: str, profile_fingerprint: str):
     """No implicit model selection: DesignDocument uses two explicit local roots.
@@ -79,6 +78,7 @@ def _local_engine(detector_dir: str, recognizer_dir: str, profile_fingerprint: s
     except Exception as exc:
         raise OCRUnavailable("configured local PaddleOCR models could not initialize") from exc
 
+
 def _json_dict(result):
     data = getattr(result, "json", None)
     if callable(data):
@@ -93,9 +93,7 @@ def _json_dict(result):
     return data
 
 
-def recognize(
-    image_path: Path, *, model_dirs: tuple[str, str, str] | None = None
-) -> list[dict]:
+def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = None) -> list[dict]:
     """Return per-line text, score and optional pixel bbox (PaddleOCR 3.x)."""
     try:
         engine = _engine() if model_dirs is None else _local_engine(*model_dirs)
