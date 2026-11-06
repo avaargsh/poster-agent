@@ -36,6 +36,7 @@ from .errors import (
 )
 from .models import MAX_ASSET_BYTES, DesignDocument
 from .ocr_observations import OCRObservationRequest, assess_unattested
+from .ocr_runs import OCRRunJournal, OCRRunRequest, submit_ocr_run
 from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .rendering import render_svg
 from .reviewer_auth import ReviewerAccessError, reviewer_for_request
@@ -62,6 +63,8 @@ _DOMAIN_STATUS = {
     "APPROVAL_REQUIRED": 409,
     "APPROVAL_DIGEST_CONFLICT": 409,
     "APPROVAL_CONFLICT": 409,
+    "OCR_TARGET_INCOMPLETE": 409,
+    "OCR_SOURCE_MISMATCH": 409,
 }
 
 
@@ -532,4 +535,80 @@ def export_approved_design_raster(
             "X-Design-OCR-Status": "NOT_RUN",
             "X-Design-Release-Ready": "false",
         },
+    )
+
+
+@router.post("/api/designs/{document_id}/revisions/{revision}/ocr-runs")
+def submit_design_ocr_execution(
+    document_id: str,
+    payload: OCRRunRequest,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Explicit opt-in local OCR. A journaled observation is NOT attestation."""
+    if getattr(request.app.state, "design_ocr_runs_enabled", False) is not True:
+        return _error_response(403, "OCR_EXECUTION_DISABLED", "local OCR execution disabled")
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        if reviewer is None:
+            return _error_response(
+                403, "OCR_REVIEWER_REQUIRED", "named export reviewer policy required"
+            )
+        result, created = submit_ocr_run(
+            _manager(request).repository(),
+            document_id,
+            revision,
+            payload,
+            principal=reviewer.principal_id,
+            policy=reviewer.policy_digest,
+        )
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except RasterUnavailable:
+        return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
+    except RasterInvalid:
+        return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result,
+        status_code=201 if created else 200,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/designs/{document_id}/revisions/{revision}/ocr-runs/{operation_id}")
+def get_design_ocr_execution(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+    operation_id: Annotated[str, Path(pattern=r"^ocr_[0-9a-f]{32}$")],
+):
+    """Query a local journal record without repeating a provider invocation."""
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        if reviewer is None:
+            return _error_response(
+                403, "OCR_REVIEWER_REQUIRED", "named export reviewer policy required"
+            )
+        result = OCRRunJournal(_manager(request).repository()).get(
+            document_id,
+            revision,
+            operation_id,
+            principal=reviewer.principal_id,
+            policy=reviewer.policy_digest,
+        )
+        if result is None:
+            raise NotFoundError()
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
