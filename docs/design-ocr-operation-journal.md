@@ -52,6 +52,13 @@ validated PNG to an isolated temporary directory and calls the existing
 `app.ocr_provider.recognize()` in this request. The file is deleted when
 the attempt exits. There is no background worker or implicit retry.
 
+The PaddleOCR adapter caches one model instance per process. Calls to its
+`recognize()` are serialized by a narrow process-local lock to avoid
+concurrent predictions on an engine without proven thread-safe inference.
+SQLite admission, status lookup and non-model raster work are not held under
+this lock. This is not a distributed execution lease or evidence of model
+correctness; only the supported single-worker loopback deployment is in scope.
+
 The terminal update again validates the current approved snapshot. Successful
 local adapter output is bounded to at most 200 lines of plain text, confidence,
 and optional 4-integer bounding boxes. Valid results are stored alongside
