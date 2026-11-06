@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
+from threading import Lock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated
@@ -31,6 +32,10 @@ from .repository import DesignRepository, _now
 
 _SHA256 = r"^[0-9a-f]{64}$"
 _OPERATION_ID = r"^ocr_[0-9a-f]{32}$"
+
+# PaddleOCR is cached process-wide by the adapter. Do not concurrently call
+# predict() on the same cached engine unless thread-safety is independently proven.
+_LOCAL_OCR_ENGINE_LOCK = Lock()
 
 
 class OCRTargetIncomplete(DesignError):
@@ -317,6 +322,12 @@ class OCRRunJournal:
             raise StorageError() from None
 
 
+def _recognize_serialized(image: Path) -> list[dict]:
+    """Keep local cached PaddleOCR inference single-flight within this worker."""
+    with _LOCAL_OCR_ENGINE_LOCK:
+        return recognize(image)
+
+
 def _capture_model_output(rows: object) -> tuple[list[dict], dict]:
     if not isinstance(rows, list) or len(rows) > 200:
         raise ValueError("unexpected OCR line collection")
@@ -394,7 +405,7 @@ def submit_ocr_run(
         with TemporaryDirectory(prefix="poster-design-ocr-") as folder:
             image = Path(folder) / "approved.png"
             image.write_bytes(raster.png)
-            rows = recognize(image)
+            rows = _recognize_serialized(image)
             observations, runtime = _capture_model_output(rows)
     except OCRUnavailable:
         result = journal.finish(
