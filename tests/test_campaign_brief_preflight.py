@@ -155,3 +155,43 @@ def test_campaign_digest_is_not_a_substitute_for_poster_spec_digest(monkeypatch)
             _plan(brief_spec_digest=_plan().fingerprint()),
             original_product_bytes=IMAGE_BYTES,
         )
+
+
+def test_real_sqlite_checkpoint_preflight_waits_for_explicit_brief_approval(
+    tmp_path, monkeypatch
+):
+    """Integration proof: real LangGraph/SQLite state, no mocked get_run."""
+    from app.brief_compiler import BriefRequest
+    from app.review_service import create_run, decide_run, get_run
+
+    monkeypatch.setenv("POSTER_CHECKPOINT_DB", str(tmp_path / "checkpoints.sqlite3"))
+    draft = create_run(
+        BriefRequest(brief="主标题：电动牙刷，活动价：199.90元，风格：蓝色科技风", compiler="demo")
+    )
+    plan = _plan(brief_run_id=draft["run_id"])
+
+    assert draft["pending_approval"] is True
+    with pytest.raises(CampaignBriefPreflightError):
+        check_campaign_brief_preflight(plan, original_product_bytes=IMAGE_BYTES)
+
+    confirmed = decide_run(draft["run_id"], True, _spec())
+    assert confirmed["status"] == "APPROVED"
+    assert get_run(draft["run_id"])["pending_approval"] is False
+    assert check_campaign_brief_preflight(plan, original_product_bytes=IMAGE_BYTES) is None
+
+
+def test_real_rejected_checkpoint_cannot_pass_preflight(tmp_path, monkeypatch):
+    """A rejected Brief never becomes an implicit Campaign approval."""
+    from app.brief_compiler import BriefRequest
+    from app.review_service import create_run, decide_run
+
+    monkeypatch.setenv("POSTER_CHECKPOINT_DB", str(tmp_path / "checkpoints.sqlite3"))
+    draft = create_run(
+        BriefRequest(brief="主标题：电动牙刷，活动价：199.90元，风格：蓝色科技风", compiler="demo")
+    )
+    decided = decide_run(draft["run_id"], False, None)
+    assert decided["status"] == "REJECTED"
+    with pytest.raises(CampaignBriefPreflightError):
+        check_campaign_brief_preflight(
+            _plan(brief_run_id=draft["run_id"]), original_product_bytes=IMAGE_BYTES
+        )
