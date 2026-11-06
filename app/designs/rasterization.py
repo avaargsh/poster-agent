@@ -76,9 +76,7 @@ def _convert_svg_to_png(svg_bytes: bytes, width: int, height: int) -> tuple[byte
         raise RasterUnavailable("optional CairoSVG raster engine unavailable") from None
 
     try:
-        raw = cairosvg.svg2png(
-            bytestring=svg_bytes, output_width=width, output_height=height
-        )
+        raw = cairosvg.svg2png(bytestring=svg_bytes, output_width=width, output_height=height)
     except Exception:
         raise RasterInvalid("approved SVG rasterization failed") from None
     return raw, f"cairosvg/{installed_version}"
