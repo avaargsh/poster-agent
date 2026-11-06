@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS design_ocr_runs (
     svg_sha256 TEXT NOT NULL,
     png_sha256 TEXT NOT NULL,
     rasterizer TEXT NOT NULL,
+    model_profile_sha256 TEXT,
     status TEXT NOT NULL CHECK (
         status IN ('EXECUTING','EXECUTED','UNAVAILABLE','FAILED','UNKNOWN')
     ),
@@ -279,6 +280,17 @@ class DesignRepository:
         try:
             with self._connect() as connection:
                 connection.executescript(_SCHEMA)
+                # Existing local design databases predate the pinned-model
+                # column. Keep old run records readable with NULL provenance;
+                # all newly admitted runs must carry the profile digest.
+                columns = {
+                    entry["name"]
+                    for entry in connection.execute("PRAGMA table_info(design_ocr_runs)")
+                }
+                if "model_profile_sha256" not in columns:
+                    connection.execute(
+                        "ALTER TABLE design_ocr_runs ADD COLUMN model_profile_sha256 TEXT"
+                    )
                 # DesignManager holds exclusive process ownership at this
                 # point. Previous in-flight OCR is ambiguous after restart:
                 # never replay it or promote it to a terminal success.
