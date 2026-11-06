@@ -53,9 +53,7 @@ def test_fingerprint_covers_exact_declared_inputs_and_match_provenance():
         {"field": "cta", "status": "MATCHED", "matched_line_index": 3},
     ]
     assert result["comparison_schema_version"] == 1
-    assert result["observations_sha256"] == _canonical_digest(
-        observations.model_dump(mode="json")
-    )
+    assert result["observations_sha256"] == _canonical_digest(observations.model_dump(mode="json"))
     assert result["comparison_fingerprint_sha256"] == _canonical_digest(
         {
             "schema_version": 1,
@@ -82,16 +80,12 @@ def test_fingerprints_are_deterministic_and_change_with_inputs():
     compared = assess_unattested(target, altered_score)
     assert compared["field_checks"] == baseline["field_checks"]
     assert compared["observations_sha256"] != baseline["observations_sha256"]
-    assert compared["comparison_fingerprint_sha256"] != baseline[
-        "comparison_fingerprint_sha256"
-    ]
+    assert compared["comparison_fingerprint_sha256"] != baseline["comparison_fingerprint_sha256"]
 
     altered_target = {**target, "svg_sha256": "d" * 64}
     changed = assess_unattested(altered_target, observations)
     assert changed["observations_sha256"] == baseline["observations_sha256"]
-    assert changed["comparison_fingerprint_sha256"] != baseline[
-        "comparison_fingerprint_sha256"
-    ]
+    assert changed["comparison_fingerprint_sha256"] != baseline["comparison_fingerprint_sha256"]
 
 
 def test_no_match_or_missing_design_never_claims_an_observation_index():
