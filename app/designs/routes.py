@@ -36,6 +36,7 @@ from .errors import (
 )
 from .models import MAX_ASSET_BYTES, DesignDocument
 from .ocr_observations import OCRObservationRequest, assess_unattested
+from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .rendering import render_svg
 from .reviewer_auth import ReviewerAccessError, reviewer_for_request
 from .service import (
@@ -482,4 +483,53 @@ def evaluate_design_ocr_observations(
     return JSONResponse(
         content=report,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/designs/{document_id}/revisions/{revision}/approved.png")
+def export_approved_design_raster(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Protected pixels of a current approval; never an OCR or release receipt."""
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        repository = _manager(request).repository()
+        policy_digest = reviewer.policy_digest if reviewer is not None else None
+        svg = repository.approved_svg(document_id, revision, required_policy_digest=policy_digest)
+        raster = rasterize_svg(svg)
+        # Rasterization happens outside the SQLite read transaction. Re-check
+        # current approval, revision, policy and asset integrity before returning.
+        # Consumers must still revalidate before any downstream release decision.
+        checked_svg = repository.approved_svg(
+            document_id, revision, required_policy_digest=policy_digest
+        )
+        if not hmac.compare_digest(
+            hashlib.sha256(checked_svg.encode("utf-8")).hexdigest(), raster.svg_sha256
+        ):
+            return _error_response(409, "RASTER_SOURCE_CHANGED", "approved SVG changed")
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except RasterUnavailable:
+        return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
+    except RasterInvalid:
+        return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
+    except Exception:
+        return _unexpected_error_response()
+
+    return Response(
+        content=raster.png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Approved-SVG-SHA256": raster.svg_sha256,
+            "X-Raster-PNG-SHA256": raster.png_sha256,
+            "X-Design-Rasterizer": raster.rasterizer,
+            "X-Design-OCR-Status": "NOT_RUN",
+            "X-Design-Release-Ready": "false",
+        },
     )
