@@ -4,7 +4,7 @@ This is a point-in-time **metadata / CI / targeted contract review**, not a clai
 that every historical change has been independently line-by-line audited.
 Authority: GitHub PR state, exact head SHA and associated Actions runs.
 
-## Inventory (19 PRs; #14 is an issue, not a PR)
+## Inventory at audit cutoff (19 PRs before governance PR #21; #14 is an issue)
 
 | PR | Exact head (prefix) | Disposition | Quick CI on that head | Formal review submission |
 | --- | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ Authority: GitHub PR state, exact head SHA and associated Actions runs.
 | [#19](https://github.com/avaargsh/poster-agent/pull/19) | `080aef57` | merged | [success](https://github.com/avaargsh/poster-agent/actions/runs/42152069677) | none |
 | [#20](https://github.com/avaargsh/poster-agent/pull/20) | `8d3c348e` | open Draft; stacked on #18 | [new integration test run](https://github.com/avaargsh/poster-agent/actions/runs/42313440950) pending at audit | none |
 
-Seventeen PRs are merged and two remain Draft. No observed closed-unmerged PR.
+At this inventory cutoff, seventeen PRs were merged and two remained Draft.\nGovernance PR #21 was opened **after** this inventory snapshot and is deliberately\nnot counted in the historical table. No observed closed-unmerged PR.
 A passing individual head Quick CI does **not** prove a passing merged-tree CI.
 Formal COMMENTED review also does **not** equal APPROVED independent review.
 The audit does not establish a real-production OCR run or release authorization.
