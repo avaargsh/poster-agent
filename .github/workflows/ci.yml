@@ -16,8 +16,9 @@ on:
           - quick
           - full
   pull_request:
+    # Accept explicitly requested checks on stacked PRs targeting feature branches.
+    # Still NO push/synchronize trigger: only Ready or the ci:run label runs tests.
     types: [ready_for_review, labeled]
-    branches: [main]
     paths:
       - "app/**"
       - "tests/**"
