@@ -82,7 +82,9 @@ def model_directory_sha256(directory: Path) -> str:
         def fail_walk(exc: OSError) -> None:
             raise OCRModelProfileError("cannot traverse local model directory") from exc
 
-        for root, dirs, filenames in os.walk(path, topdown=True, followlinks=False, onerror=fail_walk):
+        for root, dirs, filenames in os.walk(
+            path, topdown=True, followlinks=False, onerror=fail_walk
+        ):
             current = Path(root)
             if len(current.relative_to(path).parts) > _MAX_DEPTH:
                 raise OCRModelProfileError("model directory nesting exceeds limit")
@@ -103,7 +105,9 @@ def model_directory_sha256(directory: Path) -> str:
         if not entries:
             raise OCRModelProfileError("model directory is empty")
 
-        data = json.dumps(sorted(entries), ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        data = json.dumps(
+            sorted(entries), ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
         return hashlib.sha256(data.encode("utf-8")).hexdigest()
     except OCRModelProfileError:
         raise
@@ -149,7 +153,9 @@ def load_model_profile(raw: str | None) -> LocalOCRModelProfile:
     ):
         raise OCRModelProfileError("pinned local OCR model files changed")
 
-    canonical = json.dumps(cfg, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    canonical = json.dumps(
+        cfg, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
     return LocalOCRModelProfile(
         detector_dir=detector,
         recognizer_dir=recognizer,
