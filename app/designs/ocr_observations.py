@@ -5,6 +5,8 @@ Not proof that OCR ran; never emits publish or release authorization.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Annotated, Literal
 
@@ -15,6 +17,7 @@ from .models import validate_plain_text
 OCRCheckStatus = Literal["MATCHED", "MISMATCH", "NO_OBSERVATION", "MISSING_IN_DESIGN"]
 _SCORE_MIN = 0.40
 _CORE_FIELDS = ("title", "price", "cta")
+_COMPARISON_SCHEMA_VERSION = 1
 
 
 class OCRObservation(BaseModel):
@@ -47,31 +50,66 @@ def _price_matches(observed: str, expected: str) -> bool:
     return re.search(r"(?<![0-9])" + escaped + r"(?![0-9.,．])", observed) is not None
 
 
+def _canonical_sha256(value: object) -> str:
+    """Stable content identity only; this is NOT a signature or trusted audit receipt."""
+    serialized = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def assess_unattested(target: dict, observations: OCRObservationRequest) -> dict:
     """Compare declared text only; absence, mismatch and missing design block."""
-    texts = [_normalize(line.text) for line in observations.lines if line.score >= _SCORE_MIN]
+    eligible = [
+        (index, _normalize(line.text))
+        for index, line in enumerate(observations.lines)
+        if line.score >= _SCORE_MIN
+    ]
     checks: list[dict] = []
     all_matched = True
     for field in _CORE_FIELDS:
         expected = target["expected_fields"].get(field)
+        matched_index: int | None = None
         if field in target["missing_fields"] or not expected:
             status: OCRCheckStatus = "MISSING_IN_DESIGN"
-        elif not texts:
+        elif not eligible:
             status = "NO_OBSERVATION"
         else:
             normalized_expected = _normalize(expected)
             if field == "price":
-                matched = any(_price_matches(text, normalized_expected) for text in texts)
+                matched_index = next(
+                    (
+                        index
+                        for index, text in eligible
+                        if _price_matches(text, normalized_expected)
+                    ),
+                    None,
+                )
             else:
-                matched = any(text == normalized_expected for text in texts)
-            status = "MATCHED" if matched else "MISMATCH"
+                matched_index = next(
+                    (index for index, text in eligible if text == normalized_expected),
+                    None,
+                )
+            status = "MATCHED" if matched_index is not None else "MISMATCH"
         all_matched = all_matched and status == "MATCHED"
-        checks.append({"field": field, "status": status})
+        checks.append({"field": field, "status": status, "matched_line_index": matched_index})
+    consistency = "MATCHES_EXPECTED" if all_matched else "BLOCKED"
+    declared_lines = observations.model_dump(mode="json")
+    comparison_input = {
+        "schema_version": _COMPARISON_SCHEMA_VERSION,
+        "target": target,
+        "observations": declared_lines,
+        "field_checks": checks,
+        "declared_consistency": consistency,
+    }
     return {
         **target,
         "ocr_status": "OBSERVATIONS_UNATTESTED",
         "field_checks": checks,
-        "declared_consistency": "MATCHES_EXPECTED" if all_matched else "BLOCKED",
+        "declared_consistency": consistency,
+        "comparison_schema_version": _COMPARISON_SCHEMA_VERSION,
+        "observations_sha256": _canonical_sha256(declared_lines),
+        "comparison_fingerprint_sha256": _canonical_sha256(comparison_input),
         "runtime_attested": False,
         "quality_verified": False,
         "release_ready": False,
