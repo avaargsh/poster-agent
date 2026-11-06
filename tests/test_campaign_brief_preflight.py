@@ -12,7 +12,6 @@ from app.campaigns.brief_preflight import (
 from app.campaigns.models import CampaignPlan
 from app.schemas import PosterSpec
 
-
 RUN_ID = "a" * 32
 IMAGE_BYTES = b"synthetic-original-image-bytes"
 
