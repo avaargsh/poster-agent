@@ -497,9 +497,7 @@ def export_approved_design_raster(
         reviewer = reviewer_for_request(request, "export")
         repository = _manager(request).repository()
         policy_digest = reviewer.policy_digest if reviewer is not None else None
-        svg = repository.approved_svg(
-            document_id, revision, required_policy_digest=policy_digest
-        )
+        svg = repository.approved_svg(document_id, revision, required_policy_digest=policy_digest)
         raster = rasterize_svg(svg)
         # Rasterization happens outside the SQLite read transaction. Re-check
         # current approval, revision, policy and asset integrity before returning.
