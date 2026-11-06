@@ -349,3 +349,23 @@ def test_model_mutation_during_inference_remains_unknown(
         assert len(received_model_dirs) == 1
         assert received_model_dirs[0][0].endswith("local-detector")
         assert received_model_dirs[0][1].endswith("local-recognizer")
+
+
+def test_old_sqlite_journal_without_model_column_migrates_in_place(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert created.json()["status"] == "EXECUTED"
+
+    with sqlite3.connect(ocr_paths) as conn:
+        conn.execute("ALTER TABLE design_ocr_runs DROP COLUMN model_profile_sha256")
+    with TestClient(app) as restarted:
+        recorded = restarted.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert recorded.status_code == 200, recorded.text
+        assert recorded.json()["status"] == "EXECUTED"
+        assert recorded.json()["model_profile_sha256"] is None
+        assert recorded.json()["release_ready"] is False
