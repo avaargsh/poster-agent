@@ -44,11 +44,14 @@ def test_profile_pins_two_explicit_local_model_directories(tmp_path):
     assert profile.detector_dir == str(detector)
     assert profile.recognizer_dir == str(recognizer)
     assert len(profile.fingerprint) == 64
-    assert profile.fingerprint == hashlib.sha256(
-        json.dumps(
-            json.loads(raw), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
-    ).hexdigest()
+    assert (
+        profile.fingerprint
+        == hashlib.sha256(
+            json.dumps(
+                json.loads(raw), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     assert load_model_profile(raw) == profile
 
 
