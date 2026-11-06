@@ -157,9 +157,7 @@ def test_campaign_digest_is_not_a_substitute_for_poster_spec_digest(monkeypatch)
         )
 
 
-def test_real_sqlite_checkpoint_preflight_waits_for_explicit_brief_approval(
-    tmp_path, monkeypatch
-):
+def test_real_sqlite_checkpoint_preflight_waits_for_explicit_brief_approval(tmp_path, monkeypatch):
     """Integration proof: real LangGraph/SQLite state, no mocked get_run."""
     from app.brief_compiler import BriefRequest
     from app.review_service import create_run, decide_run, get_run
