@@ -78,7 +78,11 @@ def assess_unattested(target: dict, observations: OCRObservationRequest) -> dict
             normalized_expected = _normalize(expected)
             if field == "price":
                 matched_index = next(
-                    (index for index, text in eligible if _price_matches(text, normalized_expected)),
+                    (
+                        index
+                        for index, text in eligible
+                        if _price_matches(text, normalized_expected)
+                    ),
                     None,
                 )
             else:
@@ -88,9 +92,7 @@ def assess_unattested(target: dict, observations: OCRObservationRequest) -> dict
                 )
             status = "MATCHED" if matched_index is not None else "MISMATCH"
         all_matched = all_matched and status == "MATCHED"
-        checks.append(
-            {"field": field, "status": status, "matched_line_index": matched_index}
-        )
+        checks.append({"field": field, "status": status, "matched_line_index": matched_index})
     consistency = "MATCHES_EXPECTED" if all_matched else "BLOCKED"
     declared_lines = observations.model_dump(mode="json")
     comparison_input = {
