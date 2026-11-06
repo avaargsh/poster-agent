@@ -35,6 +35,7 @@ from .errors import (
     StorageError,
 )
 from .models import MAX_ASSET_BYTES, DesignDocument
+from .ocr_model_policy import OCRModelProfileError
 from .ocr_observations import OCRObservationRequest, assess_unattested
 from .ocr_runs import OCRRunJournal, OCRRunRequest, submit_ocr_run
 from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
@@ -561,11 +562,14 @@ def submit_design_ocr_execution(
             payload,
             principal=reviewer.principal_id,
             policy=reviewer.policy_digest,
+            model_config_raw=getattr(request.app.state, "design_ocr_model_profile_raw", None),
         )
     except ReviewerAccessError as exc:
         return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
+    except OCRModelProfileError:
+        return _error_response(503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE", "pinned local OCR model profile unavailable")
     except RasterUnavailable:
         return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
     except RasterInvalid:
