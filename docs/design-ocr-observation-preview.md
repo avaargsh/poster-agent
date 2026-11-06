@@ -30,16 +30,45 @@ The report includes the exact approved input's `approval_id`,
 `spec_digest`, `asset_manifest_digest`, `svg_sha256`, `expected_fields`
 and `missing_fields`, plus deterministic checks for title, price and CTA:
 
-- `MATCHED`: a credible observation matches the expected field;
-- `MISMATCH`: credible text exists but does not match;
+- `MATCHED`: a declared observation matches the expected field;
+- `MISMATCH`: eligible text exists but does not match;
 - `NO_OBSERVATION`: no observation clears the minimum score;
 - `MISSING_IN_DESIGN`: the field is absent from the approved design.
+
+Each check includes `matched_line_index`: the zero-based index in the
+**original request** of the first eligible matching line. It is `null` for
+anything other than `MATCHED`. This does **not** check the visual location of
+text, and one declared line may match more than one expected field.
 
 Title/CTA use whitespace-normalized complete-line equality. Price matching
 accepts a fully delimited displayed amount but rejects prefix collisions such
 as `¥199.90` vs `¥1990.00` or `¥199.90.5`. These checks are deterministic
 hints, not proof that a visual field is readable. Real OCR could miss a field
 that was rendered, and callers could fabricate matching text.
+
+## Reproducible comparison fingerprints (schema version 1)
+
+Two SHA-256 fingerprints can assist downstream **external** evidence storage
+in identifying exactly which declared input and comparison output it received:
+
+- `observations_sha256`: hash of the validated, original-order `lines`
+  request encoded as canonical UTF-8 JSON;
+- `comparison_fingerprint_sha256`: hash of the canonical UTF-8 JSON record:
+  `{"schema_version":1,"target":<ocr-target dict>,"observations":<validated request>,"field_checks":<checks>,"declared_consistency":<status>}`.
+
+Canonical JSON uses sorted keys, compact separators, UTF-8 without ASCII
+escaping, and rejects NaN. It includes original text/score, not only
+whitespace-normalized text, so a changed observation score invalidates the
+fingerprint even when the three field statuses remain the same. A changed
+approved SVG hash likewise changes the comparison fingerprint.
+
+These are **ordinary content hashes** computed by the same server returning
+the response. They are neither a signature nor immutable storage, identity
+verification, independent witness, or proof of genuine OCR. An attacker can
+forge both the input and matching hashes. To obtain audit-grade provenance,
+a separately authenticated execution service must archive and anchor its
+signed receipt and frozen raster/model evidence in an independently controlled
+append-only store.
 
 **Every response explicitly includes**
 `ocr_status=OBSERVATIONS_UNATTESTED`,
