@@ -120,9 +120,7 @@ def test_revision_change_during_rasterization_is_not_returned(
                     "command_id": "approved-raster-inflight-0001",
                     "expected_revision": 1,
                     "actor": "user",
-                    "operations": [
-                        {"op": "set_text", "node_id": "title", "text": "并发编辑"}
-                    ],
+                    "operations": [{"op": "set_text", "node_id": "title", "text": "并发编辑"}],
                 },
             )
             assert changed.status_code == 200, changed.text
@@ -150,6 +148,7 @@ def test_raster_fails_closed_on_invalid_output_and_unavailable_engine(
             response = client.get(url)
             assert response.status_code == 503
             assert response.json()["error"]["code"] == "DESIGN_RASTER_INVALID"
+
         def unavailable(svg, width, height):
             raise rasterization.RasterUnavailable("optional raster engine not installed")
 
@@ -187,9 +186,5 @@ def test_raster_export_inherits_reviewer_scope(design_paths, product_bytes, monk
         _approve(client, doc, token=approver)
         url = f"/api/designs/{doc}/revisions/1/approved.png"
         assert client.get(url).status_code == 401
-        assert client.get(
-            url, headers={"Authorization": f"Bearer {approver}"}
-        ).status_code == 403
-        assert client.get(
-            url, headers={"Authorization": f"Bearer {exporter}"}
-        ).status_code == 200
+        assert client.get(url, headers={"Authorization": f"Bearer {approver}"}).status_code == 403
+        assert client.get(url, headers={"Authorization": f"Bearer {exporter}"}).status_code == 200
