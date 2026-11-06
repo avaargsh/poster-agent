@@ -26,7 +26,12 @@ def draft():
             "font_family": "Noto Sans CJK SC",
         },
         "scenes": [
-            {"scene_id": "hero", "channel": "square", "purpose": "hero", "marketing_copy": "新品上市"},
+            {
+                "scene_id": "hero",
+                "channel": "square",
+                "purpose": "hero",
+                "marketing_copy": "新品上市",
+            },
             {
                 "scene_id": "feed",
                 "channel": "feed_4x5_native",
@@ -74,7 +79,8 @@ def test_change_to_style_or_price_changes_plan_fingerprint():
     assert CampaignPlan.model_validate(changed_style).fingerprint() != initial.fingerprint()
     assert CampaignPlan.model_validate(changed_price).fingerprint() != initial.fingerprint()
     assert (
-        CampaignPlan.model_validate(changed_price).style_fingerprint() == initial.style_fingerprint()
+        CampaignPlan.model_validate(changed_price).style_fingerprint()
+        == initial.style_fingerprint()
     )
 
 
