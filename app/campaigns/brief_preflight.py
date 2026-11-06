@@ -26,9 +26,7 @@ class CampaignBriefPreflightError(ValueError):
     """An untrusted plan or its source could not pass read-only preflight."""
 
 
-def check_campaign_brief_preflight(
-    plan: CampaignPlan, *, original_product_bytes: bytes
-) -> None:
+def check_campaign_brief_preflight(plan: CampaignPlan, *, original_product_bytes: bytes) -> None:
     """Require an exact current Brief/source match; never grant approval.
 
     The Brief digest deliberately uses the existing Brief-link algorithm,
