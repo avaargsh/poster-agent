@@ -311,9 +311,7 @@ def test_missing_model_profile_rejects_before_journal_admission(
         assert conn.execute("SELECT COUNT(*) FROM design_ocr_runs").fetchone()[0] == 0
 
 
-def test_changed_local_model_is_not_used_or_journaled(
-    ocr_paths, product_bytes, monkeypatch
-):
+def test_changed_local_model_is_not_used_or_journaled(ocr_paths, product_bytes, monkeypatch):
     calls = []
     monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: calls.append(1))
     with TestClient(app) as client:
@@ -327,9 +325,7 @@ def test_changed_local_model_is_not_used_or_journaled(
         assert conn.execute("SELECT COUNT(*) FROM design_ocr_runs").fetchone()[0] == 0
 
 
-def test_model_mutation_during_inference_remains_unknown(
-    ocr_paths, product_bytes, monkeypatch
-):
+def test_model_mutation_during_inference_remains_unknown(ocr_paths, product_bytes, monkeypatch):
     received_model_dirs = []
 
     def mutate_model_after_admission(path, **kwargs):
