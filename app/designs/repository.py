@@ -152,6 +152,36 @@ CREATE TABLE IF NOT EXISTS design_approval_attributions (
     FOREIGN KEY (document_id, approval_id)
         REFERENCES design_approvals(document_id, approval_id)
 );
+
+-- Local single-writer operation journal. This is neither an immutable external
+-- ledger nor independent proof that a particular OCR model ran.
+CREATE TABLE IF NOT EXISTS design_ocr_runs (
+    operation_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    approval_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    policy_digest TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    spec_digest TEXT NOT NULL,
+    asset_manifest_digest TEXT NOT NULL,
+    renderer_version TEXT NOT NULL,
+    svg_sha256 TEXT NOT NULL,
+    png_sha256 TEXT NOT NULL,
+    rasterizer TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('EXECUTING','EXECUTED','UNAVAILABLE','FAILED','UNKNOWN')
+    ),
+    observations_json TEXT,
+    runtime_json TEXT,
+    reason TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    FOREIGN KEY (document_id, revision) REFERENCES revisions(document_id, revision),
+    FOREIGN KEY (document_id, approval_id)
+        REFERENCES design_approvals(document_id, approval_id),
+    CHECK (status <> 'EXECUTED' OR observations_json IS NOT NULL)
+);
 """
 
 
@@ -249,6 +279,21 @@ class DesignRepository:
         try:
             with self._connect() as connection:
                 connection.executescript(_SCHEMA)
+                # DesignManager holds exclusive process ownership at this
+                # point. Previous in-flight OCR is ambiguous after restart:
+                # never replay it or promote it to a terminal success.
+                connection.execute(
+                    """
+                    UPDATE design_ocr_runs
+                    SET status = 'UNKNOWN',
+                        observations_json = NULL,
+                        runtime_json = NULL,
+                        reason = 'RECOVERED_AFTER_RESTART',
+                        finished_at = ?
+                    WHERE status = 'EXECUTING'
+                    """,
+                    (_now(),),
+                )
         except sqlite3.Error:
             raise StorageError() from None
 
