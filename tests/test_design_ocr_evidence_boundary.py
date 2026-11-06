@@ -59,9 +59,7 @@ def test_v1_golden_fingerprint_vector_is_fixed_and_replay_consistent():
         == "4f2f879ecedd139afc819a108c07022960c5f83d066caf8771dd177815524e7a"
     )
     assert replay_consistent_unattested(target, observations, result)
-    assert replay_consistent_unattested(
-        target, observations, dict(reversed(list(result.items())))
-    )
+    assert replay_consistent_unattested(target, observations, dict(reversed(list(result.items()))))
 
 
 @pytest.mark.parametrize(
@@ -78,9 +76,7 @@ def test_v1_golden_fingerprint_vector_is_fixed_and_replay_consistent():
         ("expected_fields", {"title": "新标题", "price": "¥199.90", "cta": "立即抢购"}),
     ],
 )
-def test_v1_comparison_fingerprint_is_sensitive_to_authoritative_target(
-    field, changed_value
-):
+def test_v1_comparison_fingerprint_is_sensitive_to_authoritative_target(field, changed_value):
     target = _target()
     observations = _observations()
     baseline = assess_unattested(target, observations)
@@ -90,10 +86,7 @@ def test_v1_comparison_fingerprint_is_sensitive_to_authoritative_target(
     updated = assess_unattested(changed_target, observations)
 
     assert updated["observations_sha256"] == baseline["observations_sha256"]
-    assert (
-        updated["comparison_fingerprint_sha256"]
-        != baseline["comparison_fingerprint_sha256"]
-    )
+    assert updated["comparison_fingerprint_sha256"] != baseline["comparison_fingerprint_sha256"]
     assert not replay_consistent_unattested(changed_target, observations, baseline)
 
 
