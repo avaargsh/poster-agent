@@ -569,7 +569,9 @@ def submit_design_ocr_execution(
     except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
     except OCRModelProfileError:
-        return _error_response(503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE", "pinned local OCR model profile unavailable")
+        return _error_response(
+            503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE", "pinned local OCR model profile unavailable"
+        )
     except RasterUnavailable:
         return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
     except RasterInvalid:
