@@ -1,7 +1,7 @@
 name: CI
 
 # Never run on each push, and never rerun automatically on PR synchronize.
-# Normal path: draft PR -> Ready for review => ONE quick validation.
+# Normal path: draft PR -> Ready for review => explicit merge-ref + exact-head quick validation.
 # Revalidate after further changes: remove/reapply "ci:run" label, or dispatch
 # from Actions -> CI -> Run workflow, selecting the target branch.
 on:
@@ -16,8 +16,9 @@ on:
           - quick
           - full
   pull_request:
+    # Accept explicitly requested checks on stacked PRs targeting feature branches.
+    # Still NO push/synchronize trigger: only Ready or the ci:run label runs tests.
     types: [ready_for_review, labeled]
-    branches: [main]
     paths:
       - "app/**"
       - "tests/**"
@@ -44,10 +45,17 @@ jobs:
           github.event.action == 'ready_for_review' ||
           (github.event.action == 'labeled' && github.event.label.name == 'ci:run') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
-      - name: Checkout source
+      - name: Checkout source (PR merge ref or manually dispatched ref)
         uses: actions/checkout@v4
+      - name: Record tested merge-ref identity
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          echo "PR source head: ${{ github.event.pull_request.head.sha }}"
+          echo "PR base: ${{ github.event.pull_request.base.sha }}"
+          echo "PR merge ref: $(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
       - name: Setup pinned uv and reuse dependency cache
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -103,6 +111,26 @@ jobs:
       - name: Generate deterministic demo
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.level == 'full' }}
         run: uv run --locked python -m scripts.generate_demo
+
+      # PR Quick CI validates BOTH the GitHub merge ref above and the
+      # source head below. A green merge-ref run alone is not an exact-head run.
+      # Manual full workflows retain their original single-ref semantics.
+      - name: Checkout exact PR source head
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact PR head and rerun locked quick suite
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          uv lock --check
+          uv sync --locked
+          uv run --locked ruff format --check app tests scripts evals
+          uv run --locked ruff check app tests scripts evals
+          uv run --locked python -m scripts.check_repository_readiness
+          uv run --locked python -m compileall -q app tests scripts evals
+          uv run --locked python -m pytest -q
 
   # Explicit and isolated: run only when a reviewer adds "ci:browser".
   # Loads the actual FastAPI page in Chromium, but substitutes synthetic OCR
