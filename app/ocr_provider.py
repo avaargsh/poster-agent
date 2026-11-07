@@ -55,6 +55,30 @@ def _engine():
         raise OCRUnavailable("PaddleOCR 模型无法初始化，请检查本机 CPU/模型依赖") from exc
 
 
+@lru_cache(maxsize=4)
+def _local_engine(detector_dir: str, recognizer_dir: str, profile_fingerprint: str):
+    """No implicit model selection: DesignDocument uses two explicit local roots.
+
+    The profile fingerprint is a cache-key component so different verified
+    model bundles do not reuse an older cached engine at the same paths.
+    """
+    try:
+        from paddleocr import PaddleOCR
+    except (ImportError, OSError) as exc:
+        raise OCRUnavailable("local PaddleOCR package/runtime is unavailable") from exc
+    try:
+        return PaddleOCR(
+            lang="ch",
+            text_detection_model_dir=detector_dir,
+            text_recognition_model_dir=recognizer_dir,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+    except Exception as exc:
+        raise OCRUnavailable("configured local PaddleOCR models could not initialize") from exc
+
+
 def _json_dict(result):
     data = getattr(result, "json", None)
     if callable(data):
@@ -69,10 +93,11 @@ def _json_dict(result):
     return data
 
 
-def recognize(image_path: Path) -> list[dict]:
+def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = None) -> list[dict]:
     """Return per-line text, score and optional pixel bbox (PaddleOCR 3.x)."""
     try:
-        results = _engine().predict(str(image_path))
+        engine = _engine() if model_dirs is None else _local_engine(*model_dirs)
+        results = engine.predict(str(image_path))
         lines = []
         for result in results:
             data = _json_dict(result)

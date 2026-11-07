@@ -114,3 +114,33 @@ def assess_unattested(target: dict, observations: OCRObservationRequest) -> dict
         "quality_verified": False,
         "release_ready": False,
     }
+
+
+def replay_consistent_unattested(
+    authoritative_target: dict,
+    observations: OCRObservationRequest,
+    report: dict,
+) -> bool:
+    """Check exact *unattested* replay content, never OCR execution or release authority.
+
+    The caller must separately obtain and validate the authoritative revision target
+    and retain the exact caller observations. Self-consistent input and report are
+    forgeable and cannot stand in for an authenticated OCR execution receipt.
+    """
+    if not isinstance(observations, OCRObservationRequest) or not isinstance(report, dict):
+        return False
+
+    try:
+        expected = assess_unattested(authoritative_target, observations)
+        # Do not compare dictionaries directly: bool and int compare equal in Python.
+        # Canonical JSON also rejects NaN and distinguishes missing or extra claims.
+        replay_json = json.dumps(
+            expected, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        supplied_json = json.dumps(
+            report, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    return replay_json == supplied_json
