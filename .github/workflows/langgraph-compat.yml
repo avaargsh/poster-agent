@@ -15,20 +15,20 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: langgraph-compat-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   migration:
     if: ${{ github.event.label.name == 'ci:compat' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    concurrency:
+      group: langgraph-compat-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - name: Checkout exact proposed source and baseline history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Setup pinned uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
