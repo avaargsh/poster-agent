@@ -48,4 +48,6 @@
 
 ## 本地项目治理
 
+[2026-11-12 CI 修复与历史分支清理](governance/project-governance-2026-11-12.md)。
+
 [2026-10-28 分支整合、修复与验证记录](project-governance-2026-10-28.md)。

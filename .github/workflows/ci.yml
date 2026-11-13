@@ -21,6 +21,7 @@ on:
     types: [ready_for_review, labeled]
     paths:
       - "app/**"
+      - "frontend/**"
       - "tests/**"
       - "scripts/**"
       - "evals/**"
@@ -29,13 +30,10 @@ on:
       - ".python-version"
       - ".github/workflows/ci.yml"
       - ".github/workflows/real-ocr.yml"
+      - ".github/workflows/langgraph-compat.yml"
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   python-tests:
@@ -46,6 +44,9 @@ jobs:
           (github.event.action == 'labeled' && github.event.label.name == 'ci:run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: quick-python-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout source (PR merge ref or manually dispatched ref)
         uses: actions/checkout@v4
@@ -132,6 +133,44 @@ jobs:
           uv run --locked python -m compileall -q app tests scripts evals
           uv run --locked python -m pytest -q
 
+  frontend-check:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.action == 'ready_for_review' ||
+          (github.event.action == 'labeled' && github.event.label.name == 'ci:run') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: quick-frontend-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout PR merge ref or manually dispatched ref
+        uses: actions/checkout@v4
+      - name: Setup project Node version and dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build and verify committed workbench artifacts
+        run: |
+          npm ci
+          npm run check
+      - name: Checkout exact PR source head
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact PR head and rebuild workbench
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          npm ci
+          npm run check
+
   # Explicit and isolated: run only when a reviewer adds "ci:browser".
   # Loads the actual FastAPI page in Chromium, but substitutes synthetic OCR
   # API responses. This does NOT prove real PaddleOCR or customer acceptance.
@@ -142,9 +181,14 @@ jobs:
           github.event.label.name == 'ci:browser' }}
     runs-on: ubuntu-latest
     timeout-minutes: 18
+    concurrency:
+      group: browser-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout exact PR source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Setup pinned uv and dependency cache
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
