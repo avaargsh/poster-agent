@@ -365,3 +365,96 @@ def test_old_sqlite_journal_without_model_column_migrates_in_place(
         assert recorded.json()["status"] == "EXECUTED"
         assert recorded.json()["model_profile_sha256"] is None
         assert recorded.json()["release_ready"] is False
+
+
+def test_journaled_ocr_comparison_revalidates_exact_run_without_reexecuting(
+    ocr_paths, product_bytes, monkeypatch
+):
+    calls = []
+    def predict(image, **kwargs):
+        calls.append(image.read_bytes())
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", predict)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        initial = client.post(_url(doc), json=payload, headers=_headers())
+        assert initial.status_code == 201, initial.text
+        assert initial.json()["status"] == "EXECUTED"
+        comparison_url = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        compared = client.get(comparison_url, headers=_headers())
+        assert compared.status_code == 200, compared.text
+        report = compared.json()
+        assert report["operation_id"] == payload["operation_id"]
+        assert report["journal_status"] == "EXECUTED"
+        assert report["source_state"] == "CURRENT_EXECUTED_UNATTESTED"
+        assert report["svg_sha256"] == payload["svg_sha256"]
+        assert report["png_sha256"] == payload["png_sha256"]
+        assert report["declared_consistency"] == "MATCHES_EXPECTED"
+        assert all(item["status"] == "MATCHED" for item in report["field_checks"])
+        assert report["ocr_status"] == "OBSERVATIONS_UNATTESTED"
+        assert report["runtime_attested"] is False
+        assert report["quality_verified"] is False
+        assert report["release_ready"] is False
+        assert compared.headers["cache-control"] == "no-store"
+        assert len(calls) == 1
+        assert client.get(comparison_url).status_code == 401
+        assert client.get(comparison_url, headers=_headers(APPROVER)).status_code == 403
+
+    with TestClient(app) as restarted:
+        read_again = restarted.get(comparison_url, headers=_headers())
+        assert read_again.status_code == 200, read_again.text
+        assert read_again.json()["comparison_fingerprint_sha256"] == report[
+            "comparison_fingerprint_sha256"
+        ]
+        assert len(calls) == 1
+
+        changed = restarted.post(
+            f"/api/designs/{doc}/commands",
+            json={
+                "command_id": "cmd-journaled-ocr-change-0001",
+                "expected_revision": 1,
+                "actor": "user",
+                "operations": [{"op": "set_text", "node_id": "title", "text": "新版标题"}],
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        stale = restarted.get(comparison_url, headers=_headers())
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
+        assert len(calls) == 1
+
+
+def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+
+        with sqlite3.connect(ocr_paths) as connection:
+            connection.execute(
+                "UPDATE design_ocr_runs SET status='UNKNOWN', reason='RECOVERED_AFTER_RESTART'"
+                " WHERE operation_id=?",
+                (payload["operation_id"],),
+            )
+        uncertain = client.get(endpoint, headers=_headers())
+        assert uncertain.status_code == 409, uncertain.text
+        assert uncertain.json()["error"]["code"] == "OCR_RUN_NOT_EXECUTED"
+        assert uncertain.json()["error"]["message"]
+
+        with sqlite3.connect(ocr_paths) as connection:
+            connection.execute(
+                "UPDATE design_ocr_runs SET status='EXECUTED', svg_sha256=?"
+                " WHERE operation_id=?",
+                ("0" * 64, payload["operation_id"]),
+            )
+        wrong_source = client.get(endpoint, headers=_headers())
+        assert wrong_source.status_code == 409, wrong_source.text
+        assert wrong_source.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+        assert client.get(
+            _url(doc) + "/" + "ocr_" + "f" * 32 + "/comparison-preview",
+            headers=_headers(),
+        ).status_code == 404
