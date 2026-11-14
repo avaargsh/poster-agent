@@ -37,6 +37,7 @@ from .errors import (
 from .models import MAX_ASSET_BYTES, DesignDocument
 from .ocr_model_policy import OCRModelProfileError
 from .ocr_observations import OCRObservationRequest, assess_unattested
+from .ocr_run_comparison import compare_journaled_ocr_run
 from .ocr_runs import OCRRunJournal, OCRRunRequest, submit_ocr_run
 from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .rendering import render_svg
@@ -66,6 +67,7 @@ _DOMAIN_STATUS = {
     "APPROVAL_CONFLICT": 409,
     "OCR_TARGET_INCOMPLETE": 409,
     "OCR_SOURCE_MISMATCH": 409,
+    "OCR_RUN_NOT_EXECUTED": 409,
 }
 
 
@@ -612,6 +614,51 @@ def get_design_ocr_execution(
         return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get(
+    "/api/designs/{document_id}/revisions/{revision}/ocr-runs/{operation_id}/comparison-preview"
+)
+def get_design_ocr_run_comparison(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+    operation_id: Annotated[str, Path(pattern=r"^ocr_[0-9a-f]{32}$")],
+):
+    """Recheck completed local journal observations; never certify OCR or release."""
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        if reviewer is None:
+            return _error_response(
+                403, "OCR_REVIEWER_REQUIRED", "named export reviewer policy required"
+            )
+        result = compare_journaled_ocr_run(
+            _manager(request).repository(),
+            document_id,
+            revision,
+            operation_id,
+            principal=reviewer.principal_id,
+            policy=reviewer.policy_digest,
+            model_config_raw=getattr(request.app.state, "design_ocr_model_profile_raw", None),
+        )
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except OCRModelProfileError:
+        return _error_response(
+            503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE", "pinned local OCR model profile unavailable"
+        )
+    except RasterUnavailable:
+        return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
+    except RasterInvalid:
+        return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
     except Exception:
         return _unexpected_error_response()
     return JSONResponse(
