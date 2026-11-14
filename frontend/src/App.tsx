@@ -59,6 +59,10 @@ export function App() {
                     </div>
                 </nav>
                 <div className="sidebar-bottom">
+                    <a href="/canvas" className="docs-link">
+                        <Layers3 size={16} /> 图层画布
+                        <ArrowUpRight size={14} />
+                    </a>
                     <div className="local-indicator">
                         <HardDrive size={16} />
                         <div>

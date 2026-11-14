@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts", "vite.config.ts", "vite.canvas.config.ts"]
 }

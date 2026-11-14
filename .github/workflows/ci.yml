@@ -228,3 +228,6 @@ jobs:
       - name: Exercise versioned square templates in real Chromium
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_square_layout_editor.py
+      - name: Exercise editable canvas and recovery in real Chromium
+        timeout-minutes: 5
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_workspace.py
