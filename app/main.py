@@ -287,6 +287,13 @@ async def home():
     )
 
 
+@app.get("/canvas", response_class=HTMLResponse)
+async def canvas_workspace():
+    return (Path(__file__).resolve().parent / "templates" / "canvas.html").read_text(
+        encoding="utf-8"
+    )
+
+
 @app.get("/health")
 async def health():
     return {"ok": True, "version": "0.3.2"}
