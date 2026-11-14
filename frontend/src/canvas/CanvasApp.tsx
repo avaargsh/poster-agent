@@ -326,7 +326,7 @@ export function CanvasApp() {
     return (
         <div className="canvas-app">
             <header className="canvas-topbar">
-                <a className="canvas-back" href="/">
+                <a className="canvas-back" href="/" aria-label="返回工作台">
                     <ArrowLeft size={17} />
                     <span>工作台</span>
                 </a>

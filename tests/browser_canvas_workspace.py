@@ -354,6 +354,7 @@ def run(origin: str, screenshots: Path):
             saved(16)
 
             page.set_viewport_size({"width": 390, "height": 844})
+            expect(page.get_by_role("link", name="返回工作台", exact=True)).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (
                 "mobile page overflows"
             )
