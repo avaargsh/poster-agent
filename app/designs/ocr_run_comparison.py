@@ -62,9 +62,7 @@ def compare_journaled_ocr_run(
     ):
         raise OCRSourceMismatch()
 
-    target = repository.ocr_target(
-        document_id, revision, required_policy_digest=policy
-    )
+    target = repository.ocr_target(document_id, revision, required_policy_digest=policy)
     for key in (
         "document_id",
         "revision",
@@ -89,17 +87,14 @@ def compare_journaled_ocr_run(
             raise OCRSourceMismatch()
     # Re-read the authoritative head after rendering to reject concurrent
     # edits. This endpoint is still only a read-time consistency check.
-    if repository.ocr_target(
-        document_id, revision, required_policy_digest=policy
-    ) != target:
+    if repository.ocr_target(document_id, revision, required_policy_digest=policy) != target:
         raise OCRSourceMismatch()
 
     try:
         observations = OCRObservationRequest.model_validate(
             {
                 "lines": [
-                    {"text": item["text"], "score": item["score"]}
-                    for item in row["observations"]
+                    {"text": item["text"], "score": item["score"]} for item in row["observations"]
                 ]
             }
         )
