@@ -371,6 +371,7 @@ def test_journaled_ocr_comparison_revalidates_exact_run_without_reexecuting(
     ocr_paths, product_bytes, monkeypatch
 ):
     calls = []
+
     def predict(image, **kwargs):
         calls.append(image.read_bytes())
         return _ocr_lines()
@@ -404,9 +405,10 @@ def test_journaled_ocr_comparison_revalidates_exact_run_without_reexecuting(
     with TestClient(app) as restarted:
         read_again = restarted.get(comparison_url, headers=_headers())
         assert read_again.status_code == 200, read_again.text
-        assert read_again.json()["comparison_fingerprint_sha256"] == report[
-            "comparison_fingerprint_sha256"
-        ]
+        assert (
+            read_again.json()["comparison_fingerprint_sha256"]
+            == report["comparison_fingerprint_sha256"]
+        )
         assert len(calls) == 1
 
         changed = restarted.post(
@@ -447,14 +449,16 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
 
         with sqlite3.connect(ocr_paths) as connection:
             connection.execute(
-                "UPDATE design_ocr_runs SET status='EXECUTED', svg_sha256=?"
-                " WHERE operation_id=?",
+                "UPDATE design_ocr_runs SET status='EXECUTED', svg_sha256=? WHERE operation_id=?",
                 ("0" * 64, payload["operation_id"]),
             )
         wrong_source = client.get(endpoint, headers=_headers())
         assert wrong_source.status_code == 409, wrong_source.text
         assert wrong_source.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
-        assert client.get(
-            _url(doc) + "/" + "ocr_" + "f" * 32 + "/comparison-preview",
-            headers=_headers(),
-        ).status_code == 404
+        assert (
+            client.get(
+                _url(doc) + "/" + "ocr_" + "f" * 32 + "/comparison-preview",
+                headers=_headers(),
+            ).status_code
+            == 404
+        )
