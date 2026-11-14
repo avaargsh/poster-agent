@@ -462,3 +462,32 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
             ).status_code
             == 404
         )
+
+
+def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+
+        weights = ocr_paths.parent / "local-detector" / "weights.bin"
+        original = weights.read_bytes()
+        weights.write_bytes(b"corrupted-local-model")
+        changed_model = client.get(endpoint, headers=_headers())
+        assert changed_model.status_code == 503, changed_model.text
+        assert changed_model.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        weights.write_bytes(original)
+
+        alternate = BytesIO()
+        Image.new("RGB", (1024, 1024), (200, 23, 34)).save(alternate, format="PNG")
+        monkeypatch.setattr(
+            rasterization,
+            "_convert_svg_to_png",
+            lambda svg, width, height: (alternate.getvalue(), "test-raster/1"),
+        )
+        changed_raster = client.get(endpoint, headers=_headers())
+        assert changed_raster.status_code == 409, changed_raster.text
+        assert changed_raster.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
