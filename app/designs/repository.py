@@ -65,6 +65,7 @@ from .models import (
     TextNode,
     format_price_text,
 )
+from .proposals import EditProposalRequest, application_command
 from .rendering import ALLOWED_FORMATS, DesignRenderError, render_svg
 from .reviewer_auth import ReviewerContext
 from .templates import create_template
@@ -73,6 +74,20 @@ from .text_layout import split_text_chunks
 _DOCUMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ASSET_FILE_SUFFIX = ".bin"
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS design_edit_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    base_digest TEXT NOT NULL,
+    candidate_digest TEXT NOT NULL,
+    renderer_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (document_id, request_id),
+    FOREIGN KEY (document_id) REFERENCES designs(document_id)
+);
+
 CREATE TABLE IF NOT EXISTS designs (
     document_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
@@ -1152,11 +1167,7 @@ class DesignRepository:
                     if any(isinstance(op, (Undo, Redo)) for op in batch.operations):
                         raise InvalidCommandError()
                     candidate = self._load_revision(connection, document_id, head_revision)
-                    try:
-                        for operation in batch.operations:
-                            candidate = self._apply_operation(candidate, operation)
-                    except ValidationError:
-                        raise InvalidCommandError() from None
+                    candidate = self._project_edits(candidate, batch.operations)
                     candidate = candidate.model_copy(update={"revision": new_revision})
                     undo_stack.append(head_revision)
                     redo_stack = []
@@ -1222,6 +1233,191 @@ class DesignRepository:
                 )
         except sqlite3.Error:
             raise StorageError() from None
+
+    # --------------------------------------------------------- edit proposals
+
+    @staticmethod
+    def _snapshot_digest(document: DesignDocument) -> str:
+        return hashlib.sha256(
+            _canonical_json(document.model_dump(mode="json")).encode()
+        ).hexdigest()
+
+    def _project_edits(self, document: DesignDocument, operations) -> DesignDocument:
+        try:
+            for operation in operations:
+                document = self._apply_operation(document, operation)
+            return DesignDocument.model_validate(document.model_dump(mode="json"))
+        except ValidationError:
+            raise InvalidCommandError() from None
+
+    def propose_edit(self, document_id: str, request: EditProposalRequest) -> dict:
+        """Store a frozen suggestion without committing a document revision."""
+        if not _valid_document_id(document_id):
+            raise NotFoundError()
+        from .models import RENDERER_VERSION
+
+        raw = _canonical_json(request.model_dump(mode="json"))
+        fingerprint = hashlib.sha256(raw.encode()).hexdigest()
+        try:
+            with self._write_transaction() as connection:
+                existing = connection.execute(
+                    "SELECT * FROM design_edit_proposals WHERE document_id=? AND request_id=?",
+                    (document_id, request.request_id),
+                ).fetchone()
+                if existing is not None:
+                    if existing["fingerprint"] != fingerprint:
+                        raise IdempotencyConflictError()
+                    return self._proposal_view(connection, existing)
+                head = connection.execute(
+                    "SELECT revision FROM heads WHERE document_id=?", (document_id,)
+                ).fetchone()
+                if head is None:
+                    raise NotFoundError()
+                if head["revision"] != request.expected_revision:
+                    raise RevisionConflictError()
+                base = self._load_revision(connection, document_id, head["revision"])
+                candidate = self._project_edits(base, request.operations)
+                self.read_assets(candidate)
+                proposal_id = "prop_" + uuid.uuid4().hex
+                connection.execute(
+                    """INSERT INTO design_edit_proposals
+                       (proposal_id,document_id,request_id,request_json,fingerprint,
+                        base_digest,candidate_digest,renderer_version,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (
+                        proposal_id,
+                        document_id,
+                        request.request_id,
+                        raw,
+                        fingerprint,
+                        self._snapshot_digest(base),
+                        self._snapshot_digest(candidate),
+                        RENDERER_VERSION,
+                        _now(),
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM design_edit_proposals WHERE proposal_id=?", (proposal_id,)
+                ).fetchone()
+                return self._proposal_view(connection, row)
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def _proposal_view(self, connection: sqlite3.Connection, row) -> dict:
+        from .models import RENDERER_VERSION
+
+        try:
+            request = EditProposalRequest.model_validate_json(row["request_json"])
+        except ValidationError:
+            raise StorageError() from None
+        fingerprint = hashlib.sha256(
+            _canonical_json(request.model_dump(mode="json")).encode()
+        ).hexdigest()
+        base = self._load_revision(connection, row["document_id"], request.expected_revision)
+        if (
+            row["fingerprint"] != fingerprint
+            or row["base_digest"] != self._snapshot_digest(base)
+            or row["renderer_version"] != RENDERER_VERSION
+        ):
+            raise IdempotencyConflictError()
+        candidate = self._project_edits(base, request.operations)
+        if row["candidate_digest"] != self._snapshot_digest(candidate):
+            raise IdempotencyConflictError()
+        head = connection.execute(
+            "SELECT revision FROM heads WHERE document_id=?", (row["document_id"],)
+        ).fetchone()
+        batch = application_command(row["proposal_id"], request)
+        receipt = connection.execute(
+            "SELECT fingerprint,result_revision FROM commands WHERE document_id=? AND command_id=?",
+            (row["document_id"], batch.command_id),
+        ).fetchone()
+        if receipt is not None and receipt["fingerprint"] != _fingerprint(batch):
+            raise IdempotencyConflictError()
+        status = (
+            "APPLIED"
+            if receipt is not None
+            else "PENDING"
+            if head["revision"] == request.expected_revision
+            else "STALE"
+        )
+        return {
+            "proposal_id": row["proposal_id"],
+            "document_id": row["document_id"],
+            "request_id": request.request_id,
+            "summary": request.summary,
+            "base_revision": request.expected_revision,
+            "current_revision": head["revision"],
+            "status": status,
+            "applied_revision": receipt["result_revision"] if receipt else None,
+            "operations": request.model_dump(mode="json")["operations"],
+            "candidate_document": candidate.model_dump(mode="json"),
+            "base_document": base.model_dump(mode="json"),
+            "created_at": row["created_at"],
+        }
+
+    def get_edit_proposal(self, document_id: str, proposal_id: str) -> dict:
+        if not _valid_document_id(document_id) or not re.fullmatch(
+            r"prop_[0-9a-f]{32}", proposal_id
+        ):
+            raise NotFoundError()
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN")
+                row = connection.execute(
+                    "SELECT * FROM design_edit_proposals WHERE document_id=? AND proposal_id=?",
+                    (document_id, proposal_id),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError()
+                return self._proposal_view(connection, row)
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def list_edit_proposals(self, document_id: str, limit: int = 20) -> list[dict]:
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise InvalidCommandError()
+        if not _valid_document_id(document_id):
+            raise NotFoundError()
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN")
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM heads WHERE document_id=?", (document_id,)
+                    ).fetchone()
+                    is None
+                ):
+                    raise NotFoundError()
+                rows = connection.execute(
+                    "SELECT * FROM design_edit_proposals WHERE document_id=? ORDER BY created_at DESC,proposal_id DESC LIMIT ?",
+                    (document_id, limit),
+                ).fetchall()
+                return [
+                    {
+                        key: value
+                        for key, value in self._proposal_view(connection, row).items()
+                        if key not in {"candidate_document", "base_document", "operations"}
+                    }
+                    for row in rows
+                ]
+        except sqlite3.Error:
+            raise StorageError() from None
+
+    def apply_edit_proposal(self, document_id: str, proposal_id: str) -> CommandResult:
+        proposal = self.get_edit_proposal(document_id, proposal_id)
+        if proposal["status"] == "STALE":
+            raise RevisionConflictError()
+        request = EditProposalRequest.model_validate(
+            {
+                "request_id": proposal["request_id"],
+                "expected_revision": proposal["base_revision"],
+                "summary": proposal["summary"],
+                "operations": proposal["operations"],
+            }
+        )
+        if proposal["status"] != "APPLIED":
+            self.read_assets(DesignDocument.model_validate(proposal["candidate_document"]))
+        return self.execute(document_id, application_command(proposal_id, request))
 
     # --------------------------------------------------------------- internals
 

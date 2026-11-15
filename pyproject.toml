@@ -22,6 +22,7 @@ dependencies = [
 # The PaddlePaddle runtime is platform-specific and installed explicitly
 # from the vendor CPU index after syncing this extra (see docs/uv-workflow.md).
 ocr = ["paddleocr==3.3.0"]
+mcp = ["mcp>=2.3,<3"]
 
 [dependency-groups]
 dev = [

@@ -13,7 +13,7 @@
 要求 **Python 3.12**（由 uv 根据 `.python-version` 管理）与中文字体；Mac 使用 PingFang，Linux 使用 Noto Sans CJK。先按 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，不需要手动创建/激活 venv。
 
 ```bash
-git clone git@github.com:musuntana/poster-agent.git
+git clone https://github.com/avaargsh/poster-agent.git
 cd poster-agent
 uv python install 3.12
 uv sync --locked
@@ -31,6 +31,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 前端采用 **React 19 + TypeScript + Vite 7 + Tailwind CSS 4**，提供浅色侧栏工作台、独立滚动创作表单、预览缩放及手机布局。构建产物已随仓库保存，运行 Python 服务即可使用；开发与迁移边界见 [React 工作台说明](docs/react-workbench.md)。
 
 **图层画布：** 从侧栏“图层画布”进入，或打开 <http://127.0.0.1:8000/canvas>。上传商品图后，可选择并拖动文字、商品和装饰图层，修改文案、价格、位置与外观，使用锁定、排序、撤销重做和刷新恢复。每次提交通过已有设计命令保存为新版本，属性草稿可在本页图层切换时保留。使用与验证见 [图层画布](docs/canvas-workspace.md)。
+
+**MCP 修改建议：** 安装 `mcp` 可选依赖后，Codex、OpenCode 等宿主可读取设计并提交结构化修改建议。用户在画布预览差异、显式应用后生成新版本，过期建议会被版本检查拒绝。配置与工具契约见 [MCP 修改建议](docs/mcp-edit-proposals.md)。
 
 工作台按任务分为四个入口，单张创作与批量处理同级：
 

@@ -1,7 +1,12 @@
 """Contracts for explicit CI lanes and the revisions they validate."""
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,3 +59,38 @@ def test_frontend_changes_receive_merge_and_source_build_checks():
         commands = "\n".join(step.get("run", "") for step in steps[start:end])
         assert "npm ci" in commands
         assert "npm run check" in commands
+
+
+@pytest.mark.parametrize("has_mcp", [False, True])
+def test_locked_install_supports_source_heads_before_the_mcp_extra(tmp_path, has_mcp):
+    if not shutil.which("bash"):
+        pytest.skip("CI installer uses bash")
+    project = '[project]\nname="ci-fixture"\nversion="0.0.0"\n'
+    if has_mcp:
+        project += "[project.optional-dependencies]\nmcp=[]\n"
+    (tmp_path / "pyproject.toml").write_text(project)
+    binary = tmp_path / "uv"
+    binary.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_TEST_LOG"\n')
+    binary.chmod(0o700)
+    (tmp_path / "python3").symlink_to(sys.executable)
+    steps = workflow("ci.yml")["jobs"]["python-tests"]["steps"]
+    script = next(
+        step["run"]
+        for step in steps
+        if step["name"] == "Verify lock and install base + dev environment"
+    )
+    log = tmp_path / "uv.log"
+    subprocess.run(
+        ["bash", "-e", "-c", script],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "UV_TEST_LOG": str(log),
+        },
+        check=True,
+    )
+    assert log.read_text().splitlines() == [
+        "lock --check",
+        "sync --locked" + (" --extra mcp" if has_mcp else ""),
+    ]

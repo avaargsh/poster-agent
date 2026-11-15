@@ -23,6 +23,9 @@ import type { Design, EditRequest, Operation } from './api';
 import { Inspector } from './Inspector';
 import { Stage } from './Stage';
 import type { InspectorDraft } from './inspectorDraft';
+import { ProposalPanel } from './ProposalPanel';
+import type { ProposalView } from './ProposalPanel';
+import { applyProposal } from './proposals';
 
 interface Session {
     design: Design;
@@ -36,10 +39,9 @@ interface Recent {
     id: string;
     title: string;
 }
-interface FailedEdit {
-    id: string;
-    request: EditRequest;
-}
+type FailedEdit =
+    | { kind: 'command'; id: string; request: EditRequest }
+    | { kind: 'proposal'; id: string; proposalId: string };
 const RECENT_KEY = 'poster.canvas.recent.v1';
 
 function recentDesigns(): Recent[] {
@@ -77,6 +79,7 @@ function describe(error: unknown): Notice {
 
 function setDocumentUrl(id: string) {
     const url = new URL(location.href);
+    if (url.searchParams.get('document') !== id) url.searchParams.delete('proposal');
     url.searchParams.set('document', id);
     history.replaceState(null, '', url);
 }
@@ -90,6 +93,10 @@ export function CanvasApp() {
     const [recent, setRecent] = useState(recentDesigns);
     const [openId, setOpenId] = useState('');
     const [storageNotice, setStorageNotice] = useState('');
+    const [showProposals, setShowProposals] = useState(() =>
+        new URL(location.href).searchParams.has('proposal'),
+    );
+    const [proposalView, setProposalView] = useState<ProposalView | null>(null);
     const [inspectorEpoch, setInspectorEpoch] = useState(0);
     const [dirtyNodes, setDirtyNodes] = useState<Record<string, boolean>>({});
     const drafts = useRef(new Map<string, InspectorDraft>());
@@ -143,6 +150,7 @@ export function CanvasApp() {
     }
 
     function adopt(design: Design, svg: string | null) {
+        setProposalView(null);
         const sameProject = active.current?.design.document_id === design.document_id;
         const next = { design, svg };
         active.current = next;
@@ -155,6 +163,7 @@ export function CanvasApp() {
                   null),
         );
         record(design);
+        if (!sameProject) setShowProposals(new URL(location.href).searchParams.has('proposal'));
     }
 
     const open = useCallback(async (id: string) => {
@@ -247,10 +256,11 @@ export function CanvasApp() {
         }
     }
 
-    async function submit(operations: Operation[], retry?: FailedEdit): Promise<boolean> {
-        if (!active.current || writing.current || (receipt.current && !retry)) return false;
+    async function submit(operations: Operation[]): Promise<boolean> {
+        if (!active.current || writing.current || receipt.current) return false;
         const design = active.current.design;
-        const attempt: FailedEdit = retry ?? {
+        return write({
+            kind: 'command',
             id: design.document_id,
             request: {
                 command_id: crypto.randomUUID(),
@@ -258,7 +268,16 @@ export function CanvasApp() {
                 actor: 'user',
                 operations,
             },
-        };
+        });
+    }
+
+    async function applySuggestion(proposalId: string): Promise<boolean> {
+        if (!active.current || writing.current || receipt.current) return false;
+        return write({ kind: 'proposal', id: active.current.design.document_id, proposalId });
+    }
+
+    async function write(attempt: FailedEdit): Promise<boolean> {
+        if (writing.current || active.current?.design.document_id !== attempt.id) return false;
         writing.current = true;
         ++loadSequence.current;
         loadController.current?.abort();
@@ -266,10 +285,14 @@ export function CanvasApp() {
         setNotice(null);
         let acknowledged = false;
         try {
-            const updated = await editDesign(attempt.id, attempt.request);
+            const updated =
+                attempt.kind === 'command'
+                    ? await editDesign(attempt.id, attempt.request)
+                    : await applyProposal(attempt.id, attempt.proposalId);
             acknowledged = true;
             receipt.current = null;
             setFailedEdit(null);
+            if (attempt.kind === 'proposal') resetDrafts();
             adopt(updated, null);
             try {
                 adopt(updated, await readPreview(updated));
@@ -321,6 +344,7 @@ export function CanvasApp() {
     }
 
     const design = session?.design;
+    const displayed = proposalView?.proposal.candidate ?? design;
     const node = design?.nodes.find((item) => item.node_id === selected);
     const writeDisabled = Boolean(busy || failedEdit);
     return (
@@ -344,14 +368,26 @@ export function CanvasApp() {
                             : failedEdit
                               ? '保存待核对'
                               : design
-                                ? `${hasDraft ? '有未保存的属性修改' : '已保存'} · 版本 ${design.revision}`
+                                ? proposalView
+                                    ? `建议预览 · 基于版本 ${proposalView.proposal.base_revision}`
+                                    : `${hasDraft ? '有未保存的属性修改' : '已保存'} · 版本 ${design.revision}`
                                 : '准备创作'}
                 </div>
                 <div className="canvas-history-actions">
                     <button
                         type="button"
+                        disabled={!design || Boolean(busy)}
+                        onClick={() => {
+                            setShowProposals((value) => !value);
+                            setProposalView(null);
+                        }}
+                    >
+                        修改建议
+                    </button>
+                    <button
+                        type="button"
                         aria-label="撤销修改"
-                        disabled={!design || writeDisabled}
+                        disabled={!design || writeDisabled || Boolean(proposalView)}
                         onClick={() => void submit([{ op: 'undo' }])}
                     >
                         <Undo2 size={17} />
@@ -360,7 +396,7 @@ export function CanvasApp() {
                     <button
                         type="button"
                         aria-label="重做修改"
-                        disabled={!design || writeDisabled}
+                        disabled={!design || writeDisabled || Boolean(proposalView)}
                         onClick={() => void submit([{ op: 'redo' }])}
                     >
                         <Redo2 size={17} />
@@ -375,7 +411,7 @@ export function CanvasApp() {
                         <button
                             type="button"
                             disabled={Boolean(busy)}
-                            onClick={() => void submit([], failedEdit)}
+                            onClick={() => void write(failedEdit)}
                         >
                             重试原保存请求
                         </button>
@@ -504,7 +540,7 @@ export function CanvasApp() {
                             <h2>
                                 图层<span>{design.nodes.length}</span>
                             </h2>
-                            {[...design.nodes].reverse().map((item) => (
+                            {[...(displayed?.nodes ?? design.nodes)].reverse().map((item) => (
                                 <button
                                     key={item.node_id}
                                     type="button"
@@ -546,10 +582,11 @@ export function CanvasApp() {
                 </aside>
                 {session ? (
                     <Stage
-                        design={session.design}
-                        svg={session.svg}
+                        design={displayed ?? session.design}
+                        svg={proposalView?.svg ?? session.svg}
                         selected={selected}
-                        busy={writeDisabled}
+                        busy={Boolean(busy)}
+                        readOnly={Boolean(proposalView || failedEdit)}
                         onSelect={setSelected}
                         onEdit={submit}
                     />
@@ -562,7 +599,23 @@ export function CanvasApp() {
                         <p>上传图片，填写标题和活动价，即可创建可编辑的海报。</p>
                     </section>
                 )}
-                {design && node ? (
+                {design && showProposals ? (
+                    <ProposalPanel
+                        key={design.document_id}
+                        design={design}
+                        busy={writeDisabled}
+                        hasDraft={hasDraft}
+                        onPreview={setProposalView}
+                        onApply={applySuggestion}
+                        onClose={() => {
+                            setShowProposals(false);
+                            setProposalView(null);
+                            const url = new URL(location.href);
+                            url.searchParams.delete('proposal');
+                            history.replaceState(null, '', url);
+                        }}
+                    />
+                ) : design && node ? (
                     <Inspector
                         key={`${design.document_id}:${inspectorEpoch}:${node.node_id}`}
                         design={design}
