@@ -18,7 +18,7 @@ import os
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Path, Request, UploadFile
+from fastapi import APIRouter, File, Form, Path, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,6 +39,7 @@ from .ocr_model_policy import OCRModelProfileError
 from .ocr_observations import OCRObservationRequest, assess_unattested
 from .ocr_run_comparison import compare_journaled_ocr_run
 from .ocr_runs import OCRRunJournal, OCRRunRequest, submit_ocr_run
+from .proposals import EditProposalRequest
 from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .rendering import render_svg
 from .reviewer_auth import ReviewerAccessError, reviewer_for_request
@@ -665,3 +666,84 @@ def get_design_ocr_run_comparison(
         content=result,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
+
+
+def _proposal_links(proposal: dict) -> dict:
+    document_id, proposal_id = proposal["document_id"], proposal["proposal_id"]
+    return {
+        **proposal,
+        "preview_url": f"/api/designs/{document_id}/proposals/{proposal_id}/preview.svg",
+        "confirmation_url": f"/canvas?document={document_id}&proposal={proposal_id}",
+    }
+
+
+@router.post("/api/designs/{document_id}/proposals", status_code=201)
+def propose_design_edit(document_id: str, payload: EditProposalRequest, request: Request):
+    try:
+        return _proposal_links(_manager(request).repository().propose_edit(document_id, payload))
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
+@router.get("/api/designs/{document_id}/proposals")
+def list_design_edit_proposals(
+    document_id: str, request: Request, limit: Annotated[int, Query(ge=1, le=50)] = 20
+):
+    try:
+        return {
+            "proposals": [
+                _proposal_links(item)
+                for item in _manager(request).repository().list_edit_proposals(document_id, limit)
+            ]
+        }
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
+@router.get("/api/designs/{document_id}/proposals/{proposal_id}")
+def get_design_edit_proposal(document_id: str, proposal_id: str, request: Request):
+    try:
+        return _proposal_links(
+            _manager(request).repository().get_edit_proposal(document_id, proposal_id)
+        )
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
+@router.get("/api/designs/{document_id}/proposals/{proposal_id}/preview.svg")
+def preview_design_edit_proposal(document_id: str, proposal_id: str, request: Request):
+    try:
+        repository = _manager(request).repository()
+        proposal = repository.get_edit_proposal(document_id, proposal_id)
+        candidate = DesignDocument.model_validate(proposal["candidate_document"])
+        svg = render_svg(candidate, assets=repository.read_assets(candidate))
+        return Response(
+            svg,
+            media_type="image/svg+xml",
+            headers={
+                "Content-Security-Policy": _PREVIEW_CSP,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+            },
+        )
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
+@router.post("/api/designs/{document_id}/proposals/{proposal_id}/apply")
+def apply_design_edit_proposal(document_id: str, proposal_id: str, request: Request):
+    try:
+        result = _manager(request).repository().apply_edit_proposal(document_id, proposal_id)
+        return {**result.model_dump(mode="json"), "preview_url": _preview_url(result.document)}
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()

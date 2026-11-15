@@ -21,6 +21,7 @@ export function Stage({
     svg,
     selected,
     busy,
+    readOnly = false,
     onSelect,
     onEdit,
 }: {
@@ -28,6 +29,7 @@ export function Stage({
     svg: string | null;
     selected: string | null;
     busy: boolean;
+    readOnly?: boolean;
     onSelect: (id: string) => void;
     onEdit: (operations: Operation[]) => Promise<boolean>;
 }) {
@@ -84,7 +86,7 @@ export function Stage({
     }
 
     function down(event: PointerEvent<HTMLDivElement>) {
-        if (busy || event.button !== 0 || !(event.target instanceof Element)) return;
+        if (busy || readOnly || event.button !== 0 || !(event.target instanceof Element)) return;
         const id = event.target.closest('[data-node-id]')?.getAttribute('data-node-id');
         const target = design.nodes.find((item) => item.node_id === id);
         if (!target) return;
@@ -139,7 +141,7 @@ export function Stage({
             cancel();
             return;
         }
-        if (!node || node.locked || busy || drag.current) return;
+        if (!node || node.locked || busy || readOnly || drag.current) return;
         const step = event.shiftKey ? 10 : 1;
         let x = node.x,
             y = node.y;
@@ -181,7 +183,7 @@ export function Stage({
                 >
                     <div
                         ref={surface}
-                        className={`canvas-surface${busy ? ' is-busy' : ''}`}
+                        className={`canvas-surface${busy ? ' is-busy' : ''}${readOnly ? ' is-readonly' : ''}`}
                         tabIndex={0}
                         role="region"
                         aria-label="海报画布"

@@ -340,6 +340,42 @@ textarea {
 .canvas-surface.is-busy {
     cursor: progress;
 }
+.canvas-surface.is-readonly {
+    cursor: default;
+    touch-action: pan-y;
+}
+.canvas-proposals select {
+    width: 100%;
+    min-width: 0;
+    padding: 9px;
+    border: 1px solid #dce1eb;
+    border-radius: 6px;
+    background: #fff;
+    color: #25324b;
+    font: inherit;
+    font-size: 11px;
+}
+.canvas-proposal-summary {
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+.canvas-proposal-changes {
+    padding-left: 18px;
+    margin: 20px 0;
+    max-height: 320px;
+    overflow: auto;
+    color: #657189;
+    font-size: 12px;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+}
+.canvas-proposal-changes li {
+    margin-bottom: 9px;
+}
+.canvas-proposal-preview-actions {
+    display: flex;
+    gap: 8px;
+}
 .canvas-surface > svg {
     display: block;
     width: 100%;

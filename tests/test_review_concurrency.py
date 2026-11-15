@@ -9,7 +9,7 @@ from threading import Barrier, Event
 
 from app import brief_request_store
 from app.brief_compiler import BriefRequest, compile_brief
-from app.review_service import ReviewConflict, create_run, decide_run, get_run
+from app.review_service import ReviewConflict, create_run, decide_run, get_run, open_graph
 from app.schemas import PosterSpec
 from app.workflows import review_graph
 
@@ -31,6 +31,22 @@ def _configure(monkeypatch, tmp_path):
 
 def _qwen_request() -> BriefRequest:
     return BriefRequest(brief=BRIEF, compiler="qwen")
+
+
+def test_first_checkpoint_setup_overlaps_admission_transaction(tmp_path, monkeypatch):
+    _configure(monkeypatch, tmp_path)
+
+    def initialize_graph():
+        with open_graph() as graph:
+            return graph.get_state({"configurable": {"thread_id": "fresh"}}).values
+
+    with brief_request_store._connect() as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        connection.execute("BEGIN")
+        connection.execute("SELECT * FROM brief_request_claims").fetchall()
+        # A live admission read must coexist with the first graph setup.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(initialize_graph).result(timeout=4) == {}
 
 
 def test_slow_qwen_does_not_block_other_run_reads_or_approval(tmp_path, monkeypatch):

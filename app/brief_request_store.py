@@ -12,12 +12,16 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
 _VALID_KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+# Both admission records and graph checkpoints share this database. Establish
+# WAL before either component can start a transaction on a fresh file.
+CHECKPOINT_SETUP_GUARD = threading.Lock()
 
 
 class InvalidReviewRequestKey(ValueError):
@@ -58,16 +62,18 @@ def _connect() -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=10000")
     try:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS brief_request_claims (
+        with CHECKPOINT_SETUP_GUARD:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS brief_request_claims (
                 idempotency_key TEXT PRIMARY KEY,
                 request_hash TEXT NOT NULL,
                 run_id TEXT NOT NULL UNIQUE,
                 status TEXT NOT NULL CHECK(status IN ('RUNNING','COMPLETED','UNKNOWN')),
                 started_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            )"""
-        )
+                )"""
+            )
         with conn:
             yield conn
     finally:

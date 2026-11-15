@@ -80,17 +80,22 @@ jobs:
       - name: Verify lock and install base + dev environment
         run: |
           uv lock --check
-          uv sync --locked
+          POSTER_HAS_MCP=$(python3 -c 'import tomllib; from pathlib import Path; print("yes" if "mcp" in tomllib.loads(Path("pyproject.toml").read_text()).get("project", {}).get("optional-dependencies", {}) else "no")')
+          if [ "$POSTER_HAS_MCP" = yes ]; then
+            uv sync --locked --extra mcp
+          else
+            uv sync --locked
+          fi
       - name: Check Python formatting
-        run: uv run --locked ruff format --check app tests scripts evals
+        run: uv run --no-sync ruff format --check app tests scripts evals
       - name: Ruff syntax, unused-name and import-order checks
-        run: uv run --locked ruff check app tests scripts evals
+        run: uv run --no-sync ruff check app tests scripts evals
       - name: Check tracked secrets and local customer data (no network)
-        run: uv run --locked python -m scripts.check_repository_readiness
+        run: uv run --no-sync python -m scripts.check_repository_readiness
       - name: Validate Python syntax
-        run: uv run --locked python -m compileall -q app tests scripts evals
+        run: uv run --no-sync python -m compileall -q app tests scripts evals
       - name: Run pytest (no external model calls)
-        run: uv run --locked python -m pytest -q
+        run: uv run --no-sync python -m pytest -q
 
       # Heavy verification is EXPLICIT only: never run on PR or each push.
       - name: Replay synthetic OCR benchmark (no OCR model)
@@ -126,12 +131,17 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
           uv lock --check
-          uv sync --locked
-          uv run --locked ruff format --check app tests scripts evals
-          uv run --locked ruff check app tests scripts evals
-          uv run --locked python -m scripts.check_repository_readiness
-          uv run --locked python -m compileall -q app tests scripts evals
-          uv run --locked python -m pytest -q
+          POSTER_HAS_MCP=$(python3 -c 'import tomllib; from pathlib import Path; print("yes" if "mcp" in tomllib.loads(Path("pyproject.toml").read_text()).get("project", {}).get("optional-dependencies", {}) else "no")')
+          if [ "$POSTER_HAS_MCP" = yes ]; then
+            uv sync --locked --extra mcp
+          else
+            uv sync --locked
+          fi
+          uv run --no-sync ruff format --check app tests scripts evals
+          uv run --no-sync ruff check app tests scripts evals
+          uv run --no-sync python -m scripts.check_repository_readiness
+          uv run --no-sync python -m compileall -q app tests scripts evals
+          uv run --no-sync python -m pytest -q
 
   frontend-check:
     if: >-
@@ -199,7 +209,12 @@ jobs:
       - name: Install pinned Python and locked dependencies
         run: |
           uv python install 3.12
-          uv sync --locked
+          POSTER_HAS_MCP=$(python3 -c 'import tomllib; from pathlib import Path; print("yes" if "mcp" in tomllib.loads(Path("pyproject.toml").read_text()).get("project", {}).get("optional-dependencies", {}) else "no")')
+          if [ "$POSTER_HAS_MCP" = yes ]; then
+            uv sync --locked --extra mcp
+          else
+            uv sync --locked
+          fi
       - name: Reuse hosted Chrome, fall back to explicit Chromium install
         run: |
           if command -v google-chrome >/dev/null || command -v google-chrome-stable >/dev/null; then
@@ -231,3 +246,7 @@ jobs:
       - name: Exercise editable canvas and recovery in real Chromium
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_workspace.py
+      - name: Exercise MCP suggestion and explicit canvas application
+        if: ${{ hashFiles('tests/browser_edit_proposals.py') != '' }}
+        timeout-minutes: 5
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_edit_proposals.py

@@ -196,7 +196,7 @@ async function checked(response: Response): Promise<Response> {
     );
 }
 
-async function request<T>(
+export async function request<T>(
     path: string,
     init: RequestInit,
     read: (response: Response) => Promise<T>,
@@ -248,7 +248,11 @@ export async function editDesign(id: string, edit: EditRequest): Promise<Design>
 }
 
 export async function readPreview(design: Design, signal?: AbortSignal): Promise<string> {
-    const { type, source } = await request(previewUrl(design), { signal }, async (response) => ({
+    return readSvg(previewUrl(design), signal);
+}
+
+export async function readSvg(path: string, signal?: AbortSignal): Promise<string> {
+    const { type, source } = await request(path, { signal }, async (response) => ({
         type: response.headers.get('content-type'),
         source: await response.text(),
     }));
