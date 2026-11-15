@@ -154,3 +154,29 @@ def test_codex_invocation_limits_tools_without_persistent_configuration():
             "view_image",
         ]
     )
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["extra_before", "extra_between", "extra_after", "failed_extra", "repeated_completion", "early_completion"],
+)
+def test_codex_trace_rejects_unexpected_calls_or_ambiguous_completion(fixture, mutation):
+    before, proposal = fixture
+    events = trace(before, proposal)
+    rogue = deepcopy(events[0])
+    rogue["item"]["tool"] = "unapproved_tool"
+    if mutation == "extra_before":
+        events.insert(0, rogue)
+    elif mutation == "extra_between":
+        events.insert(1, rogue)
+    elif mutation == "extra_after":
+        events.insert(3, rogue)
+    elif mutation == "failed_extra":
+        rogue["item"]["status"] = "failed"
+        events.insert(1, rogue)
+    elif mutation == "repeated_completion":
+        events.append({"type": "turn.completed"})
+    else:
+        events.insert(0, {"type": "turn.completed"})
+        events.pop()
+    with pytest.raises(ValueError):
+        verify_tool_trace(events, before, proposal["proposal_id"], "acceptance-test-001")
