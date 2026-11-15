@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 平台与配置入口 | [根 README](../README.md) | 当前运行、限制、模块、下一步 |
 | Visual Critic 只读预览（实验性） | [design-visual-critic-shadow.md](design-visual-critic-shadow.md) | 已审批图像哈希绑定、视觉缺陷结构化提示，绝不授权修复或发布 |
+| 本地 VLM Shadow 执行（实验性） | [design-vlm-shadow-runs.md](design-vlm-shadow-runs.md) | 显式 Ollama 推理、模型摘要锁定、SQLite 操作记录与 UNKNOWN 恢复；不自动修复 |
 | 本地启动、单 Worker 与网络暴露边界 | [local-only-deployment.md](local-only-deployment.md) | 回环 IP 启动、执行账本、LangGraph 检查点及海报目录的 POSIX 独占锁、禁止非本机暴露 |
 | 文件持久化与崩溃恢复 | [storage-recovery.md](storage-recovery.md) | 原子文件写入、海报目录分阶段发布、版本提交与 UNKNOWN 边界 |
 | uv 开发环境与锁依赖 | [uv-workflow.md](uv-workflow.md) | Python 3.12 / pyproject.toml / uv.lock、开发组、按需 OCR |

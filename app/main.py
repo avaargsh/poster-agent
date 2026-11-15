@@ -81,6 +81,11 @@ async def lifespan(app: FastAPI):
         app.state.design_ocr_model_profile_raw = os.environ.get(
             "POSTER_DESIGN_OCR_MODEL_CONFIG_JSON"
         )
+        # Never turn on model execution merely by configuring its name.
+        app.state.design_vlm_runs_enabled = os.environ.get("POSTER_DESIGN_VLM_RUNS_ENABLED") == "1"
+        app.state.design_vlm_model_profile_raw = os.environ.get(
+            "POSTER_DESIGN_VLM_MODEL_CONFIG_JSON"
+        )
         app.state.design_manager = design_manager
         try:
             yield
@@ -90,6 +95,8 @@ async def lifespan(app: FastAPI):
             app.state.design_reviewer_policy_raw = None
             app.state.design_ocr_runs_enabled = False
             app.state.design_ocr_model_profile_raw = None
+            app.state.design_vlm_runs_enabled = False
+            app.state.design_vlm_model_profile_raw = None
 
 
 app = FastAPI(title="Poster Agent M3c", version="0.3.2", lifespan=lifespan)
