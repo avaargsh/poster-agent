@@ -106,11 +106,18 @@ def test_real_stdio_tools_create_only_a_draft_and_return_confirmation_url(
         async with sdk.Client(parameters, mode=mode, read_timeout_seconds=25) as client:
             tools = (await client.list_tools()).tools
             assert {tool.name for tool in tools} == {
+                "list_designs",
                 "read_design",
                 "propose_design_edit",
                 "read_edit_proposal",
             }
             assert next(t for t in tools if t.name == "read_design").annotations.read_only_hint
+            listed = await client.call_tool("list_designs", {"limit": 1})
+            assert not listed.is_error, listed
+            item = listed.structured_content["designs"][0]
+            assert item["document_id"] == document_id
+            assert item["canvas_url"].startswith(str(backend.base_url).rstrip("/") + "/canvas?")
+            assert (await client.call_tool("list_designs", {"limit": 51})).is_error
             read = await client.call_tool("read_design", {"document_id": document_id})
             assert not read.is_error
             assert read.structured_content["document"]["revision"] == 1

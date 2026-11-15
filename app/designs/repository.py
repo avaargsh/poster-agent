@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS designs (
     document_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS designs_created_order ON designs(created_at DESC, document_id DESC);
 
 CREATE TABLE IF NOT EXISTS revisions (
     document_id TEXT NOT NULL,
@@ -526,6 +527,54 @@ class DesignRepository:
             raise StorageError() from None
 
         return document
+
+    def list_designs(self, limit: int = 20, cursor: str | None = None) -> dict:
+        """Read a bounded page of current summaries in stable creation order."""
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise InvalidCommandError("limit must be between 1 and 50")
+        if cursor is not None and not _valid_document_id(cursor):
+            raise InvalidCommandError("invalid design cursor")
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN")
+                parameters: list[object] = []
+                boundary = ""
+                if cursor is not None:
+                    anchor = connection.execute(
+                        "SELECT created_at FROM designs WHERE document_id=?", (cursor,)
+                    ).fetchone()
+                    if anchor is None:
+                        raise InvalidCommandError("unknown design cursor")
+                    boundary = "WHERE (d.created_at, d.document_id) < (?, ?)"
+                    parameters.extend([anchor["created_at"], cursor])
+                rows = connection.execute(
+                    f"""SELECT d.document_id, d.created_at, r.created_at AS updated_at,
+                               r.document_json
+                        FROM designs d JOIN heads h ON h.document_id=d.document_id
+                        JOIN revisions r ON r.document_id=h.document_id AND r.revision=h.revision
+                        {boundary}
+                        ORDER BY d.created_at DESC, d.document_id DESC LIMIT ?""",
+                    [*parameters, limit + 1],
+                ).fetchall()
+                items = []
+                for row in rows[:limit]:
+                    document = DesignDocument.model_validate_json(row["document_json"])
+                    title = next(node for node in document.nodes if node.role == "title")
+                    items.append(
+                        {
+                            "document_id": document.document_id,
+                            "revision": document.revision,
+                            "title": "".join(line.text for line in title.lines),
+                            "created_at": row["created_at"],
+                            "updated_at": row["updated_at"],
+                        }
+                    )
+                return {
+                    "designs": items,
+                    "next_cursor": items[-1]["document_id"] if len(rows) > limit else None,
+                }
+        except (sqlite3.Error, ValidationError, StopIteration, AttributeError):
+            raise StorageError() from None
 
     # --------------------------------------------------------------------- get
 

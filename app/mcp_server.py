@@ -6,9 +6,11 @@ import argparse
 import ipaddress
 import json
 import re
+from typing import Annotated
 from urllib.parse import urlsplit
 
 import httpx
+from pydantic import Field
 
 from app.designs.models import DocumentId
 from app.designs.proposals import EditProposalRequest
@@ -75,6 +77,25 @@ def build_server(base_url: str):
             raise ToolError(
                 "BACKEND_UNAVAILABLE: start the local Poster Agent HTTP service"
             ) from None
+
+    @server.tool(
+        structured_output=True,
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
+    )
+    async def list_designs(
+        limit: Annotated[int, Field(ge=1, le=50)] = 20,
+        cursor: DocumentId | None = None,
+    ) -> dict[str, object]:
+        """Discover existing local designs in creation order. Use next_cursor to read another page, then read_design for current layers before editing."""
+        query = httpx.QueryParams({"limit": limit})
+        if cursor is not None:
+            query = query.set("cursor", cursor)
+        result = await call("GET", f"/api/designs?{query}")
+        for item in result["designs"]:
+            item["canvas_url"] = base_url + item["canvas_url"]
+        return result
 
     @server.tool(
         structured_output=True,
