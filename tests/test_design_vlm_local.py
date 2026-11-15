@@ -74,13 +74,14 @@ def test_model_identity_must_match_exact_digest(monkeypatch, listing):
 
 
 def test_redirects_oversize_and_claimed_model_mismatch_fail_closed(monkeypatch):
-    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(302, headers={"location": "https://example.org"}))
+    _install_httpx_transport(
+        monkeypatch,
+        lambda request: httpx.Response(302, headers={"location": "https://example.org"}),
+    )
     with pytest.raises(local.VLMProviderUnavailable):
         local.verify_ollama_model(_profile())
 
-    _install_httpx_transport(
-        monkeypatch, lambda request: httpx.Response(200, content=b"x" * 66000)
-    )
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, content=b"x" * 66000))
     with pytest.raises(local.VLMProviderUnavailable):
         local.verify_ollama_model(_profile())
 
