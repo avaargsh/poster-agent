@@ -54,4 +54,4 @@ uv run --locked python -m pytest -q
 
 Tests use a synthetic PNG and mocked local Ollama transport. They prove the integration contract and fail-closed outcomes, **not** actual model inference or predictive accuracy. A pinned local model and at least 20 independently labeled authorized SKUs remain future manual acceptance gates.
 
-Next: shadow evaluation against human labels (false positives, latency, per-category sensitivity), then human-confirmed, version-bound repair proposals and independent OCR/brand-rule rechecks. Neither stage is implemented by this PR.
+Offline operator-only shadow comparison now has a separate [calibration tool and frozen CSV contract](design-vlm-shadow-calibration.md). It does not attest a real model run or replace independent human acceptance. Next: a genuinely authorized, independently adjudicated cohort followed by human-confirmed, version-bound repair proposals and independent OCR/brand-rule rechecks.
