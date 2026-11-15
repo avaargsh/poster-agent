@@ -170,9 +170,7 @@ def test_default_disabled_named_exporter_and_validated_source(
         url = _url(doc)
         assert client.post(url, json=payload).status_code == 401
         assert client.post(url, json=payload, headers=_headers(APPROVER)).status_code == 403
-        wrong = client.post(
-            url, json={**payload, "svg_sha256": "f" * 64}, headers=_headers()
-        )
+        wrong = client.post(url, json={**payload, "svg_sha256": "f" * 64}, headers=_headers())
         assert wrong.status_code == 409
         assert wrong.json()["error"]["code"] == "VISUAL_SOURCE_MISMATCH"
         assert calls == []
@@ -236,17 +234,13 @@ def test_abandoned_executing_journal_recovers_unknown_without_retry(
                 (payload["operation_id"],),
             )
     with TestClient(app) as restarted:
-        recovered = restarted.get(
-            _url(doc) + "/" + payload["operation_id"], headers=_headers()
-        )
+        recovered = restarted.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
         assert recovered.status_code == 200
         assert recovered.json()["status"] == "UNKNOWN"
         assert recovered.json()["reason"] == "RECOVERED_AFTER_RESTART"
 
 
-def test_inflight_revision_change_quarantines_results(
-    local_vlm, product_bytes, monkeypatch
-):
+def test_inflight_revision_change_quarantines_results(local_vlm, product_bytes, monkeypatch):
     monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
     with TestClient(app) as client:
         doc, payload = _prepare(client, product_bytes)
