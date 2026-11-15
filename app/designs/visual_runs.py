@@ -22,8 +22,6 @@ from .rasterization import rasterize_svg
 from .repository import DesignRepository, _now
 from .visual_critic import VisualSourceMismatch
 from .vlm_local import (
-    VLMModelProfileError,
-    VLMProviderUnavailable,
     inspect_approved_png,
     load_vlm_profile,
     verify_ollama_model,
