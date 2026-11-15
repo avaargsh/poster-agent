@@ -100,18 +100,30 @@ def verify_candidate(before: dict, proposal: dict, current: dict) -> None:
 def verify_tool_trace(
     events: list[dict], before: dict, proposal_id: str, request_id: str
 ) -> list[str]:
-    if not any(event.get("type") == "turn.completed" for event in events) or any(
+    completed = [
+        index for index, event in enumerate(events) if event.get("type") == "turn.completed"
+    ]
+    if len(completed) != 1 or any(
         event.get("type") in {"turn.failed", "error"} for event in events
     ):
-        raise ValueError("Codex did not complete a successful turn")
-    calls = iter(
-        event["item"]
-        for event in events
+        raise ValueError("Codex did not complete exactly one successful turn")
+    calls = [
+        (index, event["item"])
+        for index, event in enumerate(events)
         if event.get("type") == "item.completed"
-        and event.get("item", {}).get("type") == "mcp_tool_call"
-    )
-    for tool in TOOLS:
-        call = next((item for item in calls if item.get("tool") == tool), None)
+        and isinstance(event.get("item"), dict)
+        and event["item"].get("type") == "mcp_tool_call"
+    ]
+    # The account acceptance is not a generic coding task: exactly these
+    # three approved MCP calls must occur, in order. A successful subsequence
+    # among additional calls could conceal an out-of-scope side effect.
+    if (
+        len(calls) != len(TOOLS)
+        or completed[0] <= calls[-1][0]
+        or [call.get("tool") for _, call in calls] != TOOLS
+    ):
+        raise ValueError("unexpected MCP call or ambiguous completion order")
+    for (_, call), tool in zip(calls, TOOLS, strict=True):
         if (
             call is None
             or call.get("server") != "poster_agent"
