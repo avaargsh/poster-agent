@@ -40,7 +40,7 @@ _SYSTEM_PROMPT = (
     "Never assert OCR correctness, SKU fidelity, product identity, pricing, legal compliance, "
     "permissions, acceptance, repair authorization or release readiness. "
     "Do not rewrite text or suggest changes to prices, SKU, logo or factual claims. "
-    "If uncertain or nothing stands out, return {\"findings\":[]}."
+    'If uncertain or nothing stands out, return {"findings":[]}.'
 )
 
 
