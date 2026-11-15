@@ -155,9 +155,17 @@ def test_codex_invocation_limits_tools_without_persistent_configuration():
         ]
     )
 
+
 @pytest.mark.parametrize(
     "mutation",
-    ["extra_before", "extra_between", "extra_after", "failed_extra", "repeated_completion", "early_completion"],
+    [
+        "extra_before",
+        "extra_between",
+        "extra_after",
+        "failed_extra",
+        "repeated_completion",
+        "early_completion",
+    ],
 )
 def test_codex_trace_rejects_unexpected_calls_or_ambiguous_completion(fixture, mutation):
     before, proposal = fixture
