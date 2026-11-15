@@ -49,11 +49,17 @@ class VisualRunRequest(BaseModel):
 
 
 def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
 
 
 def _fingerprint(
-    doc: str, revision: int, payload: VisualRunRequest, principal: str, policy: str,
+    doc: str,
+    revision: int,
+    payload: VisualRunRequest,
+    principal: str,
+    policy: str,
     profile_fingerprint: str,
 ) -> str:
     canonical = {
@@ -116,8 +122,12 @@ class VisualRunJournal:
 
     @staticmethod
     def _authorize(
-        row: sqlite3.Row, document_id: str, revision: int,
-        principal: str, policy: str, fingerprint: str | None,
+        row: sqlite3.Row,
+        document_id: str,
+        revision: int,
+        principal: str,
+        policy: str,
+        fingerprint: str | None,
     ) -> None:
         if row["document_id"] != document_id or row["revision"] != revision:
             raise IdempotencyConflictError()
@@ -129,8 +139,14 @@ class VisualRunJournal:
             raise IdempotencyConflictError()
 
     def get(
-        self, document_id: str, revision: int, operation_id: str, *,
-        principal: str, policy: str, fingerprint: str | None = None,
+        self,
+        document_id: str,
+        revision: int,
+        operation_id: str,
+        *,
+        principal: str,
+        policy: str,
+        fingerprint: str | None = None,
     ) -> dict | None:
         try:
             with self.repository._connect() as db:
@@ -143,9 +159,17 @@ class VisualRunJournal:
             raise StorageError() from None
 
     def begin(
-        self, document_id: str, revision: int, payload: VisualRunRequest, *,
-        principal: str, policy: str, fingerprint: str,
-        rasterizer: str, model_name: str, model_profile_sha256: str,
+        self,
+        document_id: str,
+        revision: int,
+        payload: VisualRunRequest,
+        *,
+        principal: str,
+        policy: str,
+        fingerprint: str,
+        rasterizer: str,
+        model_name: str,
+        model_profile_sha256: str,
     ) -> tuple[dict, bool]:
         """Atomically fence one operation against the current approved revision."""
         try:
@@ -175,11 +199,22 @@ class VisualRunJournal:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EXECUTING', ?)
                     """,
                     (
-                        payload.operation_id, document.document_id, revision,
-                        approval["approval_id"], principal, policy, fingerprint,
-                        spec, assets, RENDERER_VERSION, payload.svg_sha256,
-                        payload.png_sha256, rasterizer, model_name,
-                        model_profile_sha256, _now(),
+                        payload.operation_id,
+                        document.document_id,
+                        revision,
+                        approval["approval_id"],
+                        principal,
+                        policy,
+                        fingerprint,
+                        spec,
+                        assets,
+                        RENDERER_VERSION,
+                        payload.svg_sha256,
+                        payload.png_sha256,
+                        rasterizer,
+                        model_name,
+                        model_profile_sha256,
+                        _now(),
                     ),
                 )
                 return _result(self._find(db, payload.operation_id), replayed=False), True
@@ -187,8 +222,13 @@ class VisualRunJournal:
             raise StorageError() from None
 
     def finish(
-        self, operation_id: str, *, status: str, findings: list[dict] | None = None,
-        runtime: dict | None = None, reason: str | None = None,
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        findings: list[dict] | None = None,
+        runtime: dict | None = None,
+        reason: str | None = None,
     ) -> dict:
         if status not in {"EXECUTED", "UNKNOWN"}:
             raise ValueError("invalid local shadow run terminal status")
@@ -201,7 +241,9 @@ class VisualRunJournal:
                     return _result(row, replayed=True)
                 try:
                     _, spec, assets, svg = self.repository._approved_snapshot(
-                        db, row["document_id"], row["revision"],
+                        db,
+                        row["document_id"],
+                        row["revision"],
                         required_policy_digest=row["policy_digest"],
                     )
                     if (
@@ -223,9 +265,12 @@ class VisualRunJournal:
                     WHERE operation_id = ? AND status = 'EXECUTING'
                     """,
                     (
-                        status, _json(findings) if status == "EXECUTED" else None,
+                        status,
+                        _json(findings) if status == "EXECUTED" else None,
                         _json(runtime) if runtime is not None else None,
-                        reason, _now(), operation_id,
+                        reason,
+                        _now(),
+                        operation_id,
                     ),
                 )
                 return _result(self._find(db, operation_id), replayed=False)
@@ -234,8 +279,14 @@ class VisualRunJournal:
 
 
 def submit_visual_run(
-    repository: DesignRepository, document_id: str, revision: int,
-    payload: VisualRunRequest, *, principal: str, policy: str, model_config_raw: str | None,
+    repository: DesignRepository,
+    document_id: str,
+    revision: int,
+    payload: VisualRunRequest,
+    *,
+    principal: str,
+    policy: str,
+    model_config_raw: str | None,
 ) -> tuple[dict, bool]:
     """Explicit synchronous local inference; never repeat a journaled attempt."""
     profile = load_vlm_profile(model_config_raw)
@@ -244,8 +295,12 @@ def submit_visual_run(
         document_id, revision, payload, principal, policy, profile.fingerprint
     )
     existing = journal.get(
-        document_id, revision, payload.operation_id,
-        principal=principal, policy=policy, fingerprint=fingerprint,
+        document_id,
+        revision,
+        payload.operation_id,
+        principal=principal,
+        policy=policy,
+        fingerprint=fingerprint,
     )
     if existing is not None:
         return existing, False
@@ -256,20 +311,20 @@ def submit_visual_run(
         # A second check after acquiring the lock prevents a concurrent caller
         # from running the same admitted operation twice.
         existing = journal.get(
-            document_id, revision, payload.operation_id,
-            principal=principal, policy=policy, fingerprint=fingerprint,
+            document_id,
+            revision,
+            payload.operation_id,
+            principal=principal,
+            policy=policy,
+            fingerprint=fingerprint,
         )
         if existing is not None:
             return existing, False
 
         # Entire preflight is before durable admission and before inference.
         # No model invocation when approval, raster or tag digest mismatches.
-        target = repository.ocr_target(
-            document_id, revision, required_policy_digest=policy
-        )
-        svg = repository.approved_svg(
-            document_id, revision, required_policy_digest=policy
-        )
+        target = repository.ocr_target(document_id, revision, required_policy_digest=policy)
+        svg = repository.approved_svg(document_id, revision, required_policy_digest=policy)
         raster = rasterize_svg(svg)
         if not all(
             hmac.compare_digest(a, b)
@@ -283,9 +338,14 @@ def submit_visual_run(
         verify_ollama_model(profile)
 
         admitted, new = journal.begin(
-            document_id, revision, payload,
-            principal=principal, policy=policy, fingerprint=fingerprint,
-            rasterizer=raster.rasterizer, model_name=profile.model,
+            document_id,
+            revision,
+            payload,
+            principal=principal,
+            policy=policy,
+            fingerprint=fingerprint,
+            rasterizer=raster.rasterizer,
+            model_name=profile.model,
             model_profile_sha256=profile.fingerprint,
         )
         if not new:
@@ -302,7 +362,9 @@ def submit_visual_run(
             )
         else:
             result = journal.finish(
-                payload.operation_id, status="EXECUTED", findings=findings,
+                payload.operation_id,
+                status="EXECUTED",
+                findings=findings,
                 runtime={
                     "source": "local_ollama",
                     "local_model_digest_claim": profile.digest,
