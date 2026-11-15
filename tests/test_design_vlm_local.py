@@ -9,6 +9,7 @@ import pytest
 import app.designs.vlm_local as local
 
 DIGEST = "sha256:" + "d" * 64
+_ORIGINAL_HTTPX_CLIENT = httpx.Client
 
 
 def _profile():
@@ -18,7 +19,9 @@ def _profile():
 
 
 def _install_httpx_transport(monkeypatch, handler):
-    real_client = httpx.Client
+    # A test can replace the transport more than once; retain the genuine
+    # client class instead of wrapping the previous monkeypatch recursively.
+    real_client = _ORIGINAL_HTTPX_CLIENT
 
     def local_client(**kwargs):
         assert kwargs["trust_env"] is False
