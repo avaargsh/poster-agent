@@ -189,6 +189,25 @@ async def create_design(
     }
 
 
+@router.get("/api/designs")
+def list_designs(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[
+        str | None, Query(max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    ] = None,
+):
+    try:
+        result = _manager(request).repository().list_designs(limit=limit, cursor=cursor)
+        for item in result["designs"]:
+            item["canvas_url"] = f"/canvas?document={item['document_id']}"
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
 @router.get("/api/designs/{document_id}")
 def get_design(document_id: str, request: Request):
     try:

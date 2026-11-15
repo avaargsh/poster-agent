@@ -26,6 +26,7 @@ import type { InspectorDraft } from './inspectorDraft';
 import { ProposalPanel } from './ProposalPanel';
 import type { ProposalView } from './ProposalPanel';
 import { applyProposal } from './proposals';
+import { DesignLibrary } from './DesignLibrary';
 
 interface Session {
     design: Design;
@@ -535,6 +536,19 @@ export function CanvasApp() {
                             {storageNotice}
                         </p>
                     )}
+                    <DesignLibrary
+                        currentId={design?.document_id ?? null}
+                        revision={design?.revision ?? null}
+                        disabled={writeDisabled}
+                        onOpen={(id) => {
+                            if (
+                                hasDraft &&
+                                !window.confirm('打开设计将放弃当前未保存的属性修改，是否继续？')
+                            )
+                                return;
+                            void open(id);
+                        }}
+                    />
                     {design && (
                         <section className="canvas-layer-list" aria-label="图层列表">
                             <h2>

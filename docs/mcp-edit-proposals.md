@@ -11,7 +11,7 @@ uv sync --locked --extra mcp
 uv run --locked --extra mcp python -m app.run_local --port 8000
 ```
 
-打开 `http://127.0.0.1:8000/canvas` 创建一份设计，复制左侧设计 ID。MCP 服务连接运行中的 HTTP 服务，使用同一设计存储。
+打开 `http://127.0.0.1:8000/canvas` 创建一份设计。侧栏设计库列出服务端保存的设计，可分页打开，清空浏览器最近记录后仍可找回。MCP 服务连接运行中的 HTTP 服务，使用同一设计存储。
 
 ## Codex
 
@@ -55,11 +55,14 @@ opencode mcp list
 
 | 工具 | 用途 |
 | --- | --- |
+| `list_designs` | 分页查找已有设计，返回当前标题、版本和画布链接 |
 | `read_design` | 读取指定设计的当前版本、图层与素材元数据 |
 | `propose_design_edit` | 提交绑定基础版本的修改建议，返回画布确认 URL |
 | `read_edit_proposal` | 读取指定建议的状态及操作 |
 
-可向已连接 MCP 的宿主提出需求，例如“读取设计 ID 的最新版本，把活动价字号改为100，保留商品位置，给我确认链接”。工具输入需使用新的 `request_id`，网络重试复用同一标识和完整请求。
+可向已连接 MCP 的宿主提出需求，例如“列出已有设计，找到夏日活动海报，读取最新版本，把活动价字号改为100，保留商品位置，给我确认链接”。多个同名设计时由调用方确认目标。工具输入需使用新的 `request_id`，网络重试复用同一标识和完整请求。
+
+`list_designs` 接受 `limit`（默认 20，范围 1–50）及可选 `cursor`。返回 `designs` 和 `next_cursor`，后者为空表示已到末页，继续翻页时原样传入。列表按不可变创建时间与设计 ID 倒序排列，编辑不会改变分页顺序。标题和版本反映本次读取的当前状态，正式提出建议前调用 `read_design` 获取最新图层。HTTP 入口为 `GET /api/designs`，无效或未知游标返回 422。
 
 `propose_design_edit` 的参数示例使用 `document_id` 和 `proposal`。
 

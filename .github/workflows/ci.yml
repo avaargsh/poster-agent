@@ -250,3 +250,6 @@ jobs:
         if: ${{ hashFiles('tests/browser_edit_proposals.py') != '' }}
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_edit_proposals.py
+      - name: Exercise persistent design discovery and pagination
+        if: ${{ hashFiles('tests/browser_design_library.py') != '' }}
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_design_library.py
