@@ -32,6 +32,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **图层画布：** 从侧栏“图层画布”进入，或打开 <http://127.0.0.1:8000/canvas>。上传商品图后，可选择并拖动文字、商品和装饰图层，修改文案、价格、位置与外观，使用锁定、排序、撤销重做和刷新恢复。每次提交通过已有设计命令保存为新版本，属性草稿可在本页图层切换时保留。使用与验证见 [图层画布](docs/canvas-workspace.md)。
 
+**实验性 VLM 质量评测：** 可离线读取当前设计库的 VLM 执行账本，与冻结的逐 SKU 人工类别标注 CSV 对照，计算 TP/FP/FN/TN、precision/recall/FPR 与未验证覆盖率；纯只读且无任何模型调用，不将 UNKNOWN 算作“没有缺陷”，不会放行发布。使用指南见 [VLM Shadow Calibration](docs/design-vlm-shadow-calibration.md)。
+
 **实验性 Visual Critic 本地推理：** 在显式启用、配置本机 Ollama 模型和 named export reviewer 后，可对已批准的精确画布版本执行只读视觉诊断并持久化执行记录；默认禁用，失败保持 UNKNOWN，不自动修复或发布。配置与风险见 [本地 VLM Shadow 执行](docs/design-vlm-shadow-runs.md)。
 
 **MCP 修改建议：** 安装 `mcp` 可选依赖后，Codex、OpenCode 等宿主可分页查找已有设计、读取图层并提交结构化修改建议。画布侧栏提供持久设计库。用户在画布预览差异、显式应用后生成新版本，过期建议会被版本检查拒绝。配置与工具契约见 [MCP 修改建议](docs/mcp-edit-proposals.md)。
