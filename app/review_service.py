@@ -25,9 +25,6 @@ from app.workflows.review_graph import make_review_graph
 _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
 # The registry guard protects only lock bookkeeping, never network-backed work.
 _LOCAL_LOCK_GUARD = threading.Lock()
-# SqliteSaver.setup() performs DDL and PRAGMA journal_mode=WAL. Concurrent
-# first opens must not race this short setup phase; graph calls remain parallel.
-_CHECKPOINTER_SETUP_GUARD = threading.Lock()
 _LOCAL_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
 
 
@@ -50,7 +47,7 @@ def open_graph():
     # Opening a new connection on each request also proves checkpoints can be
     # rehydrated across connections/restarts. No in-memory saver is used.
     with SqliteSaver.from_conn_string(str(database_path())) as checkpointer:
-        with _CHECKPOINTER_SETUP_GUARD:
+        with brief_request_store.CHECKPOINT_SETUP_GUARD:
             checkpointer.setup()
         yield make_review_graph(checkpointer)
 
