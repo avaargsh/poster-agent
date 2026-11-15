@@ -53,6 +53,8 @@ from .visual_critic import (
     VisualSourceMismatch,
     preview_unattested_visual,
 )
+from .visual_runs import VisualRunJournal, VisualRunRequest, submit_visual_run
+from .vlm_local import VLMModelProfileError, VLMProviderUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,7 @@ _DOMAIN_STATUS = {
     "OCR_SOURCE_MISMATCH": 409,
     "OCR_RUN_NOT_EXECUTED": 409,
     "VISUAL_SOURCE_MISMATCH": 409,
+    "VLM_EXECUTION_BUSY": 409,
 }
 
 
@@ -515,6 +518,88 @@ def evaluate_design_ocr_observations(
     return JSONResponse(
         content=report,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.post("/api/designs/{document_id}/revisions/{revision}/visual-runs")
+def execute_design_visual_shadow_run(
+    document_id: str,
+    payload: VisualRunRequest,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Run an explicitly opted-in local model, never an automatic quality gate."""
+    if getattr(request.app.state, "design_vlm_runs_enabled", False) is not True:
+        return _error_response(403, "VLM_EXECUTION_DISABLED", "local VLM execution disabled")
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        if reviewer is None:
+            return _error_response(
+                403, "VLM_REVIEWER_REQUIRED", "named export reviewer policy required"
+            )
+        result, created = submit_visual_run(
+            _manager(request).repository(),
+            document_id,
+            revision,
+            payload,
+            principal=reviewer.principal_id,
+            policy=reviewer.policy_digest,
+            model_config_raw=getattr(request.app.state, "design_vlm_model_profile_raw", None),
+        )
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except VLMModelProfileError:
+        return _error_response(
+            503, "VLM_LOCAL_MODEL_PROFILE_UNAVAILABLE", "pinned local VLM profile unavailable"
+        )
+    except VLMProviderUnavailable:
+        return _error_response(503, "VLM_LOCAL_MODEL_UNAVAILABLE", "local model unavailable")
+    except RasterUnavailable:
+        return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
+    except RasterInvalid:
+        return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result,
+        status_code=201 if created else 200,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/designs/{document_id}/revisions/{revision}/visual-runs/{operation_id}")
+def get_design_visual_shadow_run(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+    operation_id: Annotated[str, Path(pattern=r"^vlm_[0-9a-f]{32}$")],
+):
+    """Read a local journal record without contacting Ollama or repeating inference."""
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        if reviewer is None:
+            return _error_response(
+                403, "VLM_REVIEWER_REQUIRED", "named export reviewer policy required"
+            )
+        result = VisualRunJournal(_manager(request).repository()).get(
+            document_id,
+            revision,
+            operation_id,
+            principal=reviewer.principal_id,
+            policy=reviewer.policy_digest,
+        )
+        if result is None:
+            raise NotFoundError()
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
     )
 
 
