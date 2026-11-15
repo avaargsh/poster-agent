@@ -9,9 +9,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from scripts.evaluate_design_vlm_shadow import (
-    CalibrationError,
     LABEL_FIELDS,
     VISUAL_CATEGORIES,
+    CalibrationError,
     evaluate_shadow_cohort,
     main,
 )
