@@ -64,9 +64,7 @@ def _approve(client, doc, token=None):
 
 
 def _payload(client, doc, *, headers=None):
-    raster = client.get(
-        f"/api/designs/{doc}/revisions/1/approved.png", headers=headers or {}
-    )
+    raster = client.get(f"/api/designs/{doc}/revisions/1/approved.png", headers=headers or {})
     assert raster.status_code == 200, raster.text
     return {
         "schema_version": 1,
@@ -86,9 +84,7 @@ def _payload(client, doc, *, headers=None):
     }
 
 
-def test_preview_is_read_only_and_all_findings_unattested(
-    design_paths, product_bytes, monkeypatch
-):
+def test_preview_is_read_only_and_all_findings_unattested(design_paths, product_bytes, monkeypatch):
     _use_fake_raster(monkeypatch)
     with TestClient(app) as client:
         doc = _create(client, product_bytes)
@@ -116,10 +112,7 @@ def test_preview_is_read_only_and_all_findings_unattested(
         payload["findings"][0]["confidence"] = 0.9
         changed = client.post(url, json=payload)
         assert changed.status_code == 200
-        assert (
-            changed.json()["critic_fingerprint_sha256"]
-            != result["critic_fingerprint_sha256"]
-        )
+        assert changed.json()["critic_fingerprint_sha256"] != result["critic_fingerprint_sha256"]
         assert changed.json()["repair_authorized"] is False
         assert client.get(f"/api/designs/{doc}").json()["document"]["revision"] == 1
 
@@ -197,9 +190,7 @@ def test_preview_rejects_forged_claims_and_invalid_regions(
         assert empty.json()["release_ready"] is False
 
 
-def test_preview_rechecks_revision_after_rasterization(
-    design_paths, product_bytes, monkeypatch
-):
+def test_preview_rechecks_revision_after_rasterization(design_paths, product_bytes, monkeypatch):
     _use_fake_raster(monkeypatch)
     with TestClient(app) as client:
         doc = _create(client, product_bytes)
@@ -253,8 +244,9 @@ def test_preview_obeys_export_scope(design_paths, product_bytes, monkeypatch):
         payload = _payload(client, doc, headers={"Authorization": f"Bearer {exporter}"})
         assert client.post(url, json=payload).status_code == 401
         assert (
-            client.post(url, json=payload, headers={"Authorization": f"Bearer {approver}"})
-            .status_code
+            client.post(
+                url, json=payload, headers={"Authorization": f"Bearer {approver}"}
+            ).status_code
             == 403
         )
         allowed = client.post(url, json=payload, headers={"Authorization": f"Bearer {exporter}"})
