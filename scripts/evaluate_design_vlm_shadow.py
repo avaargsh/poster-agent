@@ -249,8 +249,7 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
     runs, journal_sha = _read_journal(Path(db_path), labels)
     statuses = Counter()
     measures = {
-        category: Counter(tp=0, fp=0, fn=0, tn=0, unverified_human_labels=0,
-                          not_executed_labels=0)
+        category: Counter(tp=0, fp=0, fn=0, tn=0, unverified_human_labels=0, not_executed_labels=0)
         for category in VISUAL_CATEGORIES
     }
     profiles: set[str] = set()
@@ -281,9 +280,12 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
             else:
                 predicted = category in predictions
                 counts[
-                    "tp" if observed == "PRESENT" and predicted
-                    else "fn" if observed == "PRESENT"
-                    else "fp" if predicted
+                    "tp"
+                    if observed == "PRESENT" and predicted
+                    else "fn"
+                    if observed == "PRESENT"
+                    else "fp"
+                    if predicted
                     else "tn"
                 ] += 1
 
@@ -294,9 +296,17 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
         counts = measures[category]
         tp, fp, fn, tn = (counts[key] for key in ("tp", "fp", "fn", "tn"))
         categories[category] = {
-            **{key: counts[key] for key in (
-                "tp", "fp", "fn", "tn", "unverified_human_labels", "not_executed_labels"
-            )},
+            **{
+                key: counts[key]
+                for key in (
+                    "tp",
+                    "fp",
+                    "fn",
+                    "tn",
+                    "unverified_human_labels",
+                    "not_executed_labels",
+                )
+            },
             "evaluable_denominator": tp + fp + fn + tn,
             "precision": _fraction(tp, tp + fp),
             "recall": _fraction(tp, tp + fn),
@@ -312,7 +322,8 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
         "schema_version": SCHEMA,
         "status": (
             "OPERATOR_CALIBRATION_ONLY_NOT_ATTESTED"
-            if complete else "INSUFFICIENT_OPERATOR_CALIBRATION"
+            if complete
+            else "INSUFFICIENT_OPERATOR_CALIBRATION"
         ),
         "scope": "selected_local_operator_journal_and_declared_human_labels_only",
         "sku_count": len(labels),
@@ -328,9 +339,7 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
             **total,
             "precision": _fraction(total["tp"], total["tp"] + total["fp"]),
             "recall": _fraction(total["tp"], total["tp"] + total["fn"]),
-            "false_positive_rate": _fraction(
-                total["fp"], total["fp"] + total["tn"]
-            ),
+            "false_positive_rate": _fraction(total["fp"], total["fp"] + total["tn"]),
         },
         "wall_elapsed_ms": {
             "count": len(durations),
