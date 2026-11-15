@@ -51,7 +51,7 @@ def _fixture(tmp_path, count=20):
         for i in range(count):
             row = {
                 "sku_id": f"private-sku-{i:02d}",
-                "operation_id": f"vlm_{i+1:032x}",
+                "operation_id": f"vlm_{i + 1:032x}",
                 "document_id": f"doc-{i:02d}",
                 "revision": "1",
                 "approval_id": f"approval-{i}",
@@ -79,15 +79,24 @@ def _fixture(tmp_path, count=20):
                 ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'EXECUTED', ?, ?, ?, ?, ?)
                 """,
                 (
-                    row["operation_id"], row["document_id"], row["approval_id"],
-                    SVG_SHA, PNG_SHA, MODEL_SHA, "llava:latest",
-                    json.dumps(findings), json.dumps(
+                    row["operation_id"],
+                    row["document_id"],
+                    row["approval_id"],
+                    SVG_SHA,
+                    PNG_SHA,
+                    MODEL_SHA,
+                    "llava:latest",
+                    json.dumps(findings),
+                    json.dumps(
                         {
                             "source": "local_ollama",
                             "attested": False,
                             "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
                         }
-                    ), started.isoformat(), finished.isoformat(), "model-operator",
+                    ),
+                    started.isoformat(),
+                    finished.isoformat(),
+                    "model-operator",
                 ),
             )
     labels_file = tmp_path / "labels.csv"
@@ -181,7 +190,17 @@ def test_unverified_label_never_enters_denominator(tmp_path):
     assert report["complete_case_count"] == 19
 
 
-@pytest.mark.parametrize("mutation", ["duplicate_sku", "duplicate_operation", "wrong_hash", "other_model", "missing_run", "unapproved"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate_sku",
+        "duplicate_operation",
+        "wrong_hash",
+        "other_model",
+        "missing_run",
+        "unapproved",
+    ],
+)
 def test_rejects_selection_collisions_cross_model_or_unbound_inputs(tmp_path, mutation):
     db, labels, rows = _fixture(tmp_path)
     if mutation == "duplicate_sku":
@@ -201,7 +220,10 @@ def test_rejects_selection_collisions_cross_model_or_unbound_inputs(tmp_path, mu
         _eval(db, labels)
 
 
-@pytest.mark.parametrize("malformed", ["bad_json", "illegal_category", "bad_runtime", "bad_timing", "inconsistent_status"])
+@pytest.mark.parametrize(
+    "malformed",
+    ["bad_json", "illegal_category", "bad_runtime", "bad_timing", "inconsistent_status"],
+)
 def test_invalid_journal_is_not_scored(tmp_path, malformed):
     db, labels, rows = _fixture(tmp_path)
     fields = {
