@@ -48,6 +48,11 @@ from .service import (
     DesignStorageBusy,
     DesignStorageUnavailable,
 )
+from .visual_critic import (
+    VisualCriticObservationRequest,
+    VisualSourceMismatch,
+    preview_unattested_visual,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,7 @@ _DOMAIN_STATUS = {
     "OCR_TARGET_INCOMPLETE": 409,
     "OCR_SOURCE_MISMATCH": 409,
     "OCR_RUN_NOT_EXECUTED": 409,
+    "VISUAL_SOURCE_MISMATCH": 409,
 }
 
 
@@ -508,6 +514,47 @@ def evaluate_design_ocr_observations(
         return _unexpected_error_response()
     return JSONResponse(
         content=report,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.post("/api/designs/{document_id}/revisions/{revision}/visual-critic-preview")
+def preview_design_visual_critic(
+    document_id: str,
+    payload: VisualCriticObservationRequest,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+):
+    """Compare untrusted visual suggestions with the current approved raster.
+
+    No VLM is executed and no edit, journal event or release decision is made.
+    Recheck the authoritative revision after rasterization to reject races.
+    """
+    try:
+        reviewer = reviewer_for_request(request, "export")
+        repository = _manager(request).repository()
+        policy_digest = reviewer.policy_digest if reviewer is not None else None
+        target = repository.ocr_target(document_id, revision, required_policy_digest=policy_digest)
+        svg = repository.approved_svg(document_id, revision, required_policy_digest=policy_digest)
+        raster = rasterize_svg(svg)
+        if (
+            repository.ocr_target(document_id, revision, required_policy_digest=policy_digest)
+            != target
+        ):
+            raise VisualSourceMismatch()
+        result = preview_unattested_visual(target, raster, payload)
+    except ReviewerAccessError as exc:
+        return _error_response(exc.status, exc.code, exc.message)
+    except DesignError as exc:
+        return _design_error_response(exc, asset_invalid_status=409)
+    except RasterUnavailable:
+        return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
+    except RasterInvalid:
+        return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
+    except Exception:
+        return _unexpected_error_response()
+    return JSONResponse(
+        content=result,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
 
