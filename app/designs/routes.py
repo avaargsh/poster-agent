@@ -515,16 +515,13 @@ def preview_design_visual_critic(
         reviewer = reviewer_for_request(request, "export")
         repository = _manager(request).repository()
         policy_digest = reviewer.policy_digest if reviewer is not None else None
-        target = repository.ocr_target(
-            document_id, revision, required_policy_digest=policy_digest
-        )
-        svg = repository.approved_svg(
-            document_id, revision, required_policy_digest=policy_digest
-        )
+        target = repository.ocr_target(document_id, revision, required_policy_digest=policy_digest)
+        svg = repository.approved_svg(document_id, revision, required_policy_digest=policy_digest)
         raster = rasterize_svg(svg)
-        if repository.ocr_target(
-            document_id, revision, required_policy_digest=policy_digest
-        ) != target:
+        if (
+            repository.ocr_target(document_id, revision, required_policy_digest=policy_digest)
+            != target
+        ):
             raise VisualSourceMismatch()
         result = preview_unattested_visual(target, raster, payload)
     except ReviewerAccessError as exc:
