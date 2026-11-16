@@ -40,7 +40,7 @@ from .ocr_observations import OCRObservationRequest, assess_unattested
 from .ocr_run_comparison import compare_journaled_ocr_run
 from .ocr_runs import OCRRunJournal, OCRRunRequest, submit_ocr_run
 from .proposals import EditProposalRequest
-from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
+from .rasterization import RasterFontUnavailable, RasterInvalid, RasterUnavailable, rasterize_svg
 from .rendering import render_svg
 from .reviewer_auth import ReviewerAccessError, reviewer_for_request
 from .service import (
@@ -671,6 +671,10 @@ def export_approved_design_raster(
         return _error_response(exc.status, exc.code, exc.message)
     except DesignError as exc:
         return _design_error_response(exc, asset_invalid_status=409)
+    except RasterFontUnavailable:
+        return _error_response(
+            503, "DESIGN_RASTER_FONT_UNAVAILABLE", "fixed raster fonts unavailable"
+        )
     except RasterUnavailable:
         return _error_response(503, "DESIGN_RASTER_UNAVAILABLE", "rasterizer unavailable")
     except RasterInvalid:

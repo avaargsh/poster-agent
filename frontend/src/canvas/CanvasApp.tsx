@@ -27,6 +27,7 @@ import { ProposalPanel } from './ProposalPanel';
 import type { ProposalView } from './ProposalPanel';
 import { applyProposal } from './proposals';
 import { DesignLibrary } from './DesignLibrary';
+import { ExportPanel } from './ExportPanel';
 
 interface Session {
     design: Design;
@@ -98,6 +99,7 @@ export function CanvasApp() {
         new URL(location.href).searchParams.has('proposal'),
     );
     const [proposalView, setProposalView] = useState<ProposalView | null>(null);
+    const [showExport, setShowExport] = useState(false);
     const [inspectorEpoch, setInspectorEpoch] = useState(0);
     const [dirtyNodes, setDirtyNodes] = useState<Record<string, boolean>>({});
     const drafts = useRef(new Map<string, InspectorDraft>());
@@ -379,6 +381,7 @@ export function CanvasApp() {
                         type="button"
                         disabled={!design || Boolean(busy)}
                         onClick={() => {
+                            setShowExport(false);
                             setShowProposals((value) => !value);
                             setProposalView(null);
                         }}
@@ -387,8 +390,24 @@ export function CanvasApp() {
                     </button>
                     <button
                         type="button"
+                        disabled={
+                            !design ||
+                            !session?.svg ||
+                            writeDisabled ||
+                            hasDraft ||
+                            Boolean(proposalView)
+                        }
+                        onClick={() => {
+                            setShowProposals(false);
+                            setShowExport((value) => !value);
+                        }}
+                    >
+                        审核与导出
+                    </button>
+                    <button
+                        type="button"
                         aria-label="撤销修改"
-                        disabled={!design || writeDisabled || Boolean(proposalView)}
+                        disabled={!design || writeDisabled || Boolean(proposalView) || showExport}
                         onClick={() => void submit([{ op: 'undo' }])}
                     >
                         <Undo2 size={17} />
@@ -397,7 +416,7 @@ export function CanvasApp() {
                     <button
                         type="button"
                         aria-label="重做修改"
-                        disabled={!design || writeDisabled || Boolean(proposalView)}
+                        disabled={!design || writeDisabled || Boolean(proposalView) || showExport}
                         onClick={() => void submit([{ op: 'redo' }])}
                     >
                         <Redo2 size={17} />
@@ -600,7 +619,7 @@ export function CanvasApp() {
                         svg={proposalView?.svg ?? session.svg}
                         selected={selected}
                         busy={Boolean(busy)}
-                        readOnly={Boolean(proposalView || failedEdit)}
+                        readOnly={Boolean(proposalView || failedEdit || showExport)}
                         onSelect={setSelected}
                         onEdit={submit}
                     />
@@ -613,7 +632,14 @@ export function CanvasApp() {
                         <p>上传图片，填写标题和活动价，即可创建可编辑的海报。</p>
                     </section>
                 )}
-                {design && showProposals ? (
+                {design && showExport ? (
+                    <ExportPanel
+                        key={`${design.document_id}:${design.revision}`}
+                        design={design}
+                        disabled={writeDisabled || hasDraft || !session?.svg}
+                        onClose={() => setShowExport(false)}
+                    />
+                ) : design && showProposals ? (
                     <ProposalPanel
                         key={design.document_id}
                         design={design}

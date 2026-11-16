@@ -253,3 +253,9 @@ jobs:
       - name: Exercise persistent design discovery and pagination
         if: ${{ hashFiles('tests/browser_design_library.py') != '' }}
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_design_library.py
+      - name: Exercise exact-version canvas confirmation and export
+        if: ${{ hashFiles('tests/browser_canvas_export.py') != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig libcairo2
+          uv run --no-sync --with 'playwright>=1.55,<2' --with 'CairoSVG>=2.7,<3' python tests/browser_canvas_export.py --require-png
