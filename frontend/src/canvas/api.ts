@@ -173,6 +173,8 @@ export function parseDesign(value: unknown): Design {
 }
 
 const messages: Record<string, string> = {
+    AGENT_BUSY: '已有 Codex 设计任务正在运行，请稍后重试。',
+    AGENT_UNAVAILABLE: 'Codex 任务服务尚未就绪，请检查本地服务配置与依赖。',
     REVISION_CONFLICT: '设计已在其他页面更新，当前修改尚未保存。请载入最新版本后重新编辑。',
     LOCKED_NODE: '该图层已锁定，请先解锁。',
     NOTHING_TO_UNDO: '当前没有可撤销的修改。',

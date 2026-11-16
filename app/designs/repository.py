@@ -75,6 +75,23 @@ from .text_layout import split_text_chunks
 _DOCUMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ASSET_FILE_SUFFIX = ".bin"
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS design_agent_runs (
+    request_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    base_revision INTEGER NOT NULL,
+    prompt TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED','UNKNOWN')),
+    error_code TEXT,
+    proposal_id TEXT,
+    usage_json TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    FOREIGN KEY (document_id) REFERENCES designs(document_id)
+);
+CREATE INDEX IF NOT EXISTS design_agent_runs_order
+    ON design_agent_runs(document_id, started_at DESC, request_id DESC);
+
 CREATE TABLE IF NOT EXISTS design_edit_proposals (
     proposal_id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL,

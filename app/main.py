@@ -40,6 +40,8 @@ from .cutout_service import (
     png_sha256,
     verify_candidate,
 )
+from .designs.agent_routes import router as design_agent_router
+from .designs.agent_runs import DesignAgentManager
 from .designs.routes import router as design_router
 from .designs.service import create_design_manager
 from .human_review_routes import router as human_review_router
@@ -87,10 +89,18 @@ async def lifespan(app: FastAPI):
             "POSTER_DESIGN_VLM_MODEL_CONFIG_JSON"
         )
         app.state.design_manager = design_manager
+        app.state.design_agent = DesignAgentManager(
+            design_manager,
+            enabled=os.environ.get("POSTER_DESIGN_AGENT_ENABLED") == "1",
+            origin=os.environ.get("POSTER_DESIGN_AGENT_BASE_URL", "http://127.0.0.1:8000"),
+        )
         try:
             yield
         finally:
-            design_manager.close()
+            try:
+                await app.state.design_agent.close()
+            finally:
+                design_manager.close()
             app.state.design_manager = None
             app.state.design_reviewer_policy_raw = None
             app.state.design_ocr_runs_enabled = False
@@ -232,6 +242,7 @@ app.include_router(m6_review_sidecar_router)
 app.include_router(review_draft_router)
 app.include_router(m6_ocr_capture_router)
 app.include_router(design_router)
+app.include_router(design_agent_router)
 MAX_UPLOAD = 10 * 1024 * 1024
 # These limits apply to the *decoded* image, not the compressed upload size.
 # Enforce them BEFORE image.load() to prevent high-memory decompression.

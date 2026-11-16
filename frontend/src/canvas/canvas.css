@@ -786,3 +786,28 @@ textarea {
     border-top: 1px solid #dce1eb;
     padding-top: 12px;
 }
+.canvas-agent-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.canvas-agent-task {
+    border-top: 1px solid #dce1eb;
+    margin-top: 16px;
+    padding-top: 12px;
+}
+.canvas-agent-prompt {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+}
+.canvas-agent-runs {
+    display: grid;
+    gap: 8px;
+    margin-top: 18px;
+}
+.canvas-agent-runs button {
+    text-align: left;
+    overflow-wrap: anywhere;
+}

@@ -13,57 +13,17 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
 from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
 
+from app.designs.codex_host import TOOLS, codex_command
 from app.mcp_server import validate_base_url
 from scripts.design_demo import _programmatic_product_png
 
-TOOLS = ["read_design", "propose_design_edit", "read_edit_proposal"]
 TARGET_TITLE = "轻松开启亮白微笑"
-
-
-def codex_command(executable: str, origin: str, root: Path, work: Path) -> list[str]:
-    command = [
-        executable,
-        "exec",
-        "--ignore-user-config",
-        "--ephemeral",
-        "--json",
-        "--strict-config",
-        "--sandbox",
-        "read-only",
-        "--skip-git-repo-check",
-        "--cd",
-        str(work),
-    ]
-    settings = {
-        "approval_policy": "never",
-        "web_search": "disabled",
-        "mcp_servers.poster_agent.command": sys.executable,
-        "mcp_servers.poster_agent.args": ["-m", "app.mcp_server", "--base-url", origin],
-        "mcp_servers.poster_agent.cwd": str(root),
-        "mcp_servers.poster_agent.required": True,
-        "mcp_servers.poster_agent.enabled_tools": TOOLS,
-    }
-    for key, value in settings.items():
-        command.extend(["-c", key + "=" + json.dumps(value, ensure_ascii=False)])
-    for feature in [
-        "shell_tool",
-        "plugins",
-        "apps",
-        "multi_agent",
-        "multi_agent_v2",
-        "browser_use",
-        "computer_use",
-        "view_image",
-    ]:
-        command.extend(["--disable", feature])
-    return command
 
 
 def verify_candidate(before: dict, proposal: dict, current: dict) -> None:

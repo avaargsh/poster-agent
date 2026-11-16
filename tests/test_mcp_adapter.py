@@ -1,17 +1,13 @@
 """Real stdio SDK handshake and HTTP bridge against a disposable backend."""
 
 import asyncio
-import os
-import socket
-import subprocess
 import sys
-import time
 from uuid import uuid4
 
-import httpx
 import pytest
 
 from app.mcp_server import validate_base_url
+from tests.server_support import local_backend
 
 
 @pytest.mark.parametrize(
@@ -32,51 +28,8 @@ def test_mcp_backend_rejects_nonlocal_or_ambiguous_origins(url):
 
 @pytest.fixture
 def backend(tmp_path):
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    env = {
-        **os.environ,
-        **{
-            key: str(tmp_path / name)
-            for key, name in [
-                ("POSTER_DATA_DIR", "posters"),
-                ("POSTER_EXECUTION_DB", "executions.sqlite3"),
-                ("POSTER_CHECKPOINT_DB", "checkpoints.sqlite3"),
-                ("POSTER_DESIGN_DB", "designs.sqlite3"),
-                ("POSTER_DESIGN_ASSET_DIR", "assets"),
-            ]
-        },
-    }
-    with (tmp_path / "backend.log").open("wb") as log:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "app.run_local", "--port", str(port)],
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-        try:
-            with httpx.Client(
-                base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=3
-            ) as client:
-                for _ in range(80):
-                    if process.poll() is not None:
-                        raise AssertionError("MCP test backend exited")
-                    try:
-                        if client.get("/health").status_code == 200:
-                            break
-                    except httpx.HTTPError:
-                        time.sleep(0.15)
-                else:
-                    raise AssertionError("MCP test backend did not start")
-                yield client
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+    with local_backend(tmp_path) as client:
+        yield client
 
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
@@ -147,3 +100,77 @@ def test_real_stdio_tools_create_only_a_draft_and_return_confirmation_url(
 
     asyncio.run(scenario())
     assert backend.get("/api/designs/" + document_id).json()["document"]["revision"] == 1
+
+
+def test_scoped_mcp_enforces_document_request_revision_and_budget(backend, product_bytes):
+    sdk = pytest.importorskip("mcp")
+
+    def create():
+        return backend.post(
+            "/api/designs",
+            data={"title": "范围测试", "price": "99"},
+            files={"product": ("product.png", product_bytes, "image/png")},
+        ).json()["document"]["document_id"]
+
+    document_id, other_id = create(), create()
+    request_id = str(uuid4())
+    body = {
+        "request_id": request_id,
+        "expected_revision": 1,
+        "summary": "调整字号",
+        "operations": [{"op": "set_style", "node_id": "price", "font_size": 100}],
+    }
+
+    async def scenario():
+        parameters = sdk.StdioServerParameters(
+            command=sys.executable,
+            args=[
+                "-m",
+                "app.mcp_server",
+                "--base-url",
+                str(backend.base_url).rstrip("/"),
+                "--document-id",
+                document_id,
+                "--request-id",
+                request_id,
+                "--expected-revision",
+                "1",
+            ],
+        )
+        async with sdk.Client(parameters, mode="legacy", read_timeout_seconds=25) as client:
+            assert (await client.call_tool("list_designs", {})).is_error
+            assert (await client.call_tool("read_design", {"document_id": other_id})).is_error
+            assert (
+                await client.call_tool(
+                    "propose_design_edit",
+                    {"document_id": document_id, "proposal": {**body, "request_id": str(uuid4())}},
+                )
+            ).is_error
+            assert not (
+                await client.call_tool("read_design", {"document_id": document_id})
+            ).is_error
+            result = await client.call_tool(
+                "propose_design_edit", {"document_id": document_id, "proposal": body}
+            )
+            assert not result.is_error, result
+            proposal_id = result.structured_content["proposal_id"]
+            assert (
+                await client.call_tool(
+                    "read_edit_proposal",
+                    {"document_id": document_id, "proposal_id": "prop_" + "0" * 32},
+                )
+            ).is_error
+            assert not (
+                await client.call_tool(
+                    "read_edit_proposal", {"document_id": document_id, "proposal_id": proposal_id}
+                )
+            ).is_error
+            results = [
+                await client.call_tool("read_design", {"document_id": document_id})
+                for _ in range(7)
+            ]
+            assert not results[0].is_error and results[-1].is_error
+
+    asyncio.run(scenario())
+    assert backend.get("/api/designs/" + document_id).json()["document"]["revision"] == 1
+    assert backend.get("/api/designs/" + other_id + "/proposals").json()["proposals"] == []

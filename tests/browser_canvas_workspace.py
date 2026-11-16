@@ -8,65 +8,24 @@ from __future__ import annotations
 
 import io
 import json
-import os
-import socket
-import subprocess
 import sys
 import tempfile
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from urllib.request import urlopen
 from uuid import uuid4
 
 from browser_support import chromium_launch_options
 from PIL import Image, ImageDraw
 from playwright.sync_api import Error, expect, sync_playwright
+from server_support import local_backend
 
 
 @contextmanager
 def disposable_server():
     with tempfile.TemporaryDirectory(prefix="poster-canvas-browser-") as directory:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        env = {
-            **os.environ,
-            "POSTER_DATA_DIR": directory + "/posters",
-            "POSTER_EXECUTION_DB": directory + "/executions.sqlite3",
-            "POSTER_CHECKPOINT_DB": directory + "/checkpoints.sqlite3",
-            "POSTER_DESIGN_DB": directory + "/designs.sqlite3",
-            "POSTER_DESIGN_ASSET_DIR": directory + "/design-assets",
-        }
-        with (Path(directory) / "server.log").open("wb") as log:
-            server = subprocess.Popen(
-                [sys.executable, "-m", "app.run_local", "--port", str(port)],
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-            )
-            try:
-                origin = f"http://127.0.0.1:{port}"
-                for _ in range(80):
-                    if server.poll() is not None:
-                        raise RuntimeError("Canvas service exited during startup")
-                    try:
-                        with urlopen(origin + "/health", timeout=1) as response:
-                            if response.status == 200:
-                                break
-                    except OSError:
-                        time.sleep(0.15)
-                else:
-                    raise RuntimeError("Canvas service did not start")
-                yield origin
-            finally:
-                server.terminate()
-                try:
-                    server.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-                    server.wait(timeout=5)
+        with local_backend(Path(directory)) as client:
+            yield str(client.base_url).rstrip("/")
 
 
 def product_png():

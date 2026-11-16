@@ -262,3 +262,6 @@ jobs:
       - name: Exercise historical preview and version restore
         if: ${{ hashFiles('tests/browser_canvas_history.py') != '' }}
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_history.py
+      - name: Exercise AI task lifecycle with local CLI stand-in
+        if: ${{ hashFiles('tests/browser_canvas_agent.py') != '' }}
+        run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_agent.py
