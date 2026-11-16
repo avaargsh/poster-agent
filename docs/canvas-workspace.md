@@ -40,3 +40,13 @@ uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_worksp
 ## 审核与导出
 
 画布现可核对精确保存版本，显式确认后下载 SVG，以及在已安装渲染器时下载 PNG。使用与凭据说明见 [画布导出](canvas-export.md)。
+
+## 历史版本
+
+点击“历史版本”按版本倒序浏览保存记录，可加载更早版本。选择一条记录后，画布显示对应的只读预览，状态栏同时标明预览版本和当前保存版本。退出历史会保留未保存的属性草稿。
+
+加载预览后可点击“恢复为新版本”。恢复包括该快照的文案、价格、素材引用、图层顺序及锁定状态，生成递增的新版本，原历史记录继续保留。存在属性草稿时按钮明确说明将放弃草稿。恢复可通过普通撤销与重做返回，当前审批需按新版本重新核对。
+
+恢复沿用原子命令、`expected_revision` 和 `command_id`。响应丢失后，页面的“重试原保存请求”复用同一恢复请求；其他会话已经保存时，恢复被版本校验拒绝。MCP 修改建议使用原有操作集合。
+
+HTTP 历史入口为 `GET /api/designs/{document_id}/revisions`，支持 `limit`（1–50，默认20）和可选版本 `cursor`。响应含 `current_revision`、`revisions` 和可空 `next_cursor`。恢复命令为 `{"op":"restore_revision","revision":1}`，独占一个命令批次。

@@ -40,6 +40,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **画布审核与导出** 可在画布核对并确认精确版本，下载 SVG 或使用可选渲染器下载中文 PNG。支持版本冲突、响应丢失重试和审核凭据，配置见 [画布导出](docs/canvas-export.md)。
 
+**历史版本** 支持分页回看与只读预览，将旧快照恢复为新版本，并沿用撤销、重做与原请求重试。使用说明见 [画布历史](docs/canvas-workspace.md#历史版本)。
+
 **Codex 账号实测** 已使用 ChatGPT 登录的 Codex CLI 完成真实读取、提案与状态查询，画布可预览实际模型生成的建议。可重复运行的验收脚本与证据范围见 [Codex 账号验收](docs/codex-account-acceptance.md)。
 
 工作台按任务分为四个入口，单张创作与批量处理同级：

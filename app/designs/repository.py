@@ -32,6 +32,7 @@ from .commands import (
     CommandResult,
     Redo,
     ReorderNode,
+    RestoreRevision,
     SetNodeLock,
     SetPrice,
     SetStyle,
@@ -618,6 +619,72 @@ class DesignRepository:
                     "next_cursor": items[-1]["document_id"] if len(rows) > limit else None,
                 }
         except (sqlite3.Error, ValidationError, StopIteration, AttributeError):
+            raise StorageError() from None
+
+    def list_revisions(self, document_id: str, limit: int = 20, cursor: int | None = None) -> dict:
+        """List bounded immutable revisions with a snapshot-consistent current head."""
+        if not _valid_document_id(document_id):
+            raise NotFoundError()
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise InvalidCommandError("limit must be between 1 and 50")
+        if cursor is not None and (type(cursor) is not int or cursor < 1):
+            raise InvalidCommandError("invalid revision cursor")
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN")
+                head = connection.execute(
+                    "SELECT revision FROM heads WHERE document_id=?", (document_id,)
+                ).fetchone()
+                if head is None:
+                    raise NotFoundError()
+                if cursor is not None and cursor > head["revision"]:
+                    raise InvalidCommandError("unknown revision cursor")
+                rows = connection.execute(
+                    """SELECT r.revision, r.parent_revision, r.created_at, r.document_json, c.request_json
+                       FROM revisions r LEFT JOIN commands c
+                         ON c.document_id=r.document_id AND c.command_id=r.command_id
+                       WHERE r.document_id=? AND r.revision < ?
+                       ORDER BY r.revision DESC LIMIT ?""",
+                    (
+                        document_id,
+                        cursor if cursor is not None else head["revision"] + 1,
+                        limit + 1,
+                    ),
+                ).fetchall()
+                items = []
+                for row in rows[:limit]:
+                    document = DesignDocument.model_validate_json(row["document_json"])
+                    title = next(node for node in document.nodes if node.role == "title")
+                    operations = (
+                        [op["op"] for op in json.loads(row["request_json"])["operations"]]
+                        if row["request_json"]
+                        else ["create"]
+                    )
+                    if row["revision"] != 1 and row["request_json"] is None:
+                        raise StorageError()
+                    items.append(
+                        {
+                            "revision": row["revision"],
+                            "parent_revision": row["parent_revision"],
+                            "created_at": row["created_at"],
+                            "title": "".join(line.text for line in title.lines),
+                            "operations": operations,
+                        }
+                    )
+                return {
+                    "document_id": document_id,
+                    "current_revision": head["revision"],
+                    "revisions": items,
+                    "next_cursor": items[-1]["revision"] if len(rows) > limit else None,
+                }
+        except (
+            sqlite3.Error,
+            ValidationError,
+            ValueError,
+            KeyError,
+            StopIteration,
+            AttributeError,
+        ):
             raise StorageError() from None
 
     # --------------------------------------------------------------------- get
@@ -1256,8 +1323,21 @@ class DesignRepository:
                     undo_stack.append(head_revision)
                     candidate = self._load_revision(connection, document_id, target_revision)
                     candidate = candidate.model_copy(update={"revision": new_revision})
+                elif len(batch.operations) == 1 and isinstance(
+                    batch.operations[0], RestoreRevision
+                ):
+                    target_revision = batch.operations[0].revision
+                    if target_revision >= head_revision:
+                        raise InvalidCommandError("restore source must be an earlier revision")
+                    candidate = self._load_revision(connection, document_id, target_revision)
+                    self.read_assets(candidate)
+                    candidate = candidate.model_copy(update={"revision": new_revision})
+                    undo_stack.append(head_revision)
+                    redo_stack = []
                 else:
-                    if any(isinstance(op, (Undo, Redo)) for op in batch.operations):
+                    if any(
+                        isinstance(op, (Undo, Redo, RestoreRevision)) for op in batch.operations
+                    ):
                         raise InvalidCommandError()
                     candidate = self._load_revision(connection, document_id, head_revision)
                     candidate = self._project_edits(candidate, batch.operations)

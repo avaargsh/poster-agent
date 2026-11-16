@@ -232,6 +232,22 @@ def get_design(document_id: str, request: Request):
     }
 
 
+@router.get("/api/designs/{document_id}/revisions")
+def list_design_revisions(
+    document_id: str,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[int | None, Query(ge=1)] = None,
+):
+    try:
+        result = _manager(request).repository().list_revisions(document_id, limit, cursor)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except DesignError as exc:
+        return _design_error_response(exc)
+    except Exception:
+        return _unexpected_error_response()
+
+
 @router.get("/api/designs/{document_id}/revisions/{revision}")
 def get_design_revision(
     document_id: str,
