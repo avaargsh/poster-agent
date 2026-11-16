@@ -128,8 +128,23 @@ class Redo(_Operation):
     op: Literal["redo"] = "redo"
 
 
+class RestoreRevision(_Operation):
+    op: Literal["restore_revision"] = "restore_revision"
+    revision: ExpectedRevision
+
+
 CommandOperation = Annotated[
-    Union[SetText, SetPrice, SetStyle, TransformNode, SetNodeLock, ReorderNode, Undo, Redo],
+    Union[
+        SetText,
+        SetPrice,
+        SetStyle,
+        TransformNode,
+        SetNodeLock,
+        ReorderNode,
+        Undo,
+        Redo,
+        RestoreRevision,
+    ],
     Field(discriminator="op"),
 ]
 
@@ -147,10 +162,10 @@ class CommandBatch(BaseModel):
     @model_validator(mode="after")
     def undo_and_redo_are_alone(self) -> CommandBatch:
         has_history_operation = any(
-            isinstance(operation, (Undo, Redo)) for operation in self.operations
+            isinstance(operation, (Undo, Redo, RestoreRevision)) for operation in self.operations
         )
         if has_history_operation and len(self.operations) != 1:
-            raise ValueError("undo and redo must be the only operation in a batch")
+            raise ValueError("history commands must be the only operation in a batch")
         return self
 
 
@@ -173,3 +188,4 @@ SetNodeLockOp = SetNodeLock
 ReorderNodeOp = ReorderNode
 UndoOp = Undo
 RedoOp = Redo
+RestoreRevisionOp = RestoreRevision

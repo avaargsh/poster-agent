@@ -751,3 +751,38 @@ textarea {
 .canvas-export-approved {
     color: #17624b;
 }
+.canvas-history-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.canvas-history-list {
+    display: grid;
+    gap: 8px;
+    max-height: 55vh;
+    overflow-y: auto;
+    margin: 16px 0;
+}
+.canvas-history-list button {
+    display: grid;
+    gap: 5px;
+    text-align: left;
+    width: 100%;
+}
+.canvas-history-list button[aria-pressed='true'] {
+    border-color: #2563eb;
+    background: #eff6ff;
+}
+.canvas-history-list span {
+    overflow-wrap: anywhere;
+}
+.canvas-history-list small,
+.canvas-history-list time {
+    font-size: 12px;
+    color: #64748b;
+}
+.canvas-history-restore {
+    border-top: 1px solid #dce1eb;
+    padding-top: 12px;
+}

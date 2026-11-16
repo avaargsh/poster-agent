@@ -44,6 +44,7 @@ export type Operation =
       }
     | { op: 'set_node_lock'; node_id: string; locked: boolean }
     | { op: 'reorder_node'; node_id: string; index: number }
+    | { op: 'restore_revision'; revision: number }
     | { op: 'undo' | 'redo' };
 
 export interface EditRequest {

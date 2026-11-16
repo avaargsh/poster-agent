@@ -28,6 +28,8 @@ import type { ProposalView } from './ProposalPanel';
 import { applyProposal } from './proposals';
 import { DesignLibrary } from './DesignLibrary';
 import { ExportPanel } from './ExportPanel';
+import { HistoryPanel } from './HistoryPanel';
+import type { HistoryView } from './history';
 
 interface Session {
     design: Design;
@@ -95,11 +97,11 @@ export function CanvasApp() {
     const [recent, setRecent] = useState(recentDesigns);
     const [openId, setOpenId] = useState('');
     const [storageNotice, setStorageNotice] = useState('');
-    const [showProposals, setShowProposals] = useState(() =>
-        new URL(location.href).searchParams.has('proposal'),
+    const [panel, setPanel] = useState<'inspector' | 'proposals' | 'export' | 'history'>(() =>
+        new URL(location.href).searchParams.has('proposal') ? 'proposals' : 'inspector',
     );
     const [proposalView, setProposalView] = useState<ProposalView | null>(null);
-    const [showExport, setShowExport] = useState(false);
+    const [historyView, setHistoryView] = useState<HistoryView | null>(null);
     const [inspectorEpoch, setInspectorEpoch] = useState(0);
     const [dirtyNodes, setDirtyNodes] = useState<Record<string, boolean>>({});
     const drafts = useRef(new Map<string, InspectorDraft>());
@@ -154,6 +156,7 @@ export function CanvasApp() {
 
     function adopt(design: Design, svg: string | null) {
         setProposalView(null);
+        setHistoryView(null);
         const sameProject = active.current?.design.document_id === design.document_id;
         const next = { design, svg };
         active.current = next;
@@ -166,7 +169,12 @@ export function CanvasApp() {
                   null),
         );
         record(design);
-        if (!sameProject) setShowProposals(new URL(location.href).searchParams.has('proposal'));
+        if (!sameProject)
+            setPanel((current) =>
+                current === 'proposals' && !new URL(location.href).searchParams.has('proposal')
+                    ? 'inspector'
+                    : current,
+            );
     }
 
     const open = useCallback(async (id: string) => {
@@ -295,7 +303,11 @@ export function CanvasApp() {
             acknowledged = true;
             receipt.current = null;
             setFailedEdit(null);
-            if (attempt.kind === 'proposal') resetDrafts();
+            if (
+                attempt.kind === 'proposal' ||
+                attempt.request.operations.some((op) => op.op === 'restore_revision')
+            )
+                resetDrafts();
             adopt(updated, null);
             try {
                 adopt(updated, await readPreview(updated));
@@ -347,7 +359,7 @@ export function CanvasApp() {
     }
 
     const design = session?.design;
-    const displayed = proposalView?.proposal.candidate ?? design;
+    const displayed = historyView?.design ?? proposalView?.proposal.candidate ?? design;
     const node = design?.nodes.find((item) => item.node_id === selected);
     const writeDisabled = Boolean(busy || failedEdit);
     return (
@@ -371,9 +383,11 @@ export function CanvasApp() {
                             : failedEdit
                               ? '保存待核对'
                               : design
-                                ? proposalView
-                                    ? `建议预览 · 基于版本 ${proposalView.proposal.base_revision}`
-                                    : `${hasDraft ? '有未保存的属性修改' : '已保存'} · 版本 ${design.revision}`
+                                ? historyView
+                                    ? `历史预览 · 版本 ${historyView.design.revision} · 当前版本 ${design.revision}`
+                                    : proposalView
+                                      ? `建议预览 · 基于版本 ${proposalView.proposal.base_revision}`
+                                      : `${hasDraft ? '有未保存的属性修改' : '已保存'} · 版本 ${design.revision}`
                                 : '准备创作'}
                 </div>
                 <div className="canvas-history-actions">
@@ -381,9 +395,11 @@ export function CanvasApp() {
                         type="button"
                         disabled={!design || Boolean(busy)}
                         onClick={() => {
-                            setShowExport(false);
-                            setShowProposals((value) => !value);
+                            setPanel((current) =>
+                                current === 'proposals' ? 'inspector' : 'proposals',
+                            );
                             setProposalView(null);
+                            setHistoryView(null);
                         }}
                     >
                         修改建议
@@ -395,19 +411,38 @@ export function CanvasApp() {
                             !session?.svg ||
                             writeDisabled ||
                             hasDraft ||
-                            Boolean(proposalView)
+                            Boolean(proposalView) ||
+                            Boolean(historyView)
                         }
                         onClick={() => {
-                            setShowProposals(false);
-                            setShowExport((value) => !value);
+                            setPanel((current) => (current === 'export' ? 'inspector' : 'export'));
                         }}
                     >
                         审核与导出
                     </button>
                     <button
                         type="button"
+                        disabled={!design || Boolean(busy)}
+                        onClick={() => {
+                            setPanel((current) =>
+                                current === 'history' ? 'inspector' : 'history',
+                            );
+                            setProposalView(null);
+                            setHistoryView(null);
+                        }}
+                    >
+                        历史版本
+                    </button>
+                    <button
+                        type="button"
                         aria-label="撤销修改"
-                        disabled={!design || writeDisabled || Boolean(proposalView) || showExport}
+                        disabled={
+                            !design ||
+                            writeDisabled ||
+                            Boolean(proposalView) ||
+                            panel === 'export' ||
+                            panel === 'history'
+                        }
                         onClick={() => void submit([{ op: 'undo' }])}
                     >
                         <Undo2 size={17} />
@@ -416,7 +451,13 @@ export function CanvasApp() {
                     <button
                         type="button"
                         aria-label="重做修改"
-                        disabled={!design || writeDisabled || Boolean(proposalView) || showExport}
+                        disabled={
+                            !design ||
+                            writeDisabled ||
+                            Boolean(proposalView) ||
+                            panel === 'export' ||
+                            panel === 'history'
+                        }
                         onClick={() => void submit([{ op: 'redo' }])}
                     >
                         <Redo2 size={17} />
@@ -616,10 +657,12 @@ export function CanvasApp() {
                 {session ? (
                     <Stage
                         design={displayed ?? session.design}
-                        svg={proposalView?.svg ?? session.svg}
+                        svg={historyView?.svg ?? proposalView?.svg ?? session.svg}
                         selected={selected}
                         busy={Boolean(busy)}
-                        readOnly={Boolean(proposalView || failedEdit || showExport)}
+                        readOnly={Boolean(
+                            proposalView || failedEdit || panel === 'export' || panel === 'history',
+                        )}
                         onSelect={setSelected}
                         onEdit={submit}
                     />
@@ -632,14 +675,29 @@ export function CanvasApp() {
                         <p>上传图片，填写标题和活动价，即可创建可编辑的海报。</p>
                     </section>
                 )}
-                {design && showExport ? (
+                {design && panel === 'history' ? (
+                    <HistoryPanel
+                        key={`${design.document_id}:${design.revision}`}
+                        design={design}
+                        busy={writeDisabled}
+                        hasDraft={hasDraft}
+                        view={historyView}
+                        onPreview={setHistoryView}
+                        onRestore={(revision) => submit([{ op: 'restore_revision', revision }])}
+                        onReload={() => void open(design.document_id)}
+                        onClose={() => {
+                            setHistoryView(null);
+                            setPanel('inspector');
+                        }}
+                    />
+                ) : design && panel === 'export' ? (
                     <ExportPanel
                         key={`${design.document_id}:${design.revision}`}
                         design={design}
                         disabled={writeDisabled || hasDraft || !session?.svg}
-                        onClose={() => setShowExport(false)}
+                        onClose={() => setPanel('inspector')}
                     />
-                ) : design && showProposals ? (
+                ) : design && panel === 'proposals' ? (
                     <ProposalPanel
                         key={design.document_id}
                         design={design}
@@ -648,7 +706,7 @@ export function CanvasApp() {
                         onPreview={setProposalView}
                         onApply={applySuggestion}
                         onClose={() => {
-                            setShowProposals(false);
+                            setPanel('inspector');
                             setProposalView(null);
                             const url = new URL(location.href);
                             url.searchParams.delete('proposal');
