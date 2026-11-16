@@ -722,3 +722,32 @@ textarea {
     border-color: #2563eb;
     background: #eff6ff;
 }
+.canvas-export-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.canvas-export fieldset {
+    display: grid;
+    gap: 16px;
+}
+.canvas-export-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+.canvas-export-check input {
+    width: auto;
+    margin-top: 4px;
+}
+.canvas-export-formats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.canvas-export-approved {
+    color: #17624b;
+}

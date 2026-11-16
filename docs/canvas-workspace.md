@@ -36,3 +36,7 @@ uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_canvas_worksp
 ```
 
 可选传入已隔离的服务地址和截图目录。浏览器可使用系统 Chrome，找不到时需预先安装 Playwright Chromium。`ci:browser` 任务包含这条回归流程。
+
+## 审核与导出
+
+画布现可核对精确保存版本，显式确认后下载 SVG，以及在已安装渲染器时下载 PNG。使用与凭据说明见 [画布导出](canvas-export.md)。
