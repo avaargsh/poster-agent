@@ -42,6 +42,8 @@ uv run --locked python -m app.run_local --reload --port 8000
 
 **历史版本** 支持分页回看与只读预览，将旧快照恢复为新版本，并沿用撤销、重做与原请求重试。使用说明见 [画布历史](docs/canvas-workspace.md#历史版本)。
 
+**画布 AI 修改** 可使用本机 Codex 账号提交自然语言需求，查看后台任务、停止执行，并将结果送入建议预览与显式应用。默认关闭，启用与恢复说明见 [AI 修改任务](docs/canvas-agent-tasks.md)。
+
 **Codex 账号实测** 已使用 ChatGPT 登录的 Codex CLI 完成真实读取、提案与状态查询，画布可预览实际模型生成的建议。可重复运行的验收脚本与证据范围见 [Codex 账号验收](docs/codex-account-acceptance.md)。
 
 工作台按任务分为四个入口，单张创作与批量处理同级：

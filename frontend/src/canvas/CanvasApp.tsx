@@ -30,6 +30,7 @@ import { DesignLibrary } from './DesignLibrary';
 import { ExportPanel } from './ExportPanel';
 import { HistoryPanel } from './HistoryPanel';
 import type { HistoryView } from './history';
+import { AgentPanel } from './AgentPanel';
 
 interface Session {
     design: Design;
@@ -97,14 +98,15 @@ export function CanvasApp() {
     const [recent, setRecent] = useState(recentDesigns);
     const [openId, setOpenId] = useState('');
     const [storageNotice, setStorageNotice] = useState('');
-    const [panel, setPanel] = useState<'inspector' | 'proposals' | 'export' | 'history'>(() =>
-        new URL(location.href).searchParams.has('proposal') ? 'proposals' : 'inspector',
+    const [panel, setPanel] = useState<'inspector' | 'proposals' | 'export' | 'history' | 'agent'>(
+        () => (new URL(location.href).searchParams.has('proposal') ? 'proposals' : 'inspector'),
     );
     const [proposalView, setProposalView] = useState<ProposalView | null>(null);
     const [historyView, setHistoryView] = useState<HistoryView | null>(null);
     const [inspectorEpoch, setInspectorEpoch] = useState(0);
     const [dirtyNodes, setDirtyNodes] = useState<Record<string, boolean>>({});
     const drafts = useRef(new Map<string, InspectorDraft>());
+    const agentDrafts = useRef(new Map<string, string>());
     const active = useRef<Session | null>(null);
     const writing = useRef(false);
     const receipt = useRef<FailedEdit | null>(null);
@@ -395,6 +397,17 @@ export function CanvasApp() {
                         type="button"
                         disabled={!design || Boolean(busy)}
                         onClick={() => {
+                            setPanel((current) => (current === 'agent' ? 'inspector' : 'agent'));
+                            setProposalView(null);
+                            setHistoryView(null);
+                        }}
+                    >
+                        AI 修改
+                    </button>
+                    <button
+                        type="button"
+                        disabled={!design || Boolean(busy)}
+                        onClick={() => {
                             setPanel((current) =>
                                 current === 'proposals' ? 'inspector' : 'proposals',
                             );
@@ -675,7 +688,22 @@ export function CanvasApp() {
                         <p>上传图片，填写标题和活动价，即可创建可编辑的海报。</p>
                     </section>
                 )}
-                {design && panel === 'history' ? (
+                {design && panel === 'agent' ? (
+                    <AgentPanel
+                        key={design.document_id}
+                        design={design}
+                        busy={writeDisabled}
+                        drafts={agentDrafts.current}
+                        onClose={() => setPanel('inspector')}
+                        onProposal={(id) => {
+                            const url = new URL(location.href);
+                            url.searchParams.set('proposal', id);
+                            history.replaceState(null, '', url);
+                            setPanel('proposals');
+                            setProposalView(null);
+                        }}
+                    />
+                ) : design && panel === 'history' ? (
                     <HistoryPanel
                         key={`${design.document_id}:${design.revision}`}
                         design={design}
