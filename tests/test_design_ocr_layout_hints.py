@@ -39,9 +39,7 @@ def test_matching_fields_with_node_overlap_remain_uncalibrated():
     assert report["design_node_overlap_status"] == "OVERLAP_ONLY_UNCALIBRATED"
     assert report["design_node_overlap_schema_version"] == 1
     assert len(report["design_node_overlap_fingerprint_sha256"]) == 64
-    assert [c["field"] for c in report["design_node_overlap_checks"]] == [
-        "title", "price", "cta"
-    ]
+    assert [c["field"] for c in report["design_node_overlap_checks"]] == ["title", "price", "cta"]
     price = report["design_node_overlap_checks"][1]
     assert price["node_id"] == "price"
     assert price["status"] == "OVERLAP_UNCALIBRATED"
@@ -107,6 +105,5 @@ def test_document_page_mismatch_fails_closed():
     report = _assess(doc, _checks())
     assert report["design_node_overlap_status"] == "BLOCKED"
     assert all(
-        c["status"] == "UNSUPPORTED_NODE_GEOMETRY"
-        for c in report["design_node_overlap_checks"]
+        c["status"] == "UNSUPPORTED_NODE_GEOMETRY" for c in report["design_node_overlap_checks"]
     )
