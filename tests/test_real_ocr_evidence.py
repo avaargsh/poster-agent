@@ -103,9 +103,7 @@ def test_probe_rejects_partial_spatial_evidence(tmp_path, monkeypatch):
         verify_probe(report, image, "Linux")
 
 
-def test_probe_rejects_reported_pixel_dimensions_different_from_actual_png(
-    tmp_path, monkeypatch
-):
+def test_probe_rejects_reported_pixel_dimensions_different_from_actual_png(tmp_path, monkeypatch):
     report, image = _make_probe(tmp_path, monkeypatch)
     data = json.loads(report.read_text())
     data["image"]["pixel_size"] = [200, 100]
