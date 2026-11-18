@@ -497,8 +497,6 @@ def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
     ("price_bbox", "spatial_state", "price_box_state"),
     [
         (None, "BLOCKED", "MISSING_BBOX"),
-        ([2, 65, 2, 115], "BLOCKED", "INVALID_BBOX"),
-        ([2, 65, 1030, 115], "BLOCKED", "INVALID_BBOX"),
         ([2, 65, 210, 115], "BOUNDS_ONLY_UNCALIBRATED", "BOX_PRESENT_UNCALIBRATED"),
     ],
 )
@@ -650,3 +648,48 @@ def test_corrupted_ocr_journal_json_fails_closed_on_read(
         )
         assert preview.status_code == 409, preview.text
         assert preview.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "invalid_bbox",
+    [
+        [2, 65, 2, 115],  # zero-width candidate
+        [2, 65, 1030, 115],  # beyond the approved 1024px raster
+        [2, 65, 210, 1025],  # beyond the approved raster height
+        [2, 115, 210, 65],  # inverted vertical extent
+    ],
+)
+def test_unusable_ocr_geometry_is_not_recorded_as_executed(
+    ocr_paths, product_bytes, monkeypatch, invalid_bbox
+):
+    calls = []
+    lines = _ocr_lines()
+    lines[1]["bbox"] = invalid_bbox
+
+    def invalid_engine_output(image, **kwargs):
+        calls.append(image.read_bytes())
+        return lines
+
+    monkeypatch.setattr(ocr_runs, "recognize", invalid_engine_output)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        first = client.post(_url(doc), json=payload, headers=_headers())
+        assert first.status_code == 201, first.text
+        assert first.json()["status"] == "UNKNOWN"
+        assert first.json()["reason"] == "OCR_EXECUTION_AMBIGUOUS"
+        assert first.json()["observations"] == []
+        assert first.json()["quality_verified"] is False
+        assert first.json()["release_ready"] is False
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 200
+        assert replay.json()["status"] == "UNKNOWN"
+        assert replay.json()["replayed"] is True
+        assert len(calls) == 1
+
+    with sqlite3.connect(ocr_paths) as connection:
+        row = connection.execute(
+            "SELECT status, observations_json FROM design_ocr_runs WHERE operation_id = ?",
+            (payload["operation_id"],),
+        ).fetchone()
+        assert row == ("UNKNOWN", None)
