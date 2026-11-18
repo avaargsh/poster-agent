@@ -355,9 +355,7 @@ def _recognize_serialized(
         )
 
 
-def _capture_model_output(
-    rows: object, *, width: int, height: int
-) -> tuple[list[dict], dict]:
+def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[list[dict], dict]:
     if not isinstance(rows, list) or len(rows) > 200:
         raise ValueError("unexpected OCR line collection")
     observed = [_CapturedLine.model_validate(item).model_dump(mode="json") for item in rows]
