@@ -74,6 +74,8 @@ retroactively. The model bundle is rechecked immediately before and after
 inference; drift or unreadable weights after admission yields
 `UNKNOWN / MODEL_PROFILE_CHANGED`, with no retained observations.
 
+Any **present** model-reported bounding box must also have strictly positive area and remain entirely inside the exact approved PNG dimensions. Invalid rectangles are rejected before an `EXECUTED` receipt can persist; because the model may already have run, the journal records `UNKNOWN / OCR_EXECUTION_AMBIGUOUS` and replay cannot re-invoke it. A missing box is retained as `null`, with spatial comparison `BLOCKED / MISSING_BBOX` rather than fabricated placement evidence. These synthetic checks do not prove the real OCR adapter's accuracy.
+
 The terminal update again validates the current approved snapshot. Successful
 local adapter output is bounded to at most 200 lines of plain text, confidence,
 and optional 4-integer bounding boxes. Valid results are stored alongside
