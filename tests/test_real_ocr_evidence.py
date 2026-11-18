@@ -77,6 +77,44 @@ def test_cannot_accept_missing_original_ocr_lines_or_no_boxes(tmp_path, monkeypa
         verify_probe(report, image, "Linux")
 
 
+
+@pytest.mark.parametrize(
+    "invalid_box",
+    [
+        [2, 3, 101, 25],  # right edge exceeds the 100px raster
+        [2, 3, 30, 101],  # bottom edge exceeds the 100px raster
+    ],
+)
+def test_probe_rejects_boxes_outside_actual_image(tmp_path, monkeypatch, invalid_box):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    data = json.loads(report.read_text())
+    data["ocr_lines"][0]["bbox"] = invalid_box
+    report.write_text(json.dumps(data))
+    with pytest.raises(EvidenceInvalid, match="坐标框"):
+        verify_probe(report, image, "Linux")
+
+
+def test_probe_rejects_partial_spatial_evidence(tmp_path, monkeypatch):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    data = json.loads(report.read_text())
+    data["ocr_lines"].append({"text": "立即购买", "score": 0.8, "bbox": None})
+    data["line_count"] = 2
+    report.write_text(json.dumps(data, ensure_ascii=False))
+    with pytest.raises(EvidenceInvalid, match="坐标框"):
+        verify_probe(report, image, "Linux")
+
+
+def test_probe_rejects_reported_pixel_dimensions_different_from_actual_png(
+    tmp_path, monkeypatch
+):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    data = json.loads(report.read_text())
+    data["image"]["pixel_size"] = [200, 100]
+    report.write_text(json.dumps(data))
+    with pytest.raises(EvidenceInvalid, match="尺寸"):
+        verify_probe(report, image, "Linux")
+
+
 def test_tampered_input_and_missing_installed_versions_rejected(tmp_path, monkeypatch):
     report, image = _make_probe(tmp_path, monkeypatch)
     image.write_bytes(image.read_bytes() + b"tampered")
