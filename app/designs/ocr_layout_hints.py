@@ -103,9 +103,7 @@ def assess_design_node_hints(
                 status = "NO_VALID_OCR_BOX"
             else:
                 fraction = _intersection_fraction(box, node_rect)
-                status = (
-                    "OVERLAP_UNCALIBRATED" if fraction > 0 else "OUTSIDE_DESIGN_NODE"
-                )
+                status = "OVERLAP_UNCALIBRATED" if fraction > 0 else "OUTSIDE_DESIGN_NODE"
         findings.append(
             {
                 "field": field,
