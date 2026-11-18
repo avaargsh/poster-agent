@@ -113,6 +113,19 @@ def _request_fingerprint(
 
 def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
     """Never promote stored adapter observations to verification or approval."""
+    try:
+        observations = (
+            json.loads(row["observations_json"])
+            if row["status"] == "EXECUTED" and row["observations_json"] is not None
+            else []
+        )
+        runtime = json.loads(row["runtime_json"]) if row["runtime_json"] else None
+    except (ValueError, TypeError, UnicodeError):
+        raise OCRSourceMismatch() from None
+    if not isinstance(observations, list) or (
+        runtime is not None and not isinstance(runtime, dict)
+    ):
+        raise OCRSourceMismatch()
     return {
         "operation_id": row["operation_id"],
         "document_id": row["document_id"],
@@ -128,12 +141,8 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
         "model_profile_sha256": row["model_profile_sha256"],
         "status": row["status"],
         "reason": row["reason"],
-        "observations": (
-            json.loads(row["observations_json"])
-            if row["status"] == "EXECUTED" and row["observations_json"] is not None
-            else []
-        ),
-        "runtime": json.loads(row["runtime_json"]) if row["runtime_json"] else None,
+        "observations": observations,
+        "runtime": runtime,
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "replayed": replayed,
