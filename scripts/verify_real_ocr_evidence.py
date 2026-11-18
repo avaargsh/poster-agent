@@ -14,6 +14,8 @@ import json
 import math
 from pathlib import Path
 
+from PIL import Image
+
 from evals.image_fixtures import ImageManifest
 
 SHA_LENGTH = 64
@@ -38,7 +40,7 @@ def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _valid_bbox(box: object) -> bool:
+def _valid_bbox(box: object, *, width: int, height: int) -> bool:
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return False
     if any(
@@ -47,7 +49,7 @@ def _valid_bbox(box: object) -> bool:
     ):
         return False
     x1, y1, x2, y2 = box
-    return x1 < x2 and y1 < y2 and x1 >= 0 and y1 >= 0
+    return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
 
 
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
@@ -67,20 +69,49 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         raise EvidenceInvalid("缺少推理依赖的模块检测结果")
     if expected_platform is not None and environment.get("platform") != expected_platform:
         raise EvidenceInvalid("记录的平台与要求的平台不一致")
-    image = probe.get("image") or {}
-    actual = _sha256(image_file.read_bytes())
+    image = probe.get("image")
+    if not isinstance(image, dict):
+        raise EvidenceInvalid("缺少有效的输入图像证据")
+    try:
+        actual = _sha256(image_file.read_bytes())
+    except OSError:
+        raise EvidenceInvalid("无法读取 OCR 输入图像") from None
     if image.get("sha256") != actual:
         raise EvidenceInvalid("实际 PNG 图片 SHA-256 与探针报告不一致")
+    try:
+        with Image.open(image_file) as source:
+            actual_size = [source.width, source.height]
+            source.verify()
+    except (OSError, ValueError):
+        raise EvidenceInvalid("OCR 输入图像不是有效的受支持图像") from None
+    reported_size = image.get("pixel_size")
+    if (
+        not isinstance(reported_size, list)
+        or len(reported_size) != 2
+        or any(type(value) is not int for value in reported_size)
+        or reported_size != actual_size
+    ):
+        raise EvidenceInvalid("探针图像尺寸与实际像素尺寸不一致")
     rows = probe.get("ocr_lines")
     if not isinstance(rows, list) or not rows:
         raise EvidenceInvalid("缺少真实 OCR 原始识别行；请使用 --include-text 运行")
     if probe.get("line_count") != len(rows):
         raise EvidenceInvalid("OCR 行数与原始证据不一致")
-    bbox_count = sum(_valid_bbox(row.get("bbox")) for row in rows if isinstance(row, dict))
-    if bbox_count == 0:
-        raise EvidenceInvalid("实际 OCR 没有任何有效文字坐标框，无法验证位置检查链路")
+    width, height = actual_size
+    bbox_count = sum(
+        _valid_bbox(row.get("bbox"), width=width, height=height)
+        for row in rows
+        if isinstance(row, dict)
+    )
+    if bbox_count != len(rows):
+        raise EvidenceInvalid("OCR 坐标框缺失、无效或超出实际图像边界，不能形成完整空间证据")
     duration = probe.get("elapsed_ms")
-    if not isinstance(duration, (int, float)) or duration < 0:
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
+        or duration < 0
+    ):
         raise EvidenceInvalid("缺少合法推理耗时")
     return {
         "probe_sha256": _sha256(probe_file.read_bytes()),
