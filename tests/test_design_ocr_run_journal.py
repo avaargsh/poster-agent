@@ -533,7 +533,6 @@ def test_journaled_comparison_does_not_confuse_text_match_with_spatial_evidence(
         assert report["release_ready"] is False
 
 
-
 def test_journaled_comparison_exposes_non_authoritative_design_node_hints(
     ocr_paths, product_bytes, monkeypatch
 ):
@@ -551,11 +550,11 @@ def test_journaled_comparison_exposes_non_authoritative_design_node_hints(
         assert report["design_node_overlap_schema_version"] == 1
         assert len(report["design_node_overlap_checks"]) == 3
         assert {item["field"] for item in report["design_node_overlap_checks"]} == {
-            "title", "price", "cta"
+            "title",
+            "price",
+            "cta",
         }
-        assert report["design_node_overlap_status"] in {
-            "BLOCKED", "OVERLAP_ONLY_UNCALIBRATED"
-        }
+        assert report["design_node_overlap_status"] in {"BLOCKED", "OVERLAP_ONLY_UNCALIBRATED"}
         assert len(report["design_node_overlap_fingerprint_sha256"]) == 64
         assert report["runtime_attested"] is False
         assert report["quality_verified"] is False
