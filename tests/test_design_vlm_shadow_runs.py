@@ -293,3 +293,79 @@ def test_config_requires_exact_local_digest_and_unsafe_model_output_fails_closed
     ):
         with pytest.raises(ValueError):
             parse_findings(invalid)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "malformed_findings",
+        "wrong_findings_shape",
+        "injected_release_authority",
+        "oversized_findings",
+        "malformed_runtime",
+        "spoofed_runtime_attestation",
+        "unknown_with_stale_findings",
+    ],
+)
+def test_corrupted_vlm_journal_fails_closed_on_status_and_replay(
+    local_vlm, product_bytes, monkeypatch, mutation
+):
+    calls = []
+    monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
+
+    def inspect(png, profile):
+        calls.append(1)
+        return _findings()
+
+    monkeypatch.setattr(visual_runs, "inspect_approved_png", inspect)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert created.json()["status"] == "EXECUTED"
+        assert len(calls) == 1
+
+        with sqlite3.connect(local_vlm) as db:
+            if mutation == "malformed_findings":
+                changes = {"findings_json": "{broken"}
+            elif mutation == "wrong_findings_shape":
+                changes = {"findings_json": "{}"}
+            elif mutation == "injected_release_authority":
+                changes = {
+                    "findings_json": json.dumps(
+                        [{**_findings()[0], "release_ready": True}], ensure_ascii=False
+                    )
+                }
+            elif mutation == "oversized_findings":
+                changes = {"findings_json": "[" + " " * 33000 + "]"}
+            elif mutation == "malformed_runtime":
+                changes = {"runtime_json": "{broken"}
+            elif mutation == "spoofed_runtime_attestation":
+                changes = {
+                    "runtime_json": json.dumps(
+                        {
+                            "source": "local_ollama",
+                            "local_model_digest_claim": MODEL_DIGEST,
+                            "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
+                            "attested": True,
+                        }
+                    )
+                }
+            else:
+                changes = {"status": "UNKNOWN"}
+            for column, value in changes.items():
+                db.execute(
+                    f"UPDATE design_vlm_runs SET {column} = ? WHERE operation_id = ?",
+                    (value, payload["operation_id"]),
+                )
+
+        lookup = client.get(
+            _url(doc) + "/" + payload["operation_id"], headers=_headers()
+        )
+        assert lookup.status_code == 409, lookup.text
+        assert lookup.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 409, replay.text
+        assert replay.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
+        assert len(calls) == 1
