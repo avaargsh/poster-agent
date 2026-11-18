@@ -597,3 +597,30 @@ def test_journaled_comparison_rejects_corrupted_stored_geometry(
         response = client.get(endpoint, headers=_headers())
         assert response.status_code == 409, response.text
         assert response.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+
+
+@pytest.mark.parametrize("journal_column", ["observations_json", "runtime_json"])
+def test_corrupted_ocr_journal_json_fails_closed_on_read(
+    ocr_paths, product_bytes, monkeypatch, journal_column
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 201, response.text
+        with sqlite3.connect(ocr_paths) as connection:
+            connection.execute(
+                f"UPDATE design_ocr_runs SET {journal_column} = ? WHERE operation_id = ?",
+                ("{bad-json", payload["operation_id"]),
+            )
+        lookup = client.get(
+            _url(doc) + "/" + payload["operation_id"], headers=_headers()
+        )
+        assert lookup.status_code == 409, lookup.text
+        assert lookup.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+        preview = client.get(
+            _url(doc) + "/" + payload["operation_id"] + "/comparison-preview",
+            headers=_headers(),
+        )
+        assert preview.status_code == 409, preview.text
+        assert preview.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
