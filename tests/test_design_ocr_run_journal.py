@@ -491,3 +491,134 @@ def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
         changed_raster = client.get(endpoint, headers=_headers())
         assert changed_raster.status_code == 409, changed_raster.text
         assert changed_raster.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("price_bbox", "spatial_state", "price_box_state"),
+    [
+        (None, "BLOCKED", "MISSING_BBOX"),
+        ([2, 65, 2, 115], "BLOCKED", "INVALID_BBOX"),
+        ([2, 65, 1030, 115], "BLOCKED", "INVALID_BBOX"),
+        ([2, 65, 210, 115], "BOUNDS_ONLY_UNCALIBRATED", "BOX_PRESENT_UNCALIBRATED"),
+    ],
+)
+def test_journaled_comparison_does_not_confuse_text_match_with_spatial_evidence(
+    ocr_paths, product_bytes, monkeypatch, price_bbox, spatial_state, price_box_state
+):
+    lines = _ocr_lines()
+    lines[1]["bbox"] = price_bbox
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: lines)
+
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        executed = client.post(_url(doc), json=payload, headers=_headers())
+        assert executed.status_code == 201, executed.text
+        assert executed.json()["status"] == "EXECUTED"
+
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 200, response.text
+        report = response.json()
+        assert report["declared_consistency"] == "MATCHES_EXPECTED"
+        assert report["spatial_evidence_status"] == spatial_state
+        by_field = {item["field"]: item for item in report["spatial_field_checks"]}
+        assert by_field["price"]["status"] == price_box_state
+        assert by_field["price"]["bbox"] == (
+            price_bbox if spatial_state == "BOUNDS_ONLY_UNCALIBRATED" else None
+        )
+        assert len(report["journaled_observations_sha256"]) == 64
+        assert len(report["spatial_comparison_fingerprint_sha256"]) == 64
+        assert report["runtime_attested"] is False
+        assert report["quality_verified"] is False
+        assert report["release_ready"] is False
+
+
+def test_journaled_comparison_fingerprint_covers_original_bbox(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        before = client.get(endpoint, headers=_headers()).json()
+
+        # Deliberate local journal rewrite models the absence of independent
+        # attestation; the new diagnostic digest must bind even box-only edits.
+        with sqlite3.connect(ocr_paths) as connection:
+            old = connection.execute(
+                "SELECT observations_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            rows = json.loads(old)
+            rows[1]["bbox"][0] += 1
+            connection.execute(
+                "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                (json.dumps(rows, ensure_ascii=False), payload["operation_id"]),
+            )
+        after_response = client.get(endpoint, headers=_headers())
+        assert after_response.status_code == 200, after_response.text
+        after = after_response.json()
+        assert before["observations_sha256"] == after["observations_sha256"]
+        assert before["journaled_observations_sha256"] != after["journaled_observations_sha256"]
+        assert (
+            before["spatial_comparison_fingerprint_sha256"]
+            != after["spatial_comparison_fingerprint_sha256"]
+        )
+        assert after["quality_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "corrupted_bbox",
+    [
+        [True, 65, 210, 115],
+        [10, 65, 210, float("nan")],
+    ],
+)
+def test_journaled_comparison_rejects_corrupted_stored_geometry(
+    ocr_paths, product_bytes, monkeypatch, corrupted_bbox
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        with sqlite3.connect(ocr_paths) as connection:
+            source = connection.execute(
+                "SELECT observations_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            lines = json.loads(source)
+            lines[1]["bbox"] = corrupted_bbox
+            connection.execute(
+                "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                (json.dumps(lines, ensure_ascii=False), payload["operation_id"]),
+            )
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+
+
+@pytest.mark.parametrize("journal_column", ["observations_json", "runtime_json"])
+def test_corrupted_ocr_journal_json_fails_closed_on_read(
+    ocr_paths, product_bytes, monkeypatch, journal_column
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 201, response.text
+        with sqlite3.connect(ocr_paths) as connection:
+            connection.execute(
+                f"UPDATE design_ocr_runs SET {journal_column} = ? WHERE operation_id = ?",
+                ("{bad-json", payload["operation_id"]),
+            )
+        lookup = client.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert lookup.status_code == 409, lookup.text
+        assert lookup.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+        preview = client.get(
+            _url(doc) + "/" + payload["operation_id"] + "/comparison-preview",
+            headers=_headers(),
+        )
+        assert preview.status_code == 409, preview.text
+        assert preview.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"

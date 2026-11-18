@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from .errors import DesignError, NotFoundError
 from .ocr_model_policy import load_model_profile
 from .ocr_observations import OCRObservationRequest, assess_unattested
-from .ocr_runs import OCRRunJournal, OCRSourceMismatch
+from .ocr_runs import OCRRunJournal, OCRSourceMismatch, _CapturedLine
+from .ocr_spatial_evidence import assess_spatial_evidence
 from .rasterization import rasterize_svg
 from .repository import DesignRepository
 
@@ -91,19 +92,43 @@ def compare_journaled_ocr_run(
         raise OCRSourceMismatch()
 
     try:
+        # Validate the *entire* persisted record before hashing geometry:
+        # SQLite content is not independently trusted and may be corrupted.
+        captured_lines = [
+            _CapturedLine.model_validate(item).model_dump(mode="json")
+            for item in row["observations"]
+        ]
         observations = OCRObservationRequest.model_validate(
-            {
-                "lines": [
-                    {"text": item["text"], "score": item["score"]} for item in row["observations"]
-                ]
-            }
+            {"lines": [{"text": item["text"], "score": item["score"]} for item in captured_lines]}
         )
     except (ValidationError, KeyError, TypeError, ValueError):
         raise OCRSourceMismatch() from None
 
     compared = assess_unattested(target, observations)
+    spatial = assess_spatial_evidence(
+        captured_lines,
+        compared["field_checks"],
+        width=raster.width,
+        height=raster.height,
+        source_binding={
+            "document_id": target["document_id"],
+            "revision": target["revision"],
+            "approval_id": target["approval_id"],
+            "spec_digest": target["spec_digest"],
+            "asset_manifest_digest": target["asset_manifest_digest"],
+            "renderer_version": target["renderer_version"],
+            "svg_sha256": raster.svg_sha256,
+            "png_sha256": raster.png_sha256,
+            "rasterizer": raster.rasterizer,
+            "model_profile_sha256": model_profile.fingerprint,
+            "operation_id": operation_id,
+            "principal_id": principal,
+            "policy_digest": policy,
+        },
+    )
     return {
         **compared,
+        **spatial,
         "operation_id": operation_id,
         "journal_status": "EXECUTED",
         "source_state": "CURRENT_EXECUTED_UNATTESTED",

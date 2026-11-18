@@ -24,6 +24,29 @@ engine or mutates the journal. It requires the same named local reviewer
    then compared with the exact current title, price and CTA using the same
    deterministic, non-attesting comparison contract as the OCR observation
    preview.
+6. Separately, each text-matched field's **original journaled** `bbox` is
+   checked for integer `[left, top, right, bottom]` coordinates, positive
+   area, and containment within the exact re-rendered PNG dimensions. Missing
+   or schema-valid degenerate/out-of-raster boxes yield `BLOCKED`. Corrupted
+   non-integer, non-finite or otherwise invalid stored OCR rows fail closed with
+   `409 OCR_SOURCE_MISMATCH` before comparison/fingerprinting.
+   All present and in-bounds boxes yield `BOUNDS_ONLY_UNCALIBRATED`, **not**
+   a confirmed title/price/CTA position: expected zones have not been calibrated.
+
+The v1 `declared_consistency` and `observations_sha256` fields are
+**text-only** and remain unchanged for compatibility. New read-only fields:
+`spatial_evidence_status`, `spatial_field_checks`,
+`journaled_observations_sha256` (full stored lines, including bboxes),
+`spatial_comparison_schema_version=1`, `spatial_source_sha256`
+(content identity of approved document/revision, approval, spec, assets, PNG/SVG
+digests, rasterizer, pinned model profile, operation, principal and policy), and
+`spatial_comparison_fingerprint_sha256` (schema, source identity, full
+original-line digest, canvas dimensions, text matches and spatial findings).
+Malformed persisted observation/runtime JSON fails closed with
+`409 OCR_SOURCE_MISMATCH` rather than an unhandled server response. These
+hashes are local, forgeable content identities, not signed independent receipts.
+Even `BOUNDS_ONLY_UNCALIBRATED` cannot infer correct field placement:
+an unrelated text box can lie within canvas bounds.
 
 `UNKNOWN`/`UNAVAILABLE` => `409 OCR_RUN_NOT_EXECUTED`.
 Changed source, model identity or raster => `409 OCR_SOURCE_MISMATCH`,
