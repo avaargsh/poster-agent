@@ -10,7 +10,9 @@ import hmac
 
 from pydantic import ValidationError
 
+from .approvals import snapshot_digests
 from .errors import DesignError, NotFoundError
+from .ocr_layout_hints import assess_design_node_hints
 from .ocr_model_policy import load_model_profile
 from .ocr_observations import OCRObservationRequest, assess_unattested
 from .ocr_runs import OCRRunJournal, OCRSourceMismatch, _CapturedLine
@@ -126,9 +128,32 @@ def compare_journaled_ocr_run(
             "policy_digest": policy,
         },
     )
+    # The design-node envelopes must belong to the exact approved spec, not
+    # a historical snapshot or a concurrent edit. They remain uncalibrated
+    # layout hints and cannot authorize publication.
+    approved_document = repository.get(document_id, revision)
+    spec_digest, asset_digest = snapshot_digests(approved_document)
+    if (
+        spec_digest != target["spec_digest"]
+        or asset_digest != target["asset_manifest_digest"]
+        or approved_document.page.width != raster.width
+        or approved_document.page.height != raster.height
+    ):
+        raise OCRSourceMismatch()
+    layout_hints = assess_design_node_hints(
+        approved_document,
+        spatial["spatial_field_checks"],
+        width=raster.width,
+        height=raster.height,
+        spatial_source_sha256=spatial["spatial_source_sha256"],
+    )
+    if repository.ocr_target(document_id, revision, required_policy_digest=policy) != target:
+        raise OCRSourceMismatch()
+
     return {
         **compared,
         **spatial,
+        **layout_hints,
         "operation_id": operation_id,
         "journal_status": "EXECUTED",
         "source_state": "CURRENT_EXECUTED_UNATTESTED",
