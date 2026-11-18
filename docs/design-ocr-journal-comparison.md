@@ -26,8 +26,10 @@ engine or mutates the journal. It requires the same named local reviewer
    preview.
 6. Separately, each text-matched field's **original journaled** `bbox` is
    checked for integer `[left, top, right, bottom]` coordinates, positive
-   area, and containment within the exact re-rendered PNG dimensions. Missing,
-   degenerate, non-integer or out-of-bounds boxes yield `BLOCKED`.
+   area, and containment within the exact re-rendered PNG dimensions. Missing
+   or schema-valid degenerate/out-of-raster boxes yield `BLOCKED`. Corrupted
+   non-integer, non-finite or otherwise invalid stored OCR rows fail closed with
+   `409 OCR_SOURCE_MISMATCH` before comparison/fingerprinting.
    All present and in-bounds boxes yield `BOUNDS_ONLY_UNCALIBRATED`, **not**
    a confirmed title/price/CTA position: expected zones have not been calibrated.
 
