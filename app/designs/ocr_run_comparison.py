@@ -99,11 +99,7 @@ def compare_journaled_ocr_run(
             for item in row["observations"]
         ]
         observations = OCRObservationRequest.model_validate(
-            {
-                "lines": [
-                    {"text": item["text"], "score": item["score"]} for item in captured_lines
-                ]
-            }
+            {"lines": [{"text": item["text"], "score": item["score"]} for item in captured_lines]}
         )
     except (ValidationError, KeyError, TypeError, ValueError):
         raise OCRSourceMismatch() from None
