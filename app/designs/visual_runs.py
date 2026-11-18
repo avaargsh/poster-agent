@@ -116,9 +116,7 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
                 or runtime["execution_evidence"] != "OPERATOR_LOCAL_NOT_ATTESTED"
                 or runtime["attested"] is not False
                 or not isinstance(runtime["local_model_digest_claim"], str)
-                or re.fullmatch(
-                    r"sha256:[0-9a-f]{64}", runtime["local_model_digest_claim"]
-                ) is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", runtime["local_model_digest_claim"]) is None
             ):
                 raise ValueError("invalid local-only runtime provenance")
         elif status in {"EXECUTING", "UNKNOWN"}:
