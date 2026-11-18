@@ -157,3 +157,12 @@ def test_batch_rejects_fake_not_run_summary(tmp_path, monkeypatch):
     shutil.copytree(manifest.parent, base / "images")
     with pytest.raises(EvidenceInvalid, match="PaddleOCR"):
         verify_batch(base)
+
+@pytest.mark.parametrize("invalid_duration", [True, False, float("nan"), float("inf"), -float("inf"), "5"])
+def test_probe_rejects_non_finite_or_non_numeric_elapsed_ms(tmp_path, monkeypatch, invalid_duration):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    data = json.loads(report.read_text(encoding="utf-8"))
+    data["elapsed_ms"] = invalid_duration
+    report.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="耗时"):
+        verify_probe(report, image, "Linux")
