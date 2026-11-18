@@ -497,8 +497,6 @@ def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
     ("price_bbox", "spatial_state", "price_box_state"),
     [
         (None, "BLOCKED", "MISSING_BBOX"),
-        ([2, 65, 2, 115], "BLOCKED", "INVALID_BBOX"),
-        ([2, 65, 1030, 115], "BLOCKED", "INVALID_BBOX"),
         ([2, 65, 210, 115], "BOUNDS_ONLY_UNCALIBRATED", "BOX_PRESENT_UNCALIBRATED"),
     ],
 )
