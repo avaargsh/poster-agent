@@ -37,10 +37,14 @@ The v1 `declared_consistency` and `observations_sha256` fields are
 **text-only** and remain unchanged for compatibility. New read-only fields:
 `spatial_evidence_status`, `spatial_field_checks`,
 `journaled_observations_sha256` (full stored lines, including bboxes),
-`spatial_comparison_schema_version=1`, and
-`spatial_comparison_fingerprint_sha256` (schema, original-line digest,
-canvas dimensions, text matches and spatial findings). These hashes are
-local, forgeable content identities, not signed independent receipts.
+`spatial_comparison_schema_version=1`, `spatial_source_sha256`
+(content identity of approved document/revision, approval, spec, assets, PNG/SVG
+digests, rasterizer, pinned model profile, operation, principal and policy), and
+`spatial_comparison_fingerprint_sha256` (schema, source identity, full
+original-line digest, canvas dimensions, text matches and spatial findings).
+Malformed persisted observation/runtime JSON fails closed with
+`409 OCR_SOURCE_MISMATCH` rather than an unhandled server response. These
+hashes are local, forgeable content identities, not signed independent receipts.
 Even `BOUNDS_ONLY_UNCALIBRATED` cannot infer correct field placement:
 an unrelated text box can lie within canvas bounds.
 
