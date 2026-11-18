@@ -27,7 +27,12 @@ def _bounded_box(box: object, *, width: int, height: int) -> bool:
 
 
 def assess_spatial_evidence(
-    captured_lines: list[dict], field_checks: list[dict], *, width: int, height: int
+    captured_lines: list[dict],
+    field_checks: list[dict],
+    *,
+    width: int,
+    height: int,
+    source_binding: dict,
 ) -> dict:
     """Bind journaled geometry to matched text without asserting field placement.
 
@@ -66,10 +71,14 @@ def assess_spatial_evidence(
         else "BLOCKED"
     )
     observations_hash = _canonical_sha256(captured_lines)
+    # Bind the diagnostic to the exact approved source, model profile and
+    # operation, not only to text, boxes and canvas dimensions.
+    source_hash = _canonical_sha256(source_binding)
     fingerprint = _canonical_sha256(
         {
             "schema_version": _SPATIAL_SCHEMA_VERSION,
             "journaled_observations_sha256": observations_hash,
+            "spatial_source_sha256": source_hash,
             "canvas": {"width": width, "height": height},
             "text_field_checks": field_checks,
             "spatial_field_checks": checks,
@@ -81,5 +90,6 @@ def assess_spatial_evidence(
         "spatial_field_checks": checks,
         "spatial_comparison_schema_version": _SPATIAL_SCHEMA_VERSION,
         "journaled_observations_sha256": observations_hash,
+        "spatial_source_sha256": source_hash,
         "spatial_comparison_fingerprint_sha256": fingerprint,
     }
