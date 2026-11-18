@@ -77,7 +77,6 @@ def test_cannot_accept_missing_original_ocr_lines_or_no_boxes(tmp_path, monkeypa
         verify_probe(report, image, "Linux")
 
 
-
 @pytest.mark.parametrize(
     "invalid_box",
     [
