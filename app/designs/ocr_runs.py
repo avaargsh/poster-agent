@@ -355,10 +355,21 @@ def _recognize_serialized(
         )
 
 
-def _capture_model_output(rows: object) -> tuple[list[dict], dict]:
+def _capture_model_output(
+    rows: object, *, width: int, height: int
+) -> tuple[list[dict], dict]:
     if not isinstance(rows, list) or len(rows) > 200:
         raise ValueError("unexpected OCR line collection")
     observed = [_CapturedLine.model_validate(item).model_dump(mode="json") for item in rows]
+    # A valid 4-integer tuple is not necessarily a valid pixel rectangle.
+    # Reject impossible *present* boxes before writing the durable EXECUTED
+    # receipt. Absent boxes remain None and are blocked by spatial comparison.
+    for line in observed:
+        box = line["bbox"]
+        if box is not None and not (
+            0 <= box[0] < box[2] <= width and 0 <= box[1] < box[3] <= height
+        ):
+            raise ValueError("OCR rectangle is outside the approved raster")
     telemetry = getattr(rows, "runtime", None)
     telemetry = telemetry if isinstance(telemetry, dict) else {}
 
@@ -440,7 +451,9 @@ def submit_ocr_run(
             if load_model_profile(model_config_raw) != profile:
                 raise OCRModelProfileError("local OCR model profile changed before inference")
             rows = _recognize_serialized(image, profile=profile)
-            observations, runtime = _capture_model_output(rows)
+            observations, runtime = _capture_model_output(
+                rows, width=raster.width, height=raster.height
+            )
             if load_model_profile(model_config_raw) != profile:
                 raise OCRModelProfileError("local OCR model profile changed during inference")
     except OCRModelProfileError:
