@@ -566,3 +566,34 @@ def test_journaled_comparison_fingerprint_covers_original_bbox(
             != after["spatial_comparison_fingerprint_sha256"]
         )
         assert after["quality_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "corrupted_bbox",
+    [
+        [True, 65, 210, 115],
+        [10, 65, 210, float("nan")],
+    ],
+)
+def test_journaled_comparison_rejects_corrupted_stored_geometry(
+    ocr_paths, product_bytes, monkeypatch, corrupted_bbox
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        with sqlite3.connect(ocr_paths) as connection:
+            source = connection.execute(
+                "SELECT observations_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            lines = json.loads(source)
+            lines[1]["bbox"] = corrupted_bbox
+            connection.execute(
+                "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                (json.dumps(lines, ensure_ascii=False), payload["operation_id"]),
+            )
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
