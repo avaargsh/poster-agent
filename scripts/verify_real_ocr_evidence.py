@@ -106,7 +106,12 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     if bbox_count != len(rows):
         raise EvidenceInvalid("OCR 坐标框缺失、无效或超出实际图像边界，不能形成完整空间证据")
     duration = probe.get("elapsed_ms")
-    if not isinstance(duration, (int, float)) or duration < 0:
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
+        or duration < 0
+    ):
         raise EvidenceInvalid("缺少合法推理耗时")
     return {
         "probe_sha256": _sha256(probe_file.read_bytes()),
