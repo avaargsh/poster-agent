@@ -359,9 +359,7 @@ def test_corrupted_vlm_journal_fails_closed_on_status_and_replay(
                     (value, payload["operation_id"]),
                 )
 
-        lookup = client.get(
-            _url(doc) + "/" + payload["operation_id"], headers=_headers()
-        )
+        lookup = client.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
         assert lookup.status_code == 409, lookup.text
         assert lookup.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
 
