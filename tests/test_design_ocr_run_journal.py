@@ -533,6 +533,34 @@ def test_journaled_comparison_does_not_confuse_text_match_with_spatial_evidence(
         assert report["release_ready"] is False
 
 
+def test_journaled_comparison_exposes_non_authoritative_design_node_hints(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        executed = client.post(_url(doc), json=payload, headers=_headers())
+        assert executed.status_code == 201, executed.text
+        response = client.get(
+            _url(doc) + "/" + payload["operation_id"] + "/comparison-preview",
+            headers=_headers(),
+        )
+        assert response.status_code == 200, response.text
+        report = response.json()
+        assert report["design_node_overlap_schema_version"] == 1
+        assert len(report["design_node_overlap_checks"]) == 3
+        assert {item["field"] for item in report["design_node_overlap_checks"]} == {
+            "title",
+            "price",
+            "cta",
+        }
+        assert report["design_node_overlap_status"] in {"BLOCKED", "OVERLAP_ONLY_UNCALIBRATED"}
+        assert len(report["design_node_overlap_fingerprint_sha256"]) == 64
+        assert report["runtime_attested"] is False
+        assert report["quality_verified"] is False
+        assert report["release_ready"] is False
+
+
 def test_journaled_comparison_fingerprint_covers_original_bbox(
     ocr_paths, product_bytes, monkeypatch
 ):

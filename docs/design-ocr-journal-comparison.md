@@ -48,6 +48,39 @@ hashes are local, forgeable content identities, not signed independent receipts.
 Even `BOUNDS_ONLY_UNCALIBRATED` cannot infer correct field placement:
 an unrelated text box can lie within canvas bounds.
 
+
+## Approved DesignDocument node-envelope hints (diagnostic v1)
+
+The comparison preview also derives a separate **read-only layout hint**
+from the exact current DesignDocument revision. The loaded document's
+specification and asset-manifest digests must match the approved snapshot;
+its page dimensions must match the re-rendered raster. The source is
+rechecked after this read. Drift returns `409 OCR_SOURCE_MISMATCH`.
+
+For title, price and CTA, `design_node_overlap_checks` compare each
+text-matched journaled OCR rectangle with the corresponding **visible,
+unrotated DesignDocument text-node authoring envelope**. Missing/invalid
+OCR boxes, missing or hidden text nodes, rotated/out-of-canvas node
+envelopes, or SVG text baselines outside their node envelope fail closed.
+Nonzero intersection is reported only as `OVERLAP_UNCALIBRATED`,
+with a deterministic overlap fraction of the OCR rectangle's area.
+Disjoint rectangles report `OUTSIDE_DESIGN_NODE`. This is *not*
+a measurement of the actual rendered glyph bounds, a calibrated zone
+classifier, or a claim of correct field placement. Even complete overlap
+never authorizes editing or publishing.
+
+New fields are `design_node_overlap_status` (`BLOCKED` or
+`OVERLAP_ONLY_UNCALIBRATED`), `design_node_overlap_checks`,
+`design_node_overlap_schema_version=1`, and
+`design_node_overlap_fingerprint_sha256`. The latter binds the findings
+to the already validated spatial source digest, canvas and version.
+Existing text-only and spatial-v1 fingerprints remain unchanged.
+
+This code and synthetic tests cannot prove that a genuine PaddleOCR model
+ran, that its geometry matches text pixels, or that a reviewer approved it.
+Real model execution, calibrated 20-SKU labels and independently anchored
+runtime evidence remain separate #14 gates.
+
 `UNKNOWN`/`UNAVAILABLE` => `409 OCR_RUN_NOT_EXECUTED`.
 Changed source, model identity or raster => `409 OCR_SOURCE_MISMATCH`,
 or `503` for unavailable pinned model/rasterizer. Stale revision or
