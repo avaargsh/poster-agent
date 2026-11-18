@@ -114,6 +114,21 @@ def compare_journaled_ocr_run(
         compared["field_checks"],
         width=raster.width,
         height=raster.height,
+        source_binding={
+            "document_id": target["document_id"],
+            "revision": target["revision"],
+            "approval_id": target["approval_id"],
+            "spec_digest": target["spec_digest"],
+            "asset_manifest_digest": target["asset_manifest_digest"],
+            "renderer_version": target["renderer_version"],
+            "svg_sha256": raster.svg_sha256,
+            "png_sha256": raster.png_sha256,
+            "rasterizer": raster.rasterizer,
+            "model_profile_sha256": model_profile.fingerprint,
+            "operation_id": operation_id,
+            "principal_id": principal,
+            "policy_digest": policy,
+        },
     )
     return {
         **compared,
