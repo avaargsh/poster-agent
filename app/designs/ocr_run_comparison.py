@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from .errors import DesignError, NotFoundError
 from .ocr_model_policy import load_model_profile
 from .ocr_observations import OCRObservationRequest, assess_unattested
-from .ocr_runs import OCRRunJournal, OCRSourceMismatch
+from .ocr_runs import OCRRunJournal, OCRSourceMismatch, _CapturedLine
 from .ocr_spatial_evidence import assess_spatial_evidence
 from .rasterization import rasterize_svg
 from .repository import DesignRepository
@@ -92,10 +92,16 @@ def compare_journaled_ocr_run(
         raise OCRSourceMismatch()
 
     try:
+        # Validate the *entire* persisted record before hashing geometry:
+        # SQLite content is not independently trusted and may be corrupted.
+        captured_lines = [
+            _CapturedLine.model_validate(item).model_dump(mode="json")
+            for item in row["observations"]
+        ]
         observations = OCRObservationRequest.model_validate(
             {
                 "lines": [
-                    {"text": item["text"], "score": item["score"]} for item in row["observations"]
+                    {"text": item["text"], "score": item["score"]} for item in captured_lines
                 ]
             }
         )
@@ -104,7 +110,7 @@ def compare_journaled_ocr_run(
 
     compared = assess_unattested(target, observations)
     spatial = assess_spatial_evidence(
-        row["observations"],
+        captured_lines,
         compared["field_checks"],
         width=raster.width,
         height=raster.height,
