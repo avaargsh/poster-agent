@@ -272,7 +272,12 @@ def test_reject_extra_csv_columns_and_forged_absence_of_labels(tmp_path):
 
 @pytest.mark.parametrize(
     "mutation",
-    ["extra_release_field", "duplicate_runtime_key", "missing_model_digest", "invalid_model_digest"],
+    [
+        "extra_release_field",
+        "duplicate_runtime_key",
+        "missing_model_digest",
+        "invalid_model_digest",
+    ],
 )
 def test_calibration_rejects_mutated_runtime_provenance(tmp_path, mutation):
     db, labels, rows = _fixture(tmp_path)
