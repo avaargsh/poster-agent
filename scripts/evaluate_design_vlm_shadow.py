@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from app.designs.vlm_local import parse_findings
+from app.designs.vlm_local import _finite_json, parse_findings
 
 SCHEMA = "design-vlm-shadow-calibration-v1"
 MINIMUM_SKUS = 20
@@ -50,6 +50,7 @@ LABEL_FIELDS = (
 )
 _LABELS = frozenset({"PRESENT", "ABSENT", "UNVERIFIED"})
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_LOCAL_MODEL_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SKU_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _DOC_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _REVIEWER = re.compile(r"^[a-z][a-z0-9_-]{2,63}$")
@@ -210,8 +211,8 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
         raise CalibrationError("journal contains an unsupported execution state")
 
     if row["status"] != "EXECUTED":
-        if row["findings_json"] is not None:
-            raise CalibrationError("unresolved run must not supply model findings")
+        if row["findings_json"] is not None or row["runtime_json"] is not None:
+            raise CalibrationError("unresolved run must not supply model evidence")
         return set(), None
 
     if not isinstance(row["findings_json"], str):
@@ -222,15 +223,24 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
         findings = parse_findings('{"findings":' + row["findings_json"] + "}")
         if not isinstance(row["runtime_json"], str) or len(row["runtime_json"]) > 4096:
             raise ValueError("missing runtime provenance")
-        runtime = json.loads(row["runtime_json"])
+        runtime = _finite_json(row["runtime_json"])
         if (
             not isinstance(runtime, dict)
-            or runtime.get("source") != "local_ollama"
-            or runtime.get("execution_evidence") != "OPERATOR_LOCAL_NOT_ATTESTED"
-            or runtime.get("attested") is not False
+            or set(runtime)
+            != {
+                "source",
+                "local_model_digest_claim",
+                "execution_evidence",
+                "attested",
+            }
+            or runtime["source"] != "local_ollama"
+            or runtime["execution_evidence"] != "OPERATOR_LOCAL_NOT_ATTESTED"
+            or runtime["attested"] is not False
+            or not isinstance(runtime["local_model_digest_claim"], str)
+            or _LOCAL_MODEL_DIGEST.fullmatch(runtime["local_model_digest_claim"]) is None
         ):
             raise ValueError("unexpected runtime provenance claim")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, UnicodeError, RecursionError):
         raise CalibrationError("invalid or untrusted local VLM observations") from None
     return {finding["category"] for finding in findings}, _elapsed_ms(
         row["started_at"], row["finished_at"]

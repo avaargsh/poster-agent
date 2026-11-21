@@ -92,6 +92,7 @@ def _fixture(tmp_path, count=20):
                             "source": "local_ollama",
                             "attested": False,
                             "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
+                            "local_model_digest_claim": "sha256:" + "f" * 64,
                         }
                     ),
                     started.isoformat(),
@@ -265,5 +266,52 @@ def test_reject_extra_csv_columns_and_forged_absence_of_labels(tmp_path):
         writer.writeheader()
         for row in rows:
             writer.writerow({**row, "release_ready": "true"})
+    with pytest.raises(CalibrationError):
+        _eval(db, labels)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extra_release_field",
+        "duplicate_runtime_key",
+        "missing_model_digest",
+        "invalid_model_digest",
+    ],
+)
+def test_calibration_rejects_mutated_runtime_provenance(tmp_path, mutation):
+    db, labels, rows = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        raw = connection.execute(
+            "SELECT runtime_json FROM design_vlm_runs WHERE operation_id = ?",
+            (rows[0]["operation_id"],),
+        ).fetchone()[0]
+        runtime = json.loads(raw)
+        if mutation == "extra_release_field":
+            runtime["release_ready"] = True
+        elif mutation == "missing_model_digest":
+            del runtime["local_model_digest_claim"]
+        elif mutation == "invalid_model_digest":
+            runtime["local_model_digest_claim"] = "sha256:not-a-digest"
+        if mutation == "duplicate_runtime_key":
+            encoded = raw[:-1] + ', "source": "local_ollama"}'
+        else:
+            encoded = json.dumps(runtime)
+        connection.execute(
+            "UPDATE design_vlm_runs SET runtime_json=? WHERE operation_id=?",
+            (encoded, rows[0]["operation_id"]),
+        )
+    with pytest.raises(CalibrationError):
+        _eval(db, labels)
+
+
+def test_calibration_rejects_unresolved_record_with_stale_runtime(tmp_path):
+    db, labels, rows = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE design_vlm_runs SET status='UNKNOWN', findings_json=NULL, finished_at=NULL"
+            " WHERE operation_id=?",
+            (rows[0]["operation_id"],),
+        )
     with pytest.raises(CalibrationError):
         _eval(db, labels)
