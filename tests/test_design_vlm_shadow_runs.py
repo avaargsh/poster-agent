@@ -302,7 +302,9 @@ def test_config_requires_exact_local_digest_and_unsafe_model_output_fails_closed
         "wrong_findings_shape",
         "injected_release_authority",
         "oversized_findings",
+        "deeply_nested_findings",
         "malformed_runtime",
+        "deeply_nested_runtime",
         "spoofed_runtime_attestation",
         "unknown_with_stale_findings",
     ],
@@ -338,8 +340,12 @@ def test_corrupted_vlm_journal_fails_closed_on_status_and_replay(
                 }
             elif mutation == "oversized_findings":
                 changes = {"findings_json": "[" + " " * 33000 + "]"}
+            elif mutation == "deeply_nested_findings":
+                changes = {"findings_json": "[" * 10000 + "0" + "]" * 10000}
             elif mutation == "malformed_runtime":
                 changes = {"runtime_json": "{broken"}
+            elif mutation == "deeply_nested_runtime":
+                changes = {"runtime_json": "[" * 1500 + "0" + "]" * 1500}
             elif mutation == "spoofed_runtime_attestation":
                 changes = {
                     "runtime_json": json.dumps(
