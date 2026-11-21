@@ -106,7 +106,8 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
             runtime = _finite_json(raw_runtime)
             if (
                 not isinstance(runtime, dict)
-                or set(runtime) != {
+                or set(runtime)
+                != {
                     "source",
                     "local_model_digest_claim",
                     "execution_evidence",
