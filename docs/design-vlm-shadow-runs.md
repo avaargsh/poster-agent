@@ -39,7 +39,17 @@ The response is content-bounded, uses JSON-only strict QualityFinding validation
 - `EXECUTING` after a crash is converted to `UNKNOWN` when DesignRepository is reopened under its exclusive storage lock.
 - Provider or model digest unavailable **before journal admission** returns an error without calling /api/chat; after admission any ambiguity is journaled UNKNOWN.
 - `model_execution_attested=false`, `quality_verified=false`, `repair_authorized=false`, `release_ready=false` in every status, including empty findings.
-- The SQLite journal, hashes, Ollama tags and adapter runtime fields are **local operator assertions**, not immutable third-party evidence, signed model execution or independently verified human judgment. This does not close OCR provenance Issue #14.
+- Status GET and idempotent POST replay now **strictly revalidate** the persisted
+JSON before returning a completed shadow operation: findings must be a
+bounded, schema-valid QualityFinding array; runtime telemetry must retain the
+exact local, explicitly **unattested** schema. Duplicate/invalid JSON keys,
+malformed or oversized findings, fabricated approval fields, claimed runtime
+attestation and findings attached to `UNKNOWN`/`EXECUTING` all fail closed
+with `409 VLM_JOURNAL_CORRUPT`. A corrupt record must not become an empty
+`EXECUTED` result or trigger another model call. This validation cannot detect
+a self-consistent local database rewrite and is **not** cryptographic attestation.
+
+The SQLite journal, hashes, Ollama tags and adapter runtime fields are **local operator assertions**, not immutable third-party evidence, signed model execution or independently verified human judgment. This does not close OCR provenance Issue #14.
 
 The request is limited to a 4 MiB PNG, one pinned model, at most 512 model output tokens, 20 findings, 32 KiB JSON response, and one local inference at a time. HTTP timeout is configured but is not an OS-level kill signal for a hung model process. Contain the Ollama service with host-level network and resource controls; a malicious local server can lie about its digest.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import sqlite3
 from threading import Lock
 from typing import Annotated
@@ -22,8 +23,10 @@ from .rasterization import rasterize_svg
 from .repository import DesignRepository, _now
 from .visual_critic import VisualSourceMismatch
 from .vlm_local import (
+    _finite_json,
     inspect_approved_png,
     load_vlm_profile,
+    parse_findings,
     verify_ollama_model,
 )
 
@@ -36,6 +39,16 @@ class VLMExecutionBusy(DesignError):
     @property
     def default_message(self) -> str:
         return "another local VLM shadow execution is in progress"
+
+
+class VLMJournalCorrupt(DesignError):
+    """Persisted local findings or runtime data cannot be safely replayed."""
+
+    code = "VLM_JOURNAL_CORRUPT"
+
+    @property
+    def default_message(self) -> str:
+        return "stored visual shadow operation has invalid evidence"
 
 
 class VisualRunRequest(BaseModel):
@@ -74,6 +87,48 @@ def _fingerprint(
 
 
 def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
+    """Never turn malformed local data into empty positive shadow findings.
+
+    A journal is operator-controlled storage, not trusted model attestation.
+    Structural checks only prevent stale/corrupt rows from being presented as
+    valid, without asserting visual quality or weight provenance.
+    """
+    try:
+        status = row["status"]
+        if status == "EXECUTED":
+            raw_findings = row["findings_json"]
+            raw_runtime = row["runtime_json"]
+            if not isinstance(raw_findings, str) or not isinstance(raw_runtime, str):
+                raise ValueError("completed visual run missing evidence")
+            findings = parse_findings('{"findings":' + raw_findings + "}")
+            if len(raw_runtime) > 4096:
+                raise ValueError("visual runtime provenance exceeds limit")
+            runtime = _finite_json(raw_runtime)
+            if (
+                not isinstance(runtime, dict)
+                or set(runtime)
+                != {
+                    "source",
+                    "local_model_digest_claim",
+                    "execution_evidence",
+                    "attested",
+                }
+                or runtime["source"] != "local_ollama"
+                or runtime["execution_evidence"] != "OPERATOR_LOCAL_NOT_ATTESTED"
+                or runtime["attested"] is not False
+                or not isinstance(runtime["local_model_digest_claim"], str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", runtime["local_model_digest_claim"]) is None
+            ):
+                raise ValueError("invalid local-only runtime provenance")
+        elif status in {"EXECUTING", "UNKNOWN"}:
+            if row["findings_json"] is not None or row["runtime_json"] is not None:
+                raise ValueError("unresolved visual operation contains evidence")
+            findings, runtime = [], None
+        else:
+            raise ValueError("unknown visual journal state")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise VLMJournalCorrupt() from None
+
     return {
         "operation_id": row["operation_id"],
         "document_id": row["document_id"],
@@ -90,12 +145,8 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
         "model_profile_sha256": row["model_profile_sha256"],
         "status": row["status"],
         "reason": row["reason"],
-        "findings": (
-            json.loads(row["findings_json"])
-            if row["status"] == "EXECUTED" and row["findings_json"] is not None
-            else []
-        ),
-        "runtime": json.loads(row["runtime_json"]) if row["runtime_json"] else None,
+        "findings": findings,
+        "runtime": runtime,
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "replayed": replayed,

@@ -114,7 +114,7 @@ def parse_findings(content: str) -> list[dict]:
     try:
         parsed = _finite_json(content)
         findings = _FindingEnvelope.model_validate(parsed).findings
-    except (ValueError, ValidationError, TypeError):
+    except (ValueError, ValidationError, TypeError, RecursionError):
         raise ValueError("invalid visual finding response") from None
     ids = [finding.finding_id for finding in findings]
     if len(ids) != len(set(ids)):
