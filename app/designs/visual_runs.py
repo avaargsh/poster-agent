@@ -126,7 +126,7 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
             findings, runtime = [], None
         else:
             raise ValueError("unknown visual journal state")
-    except (ValueError, TypeError, UnicodeError):
+    except (ValueError, TypeError, UnicodeError, RecursionError):
         raise VLMJournalCorrupt() from None
 
     return {
