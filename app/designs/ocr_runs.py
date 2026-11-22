@@ -162,7 +162,9 @@ def _reject_non_finite_json(value: str):
 
 
 def _load_journal_json(raw: str, *, max_bytes: int):
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > max_bytes:
+    if not isinstance(raw, str) or len(raw) > max_bytes:
+        raise ValueError("journal JSON exceeds limit")
+    if len(raw.encode("utf-8")) > max_bytes:
         raise ValueError("journal JSON exceeds limit")
     return json.loads(
         raw,
