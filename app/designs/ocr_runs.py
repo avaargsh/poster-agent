@@ -190,9 +190,7 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
         if status == "EXECUTED":
             if not isinstance(observations_raw, str):
                 raise ValueError("executed OCR run has no observations")
-            parsed = _load_journal_json(
-                observations_raw, max_bytes=_MAX_OBSERVATIONS_JSON_BYTES
-            )
+            parsed = _load_journal_json(observations_raw, max_bytes=_MAX_OBSERVATIONS_JSON_BYTES)
             if not isinstance(parsed, list) or len(parsed) > 200:
                 raise ValueError("invalid OCR observations")
             observations = []
@@ -211,9 +209,7 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
                     raise ValueError("pinned OCR run has no runtime metadata")
                 runtime = None
             else:
-                runtime = _load_journal_json(
-                    runtime_raw, max_bytes=_MAX_RUNTIME_JSON_BYTES
-                )
+                runtime = _load_journal_json(runtime_raw, max_bytes=_MAX_RUNTIME_JSON_BYTES)
                 if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
                     raise ValueError("invalid OCR runtime schema")
                 if (
@@ -226,9 +222,7 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
                     raise ValueError("invalid OCR runtime values")
                 for field in _RUNTIME_TEXT_FIELDS:
                     value = runtime[field]
-                    if value is not None and (
-                        not isinstance(value, str) or len(value) > 128
-                    ):
+                    if value is not None and (not isinstance(value, str) or len(value) > 128):
                         raise ValueError("invalid OCR runtime text")
             if row["reason"] is not None:
                 raise ValueError("executed OCR run has a failure reason")
