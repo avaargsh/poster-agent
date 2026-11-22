@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from .errors import DesignError, IdempotencyConflictError, NotFoundError, StorageError
 from .models import RENDERER_VERSION
-from .rasterization import rasterize_svg
+from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .repository import DesignRepository, _now
 from .visual_critic import VisualSourceMismatch
 from .vlm_local import (
@@ -304,7 +304,17 @@ class VisualRunJournal:
                         )
                     ):
                         raise VisualSourceMismatch()
-                except DesignError:
+                    # Re-render *inside* the approval transaction so postflight
+                    # cannot accept a changed PNG or renderer with an unchanged SVG.
+                    # Renderer absence after inference is ambiguous, never PASS.
+                    raster = rasterize_svg(svg)
+                    if (
+                        not hmac.compare_digest(raster.svg_sha256, row["svg_sha256"])
+                        or not hmac.compare_digest(raster.png_sha256, row["png_sha256"])
+                        or raster.rasterizer != row["rasterizer"]
+                    ):
+                        raise VisualSourceMismatch()
+                except (DesignError, RasterInvalid, RasterUnavailable):
                     status, reason, findings, runtime = "UNKNOWN", "SOURCE_CHANGED", None, None
                 db.execute(
                     """
