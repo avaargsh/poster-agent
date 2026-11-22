@@ -15,7 +15,14 @@ from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 
 from app.ocr_provider import OCRUnavailable, recognize
 
@@ -111,21 +118,169 @@ def _request_fingerprint(
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
-    """Never promote stored adapter observations to verification or approval."""
-    try:
-        observations = (
-            json.loads(row["observations_json"])
-            if row["status"] == "EXECUTED" and row["observations_json"] is not None
-            else []
-        )
-        runtime = json.loads(row["runtime_json"]) if row["runtime_json"] else None
-    except (ValueError, TypeError, UnicodeError):
-        raise OCRSourceMismatch() from None
-    if not isinstance(observations, list) or (
-        runtime is not None and not isinstance(runtime, dict)
-    ):
+_MAX_OBSERVATIONS_JSON_BYTES = 256 * 1024
+_MAX_RUNTIME_JSON_BYTES = 4096
+_RUNTIME_FIELDS = {
+    "source",
+    "adapter_reported_source",
+    "paddleocr_package_version",
+    "paddlepaddle_package_version",
+    "python_version",
+    "machine",
+    "line_count",
+    "model_weights_sha256",
+    "attested",
+}
+_RUNTIME_TEXT_FIELDS = {
+    "adapter_reported_source",
+    "paddleocr_package_version",
+    "paddlepaddle_package_version",
+    "python_version",
+    "machine",
+}
+
+
+class OCRJournalCorrupt(DesignError):
+    code = "OCR_JOURNAL_CORRUPT"
+
+    @property
+    def default_message(self) -> str:
+        return "stored OCR operation contains invalid local evidence"
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def _reject_non_finite_json(value: str):
+    raise ValueError("non-finite JSON number")
+
+
+def _load_journal_json(raw: str, *, max_bytes: int):
+    if not isinstance(raw, str) or len(raw) > max_bytes:
+        raise ValueError("journal JSON exceeds limit")
+    if len(raw.encode("utf-8")) > max_bytes:
+        raise ValueError("journal JSON exceeds limit")
+    return json.loads(
+        raw,
+        object_pairs_hook=_unique_json_object,
+        parse_constant=_reject_non_finite_json,
+    )
+
+
+def _decode_observations(raw: object) -> list[dict]:
+    if not isinstance(raw, str):
         raise OCRSourceMismatch()
+    try:
+        parsed = _load_journal_json(raw, max_bytes=_MAX_OBSERVATIONS_JSON_BYTES)
+        if not isinstance(parsed, list) or len(parsed) > 200:
+            raise ValueError("invalid OCR observations")
+        observations = []
+        for item in parsed:
+            line = _CapturedLine.model_validate(item)
+            if line.bbox is not None and not (
+                line.bbox[0] < line.bbox[2] and line.bbox[1] < line.bbox[3]
+            ):
+                raise ValueError("invalid OCR rectangle")
+            observations.append(line.model_dump(mode="json"))
+        return observations
+    except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, ValidationError):
+        # Preserve the established OCR_SOURCE_MISMATCH contract for malformed
+        # observation payloads, including invalid geometry.
+        raise OCRSourceMismatch() from None
+
+
+def _decode_runtime(
+    raw: object, *, model_profile_sha256: str | None, observation_count: int
+) -> dict | None:
+    if raw is None:
+        # Historical records predating pinned model profiles may lack runtime
+        # metadata; current pinned executions may not.
+        if model_profile_sha256 is not None:
+            raise OCRJournalCorrupt()
+        return None
+    try:
+        runtime = _load_journal_json(raw, max_bytes=_MAX_RUNTIME_JSON_BYTES)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        # Keep malformed JSON reads compatible with the existing API contract.
+        raise OCRSourceMismatch() from None
+    if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
+        raise OCRJournalCorrupt()
+    if (
+        runtime["source"] != "local_paddleocr_adapter"
+        or type(runtime["line_count"]) is not int
+        or runtime["line_count"] != observation_count
+        or runtime["model_weights_sha256"] is not None
+        or runtime["attested"] is not False
+    ):
+        raise OCRJournalCorrupt()
+    for field in _RUNTIME_TEXT_FIELDS:
+        value = runtime[field]
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            raise OCRJournalCorrupt()
+    return runtime
+
+
+def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
+    """Validate persisted bytes before replay; SQLite is not an attestation source."""
+    try:
+        status = row["status"]
+        observations_raw = row["observations_json"]
+        runtime_raw = row["runtime_json"]
+        model_profile_sha256 = row["model_profile_sha256"]
+        if model_profile_sha256 is not None and (
+            not isinstance(model_profile_sha256, str)
+            or len(model_profile_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in model_profile_sha256)
+        ):
+            raise ValueError("invalid model profile digest")
+        if not isinstance(row["started_at"], str) or not row["started_at"]:
+            raise ValueError("missing operation start time")
+
+        if status == "EXECUTED":
+            observations = _decode_observations(observations_raw)
+            runtime = _decode_runtime(
+                runtime_raw,
+                model_profile_sha256=model_profile_sha256,
+                observation_count=len(observations),
+            )
+            if row["reason"] is not None:
+                raise ValueError("executed OCR run has a failure reason")
+            if not isinstance(row["finished_at"], str) or not row["finished_at"]:
+                raise ValueError("executed OCR run has no finish time")
+        elif status == "EXECUTING":
+            if (
+                observations_raw is not None
+                or runtime_raw is not None
+                or row["reason"] is not None
+                or row["finished_at"] is not None
+            ):
+                raise ValueError("executing OCR run contains terminal evidence")
+            observations, runtime = [], None
+        elif status in {"UNKNOWN", "UNAVAILABLE", "FAILED"}:
+            if observations_raw is not None or runtime_raw is not None:
+                raise ValueError("unresolved OCR run contains observations")
+            if (
+                not isinstance(row["reason"], str)
+                or not row["reason"]
+                or len(row["reason"]) > 128
+                or not isinstance(row["finished_at"], str)
+                or not row["finished_at"]
+            ):
+                raise ValueError("terminal OCR run is missing outcome metadata")
+            observations, runtime = [], None
+        else:
+            raise ValueError("unsupported OCR journal state")
+    except (OCRSourceMismatch, OCRJournalCorrupt):
+        raise
+    except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, ValidationError):
+        raise OCRJournalCorrupt() from None
+
     return {
         "operation_id": row["operation_id"],
         "document_id": row["document_id"],

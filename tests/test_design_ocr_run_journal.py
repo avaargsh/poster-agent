@@ -437,9 +437,13 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
         endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
 
         with sqlite3.connect(ocr_paths) as connection:
+            observations_json, runtime_json = connection.execute(
+                "SELECT observations_json, runtime_json FROM design_ocr_runs WHERE operation_id=?",
+                (payload["operation_id"],),
+            ).fetchone()
             connection.execute(
-                "UPDATE design_ocr_runs SET status='UNKNOWN', reason='RECOVERED_AFTER_RESTART'"
-                " WHERE operation_id=?",
+                "UPDATE design_ocr_runs SET status='UNKNOWN', observations_json=NULL,"
+                " runtime_json=NULL, reason='RECOVERED_AFTER_RESTART' WHERE operation_id=?",
                 (payload["operation_id"],),
             )
         uncertain = client.get(endpoint, headers=_headers())
@@ -449,8 +453,9 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
 
         with sqlite3.connect(ocr_paths) as connection:
             connection.execute(
-                "UPDATE design_ocr_runs SET status='EXECUTED', svg_sha256=? WHERE operation_id=?",
-                ("0" * 64, payload["operation_id"]),
+                "UPDATE design_ocr_runs SET status='EXECUTED', observations_json=?, runtime_json=?,"
+                " reason=NULL, svg_sha256=? WHERE operation_id=?",
+                (observations_json, runtime_json, "0" * 64, payload["operation_id"]),
             )
         wrong_source = client.get(endpoint, headers=_headers())
         assert wrong_source.status_code == 409, wrong_source.text
@@ -743,3 +748,124 @@ def test_postflight_ocr_raster_drift_is_unknown_and_cannot_reinvoke(
             (payload["operation_id"],),
         ).fetchone()
         assert row == ("UNKNOWN", None, None)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "observation_extra_field",
+        "observation_duplicate_key",
+        "observation_non_finite_score",
+        "runtime_claims_attestation",
+        "runtime_extra_authority",
+        "runtime_line_count_mismatch",
+        "missing_runtime_for_pinned_model",
+        "unknown_retains_observations",
+        "unavailable_retains_runtime",
+    ],
+)
+def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
+    ocr_paths, product_bytes, monkeypatch, corruption
+):
+    calls = []
+
+    def fake_recognize(path, **kwargs):
+        calls.append(path.read_bytes())
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", fake_recognize)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert created.json()["status"] == "EXECUTED"
+        assert len(calls) == 1
+
+        with sqlite3.connect(ocr_paths) as connection:
+            observations = connection.execute(
+                "SELECT observations_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            runtime = connection.execute(
+                "SELECT runtime_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            runtime_data = json.loads(runtime)
+
+            if corruption == "observation_extra_field":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                    (
+                        json.dumps(
+                            [{**json.loads(observations)[0], "release_ready": True}]
+                            + json.loads(observations)[1:]
+                        ),
+                        payload["operation_id"],
+                    ),
+                )
+            elif corruption == "observation_duplicate_key":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                    (
+                        '[{"text":"safe","text":"spoofed","score":0.9,"bbox":null}]',
+                        payload["operation_id"],
+                    ),
+                )
+            elif corruption == "observation_non_finite_score":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                    (
+                        '[{"text":"not-finite","score":1e999,"bbox":null}]',
+                        payload["operation_id"],
+                    ),
+                )
+            elif corruption == "runtime_claims_attestation":
+                runtime_data["attested"] = True
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "runtime_extra_authority":
+                runtime_data["release_ready"] = True
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "runtime_line_count_mismatch":
+                runtime_data["line_count"] = 2
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "missing_runtime_for_pinned_model":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = NULL WHERE operation_id = ?",
+                    (payload["operation_id"],),
+                )
+            elif corruption == "unknown_retains_observations":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET status = 'UNKNOWN' WHERE operation_id = ?",
+                    (payload["operation_id"],),
+                )
+            elif corruption == "unavailable_retains_runtime":
+                connection.execute(
+                    "UPDATE design_ocr_runs SET status = 'UNAVAILABLE' WHERE operation_id = ?",
+                    (payload["operation_id"],),
+                )
+
+        status = client.get(
+            _url(doc) + "/" + payload["operation_id"],
+            headers=_headers(),
+        )
+        expected_code = (
+            "OCR_SOURCE_MISMATCH"
+            if corruption.startswith("observation_")
+            else "OCR_JOURNAL_CORRUPT"
+        )
+        assert status.status_code == 409, status.text
+        assert status.json()["error"]["code"] == expected_code
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 409, replay.text
+        assert replay.json()["error"]["code"] == expected_code
+        assert len(calls) == 1
