@@ -30,6 +30,8 @@ Set both environment variables before starting the server; they are frozen at li
 
 Every POST checks the pinned profile, principal/policy, current approval, source asset/SVG hashes, approved pixel hash and revision. A persistent SQLite row is committed **before** model inference. Duplicate operation IDs with identical input replay the journal result; changed input conflicts. One model call may execute per process at a time; other distinct operations receive a busy response and should not be auto-queued.
 
+Postflight runs within the serialized approval transaction: after inference, it rechecks the exact current design, approval, reviewer policy, asset manifest and SVG hash, then **re-rasterizes the approved SVG** and compares both PNG SHA-256 and rasterizer identity with the pre-admission journal. If pixels or renderer differ, or the renderer is no longer available, the operation is terminally journaled as `UNKNOWN` with `SOURCE_CHANGED`; any returned findings are discarded. Identical operation IDs remain replay-only and cannot retrigger the model. This is an operator-local consistency check, not independent execution attestation.
+
 The response is content-bounded, uses JSON-only strict QualityFinding validation, and rejects unknown fields, malformed regions, claims about release/repair, oversized responses and changed reported model. The model is instructed to report only soft visual defects such as layout, hierarchy, spacing and contrast. It is never instructed to edit or regenerate prices, SKU, CTA or Logo.
 
 ## Failure, recovery and evidence

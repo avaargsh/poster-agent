@@ -373,3 +373,44 @@ def test_corrupted_vlm_journal_fails_closed_on_status_and_replay(
         assert replay.status_code == 409, replay.text
         assert replay.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
         assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mutation", ["png_bytes", "rasterizer", "raster_unavailable"])
+def test_postflight_raster_drift_quarantines_local_shadow_result(
+    local_vlm, product_bytes, monkeypatch, mutation
+):
+    """Exact approved pixels and rasterizer must survive the model call."""
+    monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
+    calls = []
+    original_converter = rasterization._convert_svg_to_png
+
+    def changed_converter(svg, width, height):
+        png, engine = original_converter(svg, width, height)
+        if mutation == "raster_unavailable":
+            raise rasterization.RasterUnavailable("postflight renderer unavailable")
+        if mutation == "rasterizer":
+            return png, "test-raster/changed"
+        with BytesIO() as buffer:
+            Image.new("RGB", (width, height), (21, 31, 41)).save(buffer, "PNG")
+            return buffer.getvalue(), engine
+
+    def inspect(png, profile):
+        calls.append(1)
+        monkeypatch.setattr(rasterization, "_convert_svg_to_png", changed_converter)
+        return _findings()
+
+    monkeypatch.setattr(visual_runs, "inspect_approved_png", inspect)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 201, response.text
+        assert response.json()["status"] == "UNKNOWN"
+        assert response.json()["reason"] == "SOURCE_CHANGED"
+        assert response.json()["findings"] == []
+        assert response.json()["runtime"] is None
+        assert response.json()["release_ready"] is False
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["status"] == "UNKNOWN"
+        assert len(calls) == 1
