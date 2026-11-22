@@ -50,6 +50,13 @@ def _reject_non_finite_json(value: str):
     raise ValueError("non-finite JSON number")
 
 
+def _parse_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number")
+    return parsed
+
+
 def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
     if isinstance(raw, bytes):
         if len(raw) > max_bytes:
@@ -73,6 +80,7 @@ def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
             text,
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_non_finite_json,
+            parse_float=_parse_finite_float,
         )
     except (json.JSONDecodeError, ValueError, RecursionError):
         raise EvidenceInvalid("JSON evidence is malformed or ambiguous") from None
@@ -205,7 +213,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     )
     actual = _sha256(image_bytes)
     if image.get("sha256") != actual:
-        raise EvidenceInvalid("实际 PNG 图片 SHA-256 与探针报告不一致")
+        raise EvidenceInvalid("实际图像 SHA-256 与探针报告不一致")
     width, height, image_format, raw_size = _image_dimensions(image_bytes, require_png=False)
     reported_size = image.get("pixel_size")
     if (
