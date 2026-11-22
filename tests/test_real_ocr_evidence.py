@@ -127,6 +127,7 @@ def test_tampered_input_and_missing_installed_versions_rejected(tmp_path, monkey
 
 def test_batch_manifest_observations_and_hashes_are_checked(tmp_path, monkeypatch):
     manifest = generate_fixture_set(tmp_path / "images")
+    monkeypatch.setattr("evals.image_runner.metadata.version", lambda name: "3.3.0")
     monkeypatch.setattr(
         "evals.image_runner.recognize",
         lambda path: [{"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}],
@@ -199,6 +200,7 @@ def _make_valid_batch(tmp_path, monkeypatch):
     import shutil
 
     manifest = generate_fixture_set(tmp_path / "source")
+    monkeypatch.setattr("evals.image_runner.metadata.version", lambda name: "3.3.0")
     monkeypatch.setattr(
         "evals.image_runner.recognize",
         lambda path: [{"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}],
