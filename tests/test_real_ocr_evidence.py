@@ -229,7 +229,7 @@ def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch):
 
     base = _make_valid_batch(tmp_path, monkeypatch)
     cases = [
-        (lambda row: row.update(bbox=None), "bbox"),
+        (lambda row: row.update(bbox=None), "坐标框"),
         (lambda row: row.update(score=1.01), "score"),
         (lambda row: row.update(score=float("nan")), "JSON"),
         (lambda row: row.update(text=""), "text"),
