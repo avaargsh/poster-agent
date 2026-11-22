@@ -12,8 +12,8 @@ import argparse
 import hashlib
 import json
 import math
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
 
 from PIL import Image
 from pydantic import ValidationError
@@ -59,7 +59,11 @@ def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
         except UnicodeDecodeError:
             raise EvidenceInvalid("JSON evidence is not valid UTF-8") from None
     elif isinstance(raw, str):
-        if len(raw) > max_bytes or len(raw.encode("utf-8")) > max_bytes:
+        try:
+            encoded_size = len(raw.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise EvidenceInvalid("JSON evidence is not valid UTF-8 text") from None
+        if len(raw) > max_bytes or encoded_size > max_bytes:
             raise EvidenceInvalid("JSON evidence exceeds size limit")
         text = raw
     else:
@@ -178,7 +182,13 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         raise EvidenceInvalid("不是成功的真实推理记录：mode=inference 且 status=OK 才可验收")
     if probe.get("model_invocation_completed") is not True:
         raise EvidenceInvalid("模型调用没有完成")
-    for field in ("paddlepaddle_distribution", "paddleocr_distribution", "platform", "machine", "python"):
+    for field in (
+        "paddlepaddle_distribution",
+        "paddleocr_distribution",
+        "platform",
+        "machine",
+        "python",
+    ):
         if not isinstance(environment.get(field), str) or not environment[field]:
             raise EvidenceInvalid(f"缺少有效的环境字段：{field}")
     if (
@@ -321,8 +331,10 @@ def verify_batch(batch_dir: Path) -> dict:
     if len(lines) != EXPECTED_FIXTURES:
         raise EvidenceInvalid("逐图 OCR 观察行数不等于 20")
     observations = [_parse_observation(line) for line in lines]
+    if any(not isinstance(item.get("case_id"), str) for item in observations):
+        raise EvidenceInvalid("逐图 OCR 记录缺少有效 case_id")
     expected_ids = {fixture.case_id for fixture in manifest.fixtures}
-    observation_by_id = {item.get("case_id"): item for item in observations}
+    observation_by_id = {item["case_id"]: item for item in observations}
     if len(observation_by_id) != EXPECTED_FIXTURES or set(observation_by_id) != expected_ids:
         raise EvidenceInvalid("逐图 OCR 记录缺失、重复或包含未知 case_id")
 
