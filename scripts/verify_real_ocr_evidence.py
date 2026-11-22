@@ -15,22 +15,69 @@ import math
 from pathlib import Path
 
 from PIL import Image
+from pydantic import ValidationError
 
 from evals.image_fixtures import ImageManifest
 
 SHA_LENGTH = 64
 EXPECTED_FIXTURES = 20
+_MAX_JSON_BYTES = 1024 * 1024
+_MAX_JSONL_BYTES = 8 * 1024 * 1024
+_MAX_JSONL_LINE_BYTES = 512 * 1024
+_MAX_OCR_LINES_PER_IMAGE = 200
+_MAX_OCR_TEXT_LENGTH = 200
+_MAX_IMAGE_DIMENSION = 4096
+_MAX_IMAGE_PIXELS = 8_000_000
+_OCR_ROW_FIELDS = {"text", "score", "bbox"}
 
 
 class EvidenceInvalid(ValueError):
     pass
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def _reject_non_finite_json(value: str):
+    raise ValueError("non-finite JSON number")
+
+
+def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
+    if isinstance(raw, bytes):
+        if len(raw) > max_bytes:
+            raise EvidenceInvalid("JSON evidence exceeds size limit")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise EvidenceInvalid("JSON evidence is not valid UTF-8") from None
+    elif isinstance(raw, str):
+        if len(raw) > max_bytes or len(raw.encode("utf-8")) > max_bytes:
+            raise EvidenceInvalid("JSON evidence exceeds size limit")
+        text = raw
+    else:
+        raise EvidenceInvalid("JSON evidence must be UTF-8 text")
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_non_finite_json,
+        )
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        raise EvidenceInvalid("JSON evidence is malformed or ambiguous") from None
+
+
 def _read_json(path: Path) -> dict:
     try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise EvidenceInvalid(f"缺失或无效的 JSON 证据：{path.name}") from exc
+        raw = path.read_bytes()
+    except OSError:
+        raise EvidenceInvalid(f"缺失或无法读取的 JSON 证据：{path.name}") from None
+    obj = _loads_strict(raw, max_bytes=_MAX_JSON_BYTES)
     if not isinstance(obj, dict):
         raise EvidenceInvalid("JSON 证据必须为对象")
     return obj
@@ -41,15 +88,56 @@ def _sha256(raw: bytes) -> str:
 
 
 def _valid_bbox(box: object, *, width: int, height: int) -> bool:
-    if not isinstance(box, (list, tuple)) or len(box) != 4:
+    if not isinstance(box, list) or len(box) != 4:
         return False
-    if any(
-        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
-        for value in box
-    ):
+    if any(type(value) is not int for value in box):
         return False
     x1, y1, x2, y2 = box
     return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
+
+
+def _image_dimensions(path: Path, *, require_png: bool) -> tuple[int, int, str, int]:
+    try:
+        raw_size = path.stat().st_size
+        with Image.open(path) as source:
+            image_format = source.format
+            width, height = source.size
+            source.verify()
+    except (OSError, ValueError, Image.DecompressionBombError):
+        raise EvidenceInvalid("OCR 输入图像不是有效的受支持图像") from None
+    if (
+        (require_png and image_format != "PNG")
+        or image_format not in {"PNG", "JPEG", "WEBP"}
+        or width < 1
+        or height < 1
+        or width > _MAX_IMAGE_DIMENSION
+        or height > _MAX_IMAGE_DIMENSION
+        or width * height > _MAX_IMAGE_PIXELS
+    ):
+        raise EvidenceInvalid("OCR 输入图像格式或尺寸超出允许范围")
+    return width, height, image_format, raw_size
+
+
+def _validate_ocr_rows(rows: object, *, width: int, height: int, context: str) -> int:
+    if not isinstance(rows, list) or not rows or len(rows) > _MAX_OCR_LINES_PER_IMAGE:
+        raise EvidenceInvalid(f"{context}: OCR 行数缺失或超出限制")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict) or set(row) != _OCR_ROW_FIELDS:
+            raise EvidenceInvalid(f"{context}: OCR row schema is invalid")
+        text = row["text"]
+        if not isinstance(text, str) or not text.strip() or len(text) > _MAX_OCR_TEXT_LENGTH:
+            raise EvidenceInvalid(f"{context}: OCR text is invalid")
+        score = row["score"]
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+            or not 0 <= score <= 1
+        ):
+            raise EvidenceInvalid(f"{context}: OCR score is invalid")
+        if not _valid_bbox(row["bbox"], width=width, height=height):
+            raise EvidenceInvalid(f"{context}: OCR bbox is missing or outside the image")
+    return len(rows)
 
 
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
