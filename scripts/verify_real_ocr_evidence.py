@@ -133,7 +133,7 @@ def _image_dimensions(path: Path, *, require_png: bool) -> tuple[int, int, str, 
 def _validate_ocr_rows(rows: object, *, width: int, height: int, context: str) -> int:
     if not isinstance(rows, list) or not rows or len(rows) > _MAX_OCR_LINES_PER_IMAGE:
         raise EvidenceInvalid(f"{context}: OCR 行数缺失或超出限制")
-    for index, row in enumerate(rows):
+    for row in rows:
         if not isinstance(row, dict) or set(row) != _OCR_ROW_FIELDS:
             raise EvidenceInvalid(f"{context}: OCR row schema is invalid")
         text = row["text"]
@@ -152,77 +152,92 @@ def _validate_ocr_rows(rows: object, *, width: int, height: int, context: str) -
     return len(rows)
 
 
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == SHA_LENGTH
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _valid_duration(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
     probe = _read_json(probe_file)
-    environment = probe.get("environment") or {}
+    environment = probe.get("environment")
+    if not isinstance(environment, dict):
+        raise EvidenceInvalid("缺少有效的推理环境记录")
+    if probe.get("engine") != "PaddleOCR":
+        raise EvidenceInvalid("推理引擎标识不匹配")
     if probe.get("mode") != "inference" or probe.get("status") != "OK":
         raise EvidenceInvalid("不是成功的真实推理记录：mode=inference 且 status=OK 才可验收")
     if probe.get("model_invocation_completed") is not True:
         raise EvidenceInvalid("模型调用没有完成")
-    if not environment.get("paddlepaddle_distribution") or not environment.get(
-        "paddleocr_distribution"
-    ):
-        raise EvidenceInvalid("缺少 PaddlePaddle/PaddleOCR 已安装版本证据")
-    if not environment.get("paddle_module_detected") or not environment.get(
-        "paddleocr_module_detected"
+    for field in ("paddlepaddle_distribution", "paddleocr_distribution", "platform", "machine", "python"):
+        if not isinstance(environment.get(field), str) or not environment[field]:
+            raise EvidenceInvalid(f"缺少有效的环境字段：{field}")
+    if (
+        environment.get("paddle_module_detected") is not True
+        or environment.get("paddleocr_module_detected") is not True
     ):
         raise EvidenceInvalid("缺少推理依赖的模块检测结果")
     if expected_platform is not None and environment.get("platform") != expected_platform:
         raise EvidenceInvalid("记录的平台与要求的平台不一致")
+
     image = probe.get("image")
-    if not isinstance(image, dict):
+    if not isinstance(image, dict) or not _is_sha256(image.get("sha256")):
         raise EvidenceInvalid("缺少有效的输入图像证据")
-    try:
-        actual = _sha256(image_file.read_bytes())
-    except OSError:
-        raise EvidenceInvalid("无法读取 OCR 输入图像") from None
+    image_bytes = _read_bounded_bytes(
+        image_file, max_bytes=_MAX_IMAGE_BYTES, label="OCR input image"
+    )
+    actual = _sha256(image_bytes)
     if image.get("sha256") != actual:
         raise EvidenceInvalid("实际 PNG 图片 SHA-256 与探针报告不一致")
-    try:
-        with Image.open(image_file) as source:
-            actual_size = [source.width, source.height]
-            source.verify()
-    except (OSError, ValueError):
-        raise EvidenceInvalid("OCR 输入图像不是有效的受支持图像") from None
+    width, height, image_format, raw_size = _image_dimensions(
+        image_file, require_png=False
+    )
     reported_size = image.get("pixel_size")
     if (
         not isinstance(reported_size, list)
         or len(reported_size) != 2
         or any(type(value) is not int for value in reported_size)
-        or reported_size != actual_size
+        or reported_size != [width, height]
+        or image.get("format") != image_format
+        or type(image.get("bytes")) is not int
+        or image["bytes"] != raw_size
     ):
-        raise EvidenceInvalid("探针图像尺寸与实际像素尺寸不一致")
+        raise EvidenceInvalid("探针图像格式、字节数或像素尺寸与实际图像不一致")
+
     rows = probe.get("ocr_lines")
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         raise EvidenceInvalid("缺少真实 OCR 原始识别行；请使用 --include-text 运行")
-    if probe.get("line_count") != len(rows):
+    if type(probe.get("line_count")) is not int or probe["line_count"] != len(rows):
         raise EvidenceInvalid("OCR 行数与原始证据不一致")
-    width, height = actual_size
-    bbox_count = sum(
-        _valid_bbox(row.get("bbox"), width=width, height=height)
-        for row in rows
-        if isinstance(row, dict)
+    valid_count = _validate_ocr_rows(
+        rows, width=width, height=height, context="probe"
     )
-    if bbox_count != len(rows):
-        raise EvidenceInvalid("OCR 坐标框缺失、无效或超出实际图像边界，不能形成完整空间证据")
     duration = probe.get("elapsed_ms")
-    if (
-        isinstance(duration, bool)
-        or not isinstance(duration, (int, float))
-        or not math.isfinite(duration)
-        or duration < 0
-    ):
+    if not _valid_duration(duration):
         raise EvidenceInvalid("缺少合法推理耗时")
     return {
-        "probe_sha256": _sha256(probe_file.read_bytes()),
+        "probe_sha256": _sha256(
+            _read_bounded_bytes(probe_file, max_bytes=_MAX_JSON_BYTES, label="probe JSON")
+        ),
         "input_image_sha256": actual,
         "platform": environment["platform"],
-        "machine": environment.get("machine"),
-        "python": environment.get("python"),
+        "machine": environment["machine"],
+        "python": environment["python"],
         "paddlepaddle": environment["paddlepaddle_distribution"],
         "paddleocr": environment["paddleocr_distribution"],
-        "ocr_lines": len(rows),
-        "valid_bboxes": bbox_count,
+        "ocr_lines": valid_count,
+        "valid_bboxes": valid_count,
         "elapsed_ms": duration,
     }
 
@@ -232,39 +247,112 @@ def verify_batch(batch_dir: Path) -> dict:
     manifest_path = root / "manifest.json"
     report_file = batch_dir / "image_benchmark_summary.json"
     observations_file = batch_dir / "ocr_observations.jsonl"
-    manifest = ImageManifest.model_validate_json(manifest_path.read_bytes())
+
+    manifest_raw = _read_bounded_bytes(
+        manifest_path, max_bytes=_MAX_JSON_BYTES, label="image manifest"
+    )
+    manifest_data = _loads_strict(manifest_raw, max_bytes=_MAX_JSON_BYTES)
+    if not isinstance(manifest_data, dict) or set(manifest_data) != {
+        "dataset_id",
+        "dataset_kind",
+        "caveat",
+        "expected_spec",
+        "target_fields",
+        "fixtures",
+    }:
+        raise EvidenceInvalid("image manifest schema is invalid")
+    try:
+        manifest = ImageManifest.model_validate(manifest_data)
+    except ValidationError:
+        raise EvidenceInvalid("image manifest schema is invalid") from None
+    if any(
+        not isinstance(fixture, dict)
+        or set(fixture)
+        != {
+            "case_id",
+            "category",
+            "image_file",
+            "image_sha256",
+            "rendered_spec",
+            "truth_defects",
+        }
+        for fixture in manifest_data["fixtures"]
+    ):
+        raise EvidenceInvalid("image fixture schema is invalid")
+
     report = _read_json(report_file)
     if report.get("ocr_mode") != "paddle" or report.get("model_executed") is not True:
         raise EvidenceInvalid("批量报告没有记录 PaddleOCR 完成")
     if report.get("dataset_kind") != "code_rendered_png_fixtures":
         raise EvidenceInvalid("数据集类型与程序渲染 PNG 测试不匹配")
-    if report.get("manifest_sha256") != _sha256(manifest_path.read_bytes()):
+    if report.get("dataset_id") != manifest.dataset_id:
+        raise EvidenceInvalid("批量报告与 manifest dataset_id 不一致")
+    if report.get("manifest_sha256") != _sha256(manifest_raw):
         raise EvidenceInvalid("批量报告与 manifest 摘要不一致")
     if (
         len(manifest.fixtures) != EXPECTED_FIXTURES
-        or report.get("fixture_count") != EXPECTED_FIXTURES
+        or type(report.get("fixture_count")) is not int
+        or report["fixture_count"] != EXPECTED_FIXTURES
     ):
         raise EvidenceInvalid("批量 PNG 样本数量不足")
-    lines = observations_file.read_text(encoding="utf-8").splitlines()
+    if (
+        not isinstance(report.get("paddleocr_package_version"), str)
+        or not report["paddleocr_package_version"]
+        or report.get("ocr_observations_file") != "ocr_observations.jsonl"
+        or not isinstance(report.get("case_metrics"), dict)
+        or not isinstance(report.get("field_metrics"), dict)
+        or not isinstance(report.get("by_category"), dict)
+    ):
+        raise EvidenceInvalid("批量报告缺少模型版本或指标摘要")
+
+    observations_raw = _read_bounded_bytes(
+        observations_file, max_bytes=_MAX_JSONL_BYTES, label="OCR observations JSONL"
+    )
+    try:
+        lines = observations_raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        raise EvidenceInvalid("OCR observations JSONL is not valid UTF-8") from None
     if len(lines) != EXPECTED_FIXTURES:
         raise EvidenceInvalid("逐图 OCR 观察行数不等于 20")
     observations = [_parse_observation(line) for line in lines]
+    expected_ids = {fixture.case_id for fixture in manifest.fixtures}
     observation_by_id = {item.get("case_id"): item for item in observations}
-    if len(observation_by_id) != EXPECTED_FIXTURES:
-        raise EvidenceInvalid("逐图 OCR 记录缺失或存在重复 case_id")
+    if len(observation_by_id) != EXPECTED_FIXTURES or set(observation_by_id) != expected_ids:
+        raise EvidenceInvalid("逐图 OCR 记录缺失、重复或包含未知 case_id")
+
     for fixture in manifest.fixtures:
-        actual = _sha256((root / fixture.image_file).read_bytes())
+        observation = observation_by_id[fixture.case_id]
+        if set(observation) != {"case_id", "image_sha256", "elapsed_ms", "ocr_lines"}:
+            raise EvidenceInvalid(f"{fixture.case_id} OCR observation schema is invalid")
+        if not _is_sha256(fixture.image_sha256):
+            raise EvidenceInvalid(f"{fixture.case_id} manifest image SHA-256 is invalid")
+        image_path = root / fixture.image_file
+        image_bytes = _read_bounded_bytes(
+            image_path, max_bytes=_MAX_IMAGE_BYTES, label=f"{fixture.case_id} PNG"
+        )
+        actual = _sha256(image_bytes)
         if actual != fixture.image_sha256:
             raise EvidenceInvalid(f"{fixture.case_id} PNG SHA-256 与 manifest 不一致")
-        if observation_by_id[fixture.case_id].get("image_sha256") != actual:
+        if observation.get("image_sha256") != actual:
             raise EvidenceInvalid(f"{fixture.case_id} OCR 记录与输入图像哈希不一致")
-        if not isinstance(observation_by_id[fixture.case_id].get("ocr_lines"), list):
-            raise EvidenceInvalid(f"{fixture.case_id} OCR 结果缺少行数组")
+        width, height, _, _ = _image_dimensions(image_path, require_png=True)
+        if not _valid_duration(observation.get("elapsed_ms")):
+            raise EvidenceInvalid(f"{fixture.case_id} OCR elapsed_ms is invalid")
+        _validate_ocr_rows(
+            observation.get("ocr_lines"),
+            width=width,
+            height=height,
+            context=fixture.case_id,
+        )
+
+    report_raw = _read_bounded_bytes(
+        report_file, max_bytes=_MAX_JSON_BYTES, label="benchmark summary"
+    )
     return {
         "dataset_kind": manifest.dataset_kind,
         "fixture_count": EXPECTED_FIXTURES,
-        "manifest_sha256": _sha256(manifest_path.read_bytes()),
-        "report_sha256": _sha256(report_file.read_bytes()),
+        "manifest_sha256": _sha256(manifest_raw),
+        "report_sha256": _sha256(report_raw),
         "observation_records": len(observations),
         "case_metrics": report["case_metrics"],
         "field_metrics": report["field_metrics"],
@@ -272,10 +360,7 @@ def verify_batch(batch_dir: Path) -> dict:
 
 
 def _parse_observation(line: str) -> dict:
-    try:
-        parsed = json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise EvidenceInvalid("OCR observations JSONL 不合法") from exc
+    parsed = _loads_strict(line, max_bytes=_MAX_JSONL_LINE_BYTES)
     if not isinstance(parsed, dict):
         raise EvidenceInvalid("OCR observations 必须是 JSON 对象")
     return parsed
