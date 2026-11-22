@@ -693,3 +693,53 @@ def test_unusable_ocr_geometry_is_not_recorded_as_executed(
             (payload["operation_id"],),
         ).fetchone()
         assert row == ("UNKNOWN", None)
+
+
+@pytest.mark.parametrize("mutation", ["png_bytes", "rasterizer", "raster_unavailable"])
+def test_postflight_ocr_raster_drift_is_unknown_and_cannot_reinvoke(
+    ocr_paths, product_bytes, monkeypatch, mutation
+):
+    """OCR output must match both the originally approved pixels and rasterizer."""
+    original_converter = rasterization._convert_svg_to_png
+    model_calls = []
+
+    def changed_converter(svg, width, height):
+        if mutation == "raster_unavailable":
+            raise rasterization.RasterUnavailable("postflight renderer unavailable")
+        png, engine = original_converter(svg, width, height)
+        if mutation == "rasterizer":
+            return png, "test-raster/changed"
+        with BytesIO() as buffer:
+            Image.new("RGB", (width, height), (22, 33, 44)).save(buffer, "PNG")
+            return buffer.getvalue(), engine
+
+    def infer(image, **kwargs):
+        model_calls.append(image.read_bytes())
+        monkeypatch.setattr(rasterization, "_convert_svg_to_png", changed_converter)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", infer)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        first = client.post(_url(doc), json=payload, headers=_headers())
+        assert first.status_code == 201, first.text
+        assert first.json()["status"] == "UNKNOWN"
+        assert first.json()["reason"] == "SOURCE_CHANGED"
+        assert first.json()["observations"] == []
+        assert first.json()["runtime"] is None
+        assert first.json()["quality_verified"] is False
+        assert first.json()["release_ready"] is False
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["status"] == "UNKNOWN"
+        assert replay.json()["replayed"] is True
+        assert len(model_calls) == 1
+
+    with sqlite3.connect(ocr_paths) as connection:
+        row = connection.execute(
+            "SELECT status, observations_json, runtime_json FROM design_ocr_runs"
+            " WHERE operation_id = ?",
+            (payload["operation_id"],),
+        ).fetchone()
+        assert row == ("UNKNOWN", None, None)
