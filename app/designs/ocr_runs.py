@@ -211,7 +211,9 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
                     raise ValueError("pinned OCR run has no runtime metadata")
                 runtime = None
             else:
-                runtime = _load_journal_json(runtime_raw, max_bytes=_MAX_RUNTIME_JSON_BYTES)
+                runtime = _load_journal_json(
+                    runtime_raw, max_bytes=_MAX_RUNTIME_JSON_BYTES
+                )
                 if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
                     raise ValueError("invalid OCR runtime schema")
                 if (
