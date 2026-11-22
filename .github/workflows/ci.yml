@@ -190,7 +190,7 @@ jobs:
           github.event.action == 'labeled' &&
           github.event.label.name == 'ci:browser' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 25
     concurrency:
       group: browser-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
@@ -231,6 +231,43 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
           fi
+      - name: Exercise React workbench hydration and end-to-end flow
+        timeout-minutes: 5
+        run: |
+          BROWSER_TMP="$(mktemp -d)"
+          echo "BROWSER_TMP=$BROWSER_TMP" >> "$GITHUB_ENV"
+          export POSTER_DATA_DIR="$BROWSER_TMP/posters"
+          export POSTER_EXECUTION_DB="$BROWSER_TMP/executions.sqlite3"
+          export POSTER_CHECKPOINT_DB="$BROWSER_TMP/checkpoints.sqlite3"
+          export POSTER_DESIGN_DB="$BROWSER_TMP/designs.sqlite3"
+          export POSTER_DESIGN_ASSET_DIR="$BROWSER_TMP/design-assets"
+          uv run --no-sync python -m app.run_local --port 8765 > "$BROWSER_TMP/server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:8765/ >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat "$BROWSER_TMP/server.log"
+              exit 1
+            fi
+            sleep 0.15
+          done
+          if ! curl --fail --silent http://127.0.0.1:8765/ >/dev/null; then
+            cat "$BROWSER_TMP/server.log"
+            exit 1
+          fi
+          uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_react_workbench.py \
+            http://127.0.0.1:8765 "$BROWSER_TMP/react-workbench"
+      - name: Upload React workbench browser screenshots
+        if: ${{ always() && env.BROWSER_TMP != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: react-workbench-browser-e2e
+          path: ${{ env.BROWSER_TMP }}/react-workbench/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Exercise actual FastAPI page in headless Chromium
         timeout-minutes: 5
         run: uv run --no-sync --with 'playwright>=1.55,<2' python tests/browser_m6_review_triage.py
