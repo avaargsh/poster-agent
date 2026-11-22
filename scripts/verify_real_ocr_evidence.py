@@ -173,14 +173,6 @@ def _is_sha256(value: object) -> bool:
 _MAX_ELAPSED_MS = 24 * 60 * 60 * 1000
 
 
-def _is_finite_number(value: object) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    # JSON integers are finite by definition; converting an arbitrarily large
-    # integer to float for math.isfinite() can raise OverflowError.
-    return not isinstance(value, float) or math.isfinite(value)
-
-
 def _valid_duration(value: object) -> bool:
     return _is_finite_number(value) and 0 <= value <= _MAX_ELAPSED_MS
 
