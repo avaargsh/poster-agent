@@ -28,6 +28,7 @@ _MAX_OCR_LINES_PER_IMAGE = 200
 _MAX_OCR_TEXT_LENGTH = 200
 _MAX_IMAGE_DIMENSION = 4096
 _MAX_IMAGE_PIXELS = 8_000_000
+_MAX_IMAGE_BYTES = 24 * 1024 * 1024
 _OCR_ROW_FIELDS = {"text", "score", "bbox"}
 
 
@@ -72,11 +73,20 @@ def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
         raise EvidenceInvalid("JSON evidence is malformed or ambiguous") from None
 
 
-def _read_json(path: Path) -> dict:
+def _read_bounded_bytes(path: Path, *, max_bytes: int, label: str) -> bytes:
     try:
+        if path.stat().st_size > max_bytes:
+            raise EvidenceInvalid(f"{label} exceeds size limit")
         raw = path.read_bytes()
     except OSError:
-        raise EvidenceInvalid(f"缺失或无法读取的 JSON 证据：{path.name}") from None
+        raise EvidenceInvalid(f"{label} is missing or unreadable") from None
+    if len(raw) > max_bytes:
+        raise EvidenceInvalid(f"{label} exceeds size limit")
+    return raw
+
+
+def _read_json(path: Path) -> dict:
+    raw = _read_bounded_bytes(path, max_bytes=_MAX_JSON_BYTES, label="JSON evidence")
     obj = _loads_strict(raw, max_bytes=_MAX_JSON_BYTES)
     if not isinstance(obj, dict):
         raise EvidenceInvalid("JSON 证据必须为对象")
@@ -106,7 +116,9 @@ def _image_dimensions(path: Path, *, require_png: bool) -> tuple[int, int, str, 
     except (OSError, ValueError, Image.DecompressionBombError):
         raise EvidenceInvalid("OCR 输入图像不是有效的受支持图像") from None
     if (
-        (require_png and image_format != "PNG")
+        raw_size < 1
+        or raw_size > _MAX_IMAGE_BYTES
+        or (require_png and image_format != "PNG")
         or image_format not in {"PNG", "JPEG", "WEBP"}
         or width < 1
         or height < 1
