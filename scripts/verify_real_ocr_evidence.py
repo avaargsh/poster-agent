@@ -153,7 +153,9 @@ def _validate_ocr_rows(rows: object, *, width: int, height: int, context: str) -
         ):
             raise EvidenceInvalid(f"{context}: OCR score is invalid")
         if not _valid_bbox(row["bbox"], width=width, height=height):
-            raise EvidenceInvalid(f"{context}: OCR bbox is missing or outside the image")
+            raise EvidenceInvalid(
+                f"{context}: OCR 坐标框缺失、无效或超出实际图像边界，不能形成完整空间证据"
+            )
     return len(rows)
 
 
@@ -195,6 +197,9 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         "machine",
         "python",
     ):
+        if not isinstance(environment.get(field), str) or not environment[field]:
+            raise EvidenceInvalid("缺少 PaddlePaddle/PaddleOCR 已安装版本证据")
+    for field in ("platform", "machine", "python"):
         if not isinstance(environment.get(field), str) or not environment[field]:
             raise EvidenceInvalid(f"缺少有效的环境字段：{field}")
     if (
