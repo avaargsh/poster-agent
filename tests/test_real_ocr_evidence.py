@@ -214,10 +214,10 @@ def test_batch_rejects_duplicate_jsonl_keys(tmp_path, monkeypatch):
     path = base / "ocr_observations.jsonl"
     lines = path.read_text(encoding="utf-8").splitlines()
     assert '"case_id": "F01"' in lines[0]
-    lines[0] = lines[0].replace(
-        '"case_id": "F01"', '"case_id": "spoofed", "case_id": "F01"', 1
-    )
-    path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    needle = '"case_id": "F01"'
+    replacement = '"case_id": "spoofed", "case_id": "F01"'
+    lines[0] = lines[0].replace(needle, replacement, 1)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(EvidenceInvalid, match="JSON"):
         verify_batch(base)
 
