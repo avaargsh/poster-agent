@@ -244,3 +244,12 @@ def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch, mutat
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(EvidenceInvalid, match=message):
         verify_batch(base)
+
+
+def test_probe_rejects_overflowing_exponent_in_unconsumed_fields(tmp_path, monkeypatch):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    raw = report.read_text(encoding="utf-8").rstrip()
+    assert raw.endswith("}")
+    report.write_text(raw[:-1] + ', "untrusted_extra": 1e999}', encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="JSON"):
+        verify_probe(report, image, "Linux")
