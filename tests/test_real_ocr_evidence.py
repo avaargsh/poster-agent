@@ -227,7 +227,7 @@ def test_batch_rejects_duplicate_jsonl_keys(tmp_path, monkeypatch):
     [
         (lambda row: row.update(bbox=None), "bbox"),
         (lambda row: row.update(score=1.01), "score"),
-        (lambda row: row.update(score=float("nan")), "score"),
+        (lambda row: row.update(score=float("nan")), "JSON"),
         (lambda row: row.update(text=""), "text"),
         (lambda row: row.update(release_ready=True), "schema"),
     ],
