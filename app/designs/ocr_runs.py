@@ -15,7 +15,7 @@ from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 
 from app.ocr_provider import OCRUnavailable, recognize
 
@@ -248,16 +248,8 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
             observations, runtime = [], None
         else:
             raise ValueError("unsupported OCR journal state")
-    except (ValueError, TypeError, UnicodeError, KeyError, RecursionError):
+    except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, ValidationError):
         raise OCRJournalCorrupt() from None
-    except Exception as exc:
-        # Pydantic ValidationError is intentionally normalized to one stable
-        # fail-closed response; do not leak malformed journal contents.
-        from pydantic import ValidationError
-
-        if isinstance(exc, ValidationError):
-            raise OCRJournalCorrupt() from None
-        raise
 
     return {
         "operation_id": row["operation_id"],
