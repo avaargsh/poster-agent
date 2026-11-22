@@ -224,26 +224,28 @@ def test_batch_rejects_duplicate_jsonl_keys(tmp_path, monkeypatch):
         verify_batch(base)
 
 
-@pytest.mark.parametrize(
-    "mutation, message",
-    [
+def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch):
+    import shutil
+
+    base = _make_valid_batch(tmp_path, monkeypatch)
+    cases = [
         (lambda row: row.update(bbox=None), "bbox"),
         (lambda row: row.update(score=1.01), "score"),
         (lambda row: row.update(score=float("nan")), "JSON"),
         (lambda row: row.update(text=""), "text"),
         (lambda row: row.update(release_ready=True), "schema"),
-    ],
-)
-def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch, mutation, message):
-    base = _make_valid_batch(tmp_path, monkeypatch)
-    path = base / "ocr_observations.jsonl"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    observation = json.loads(lines[0])
-    mutation(observation["ocr_lines"][0])
-    lines[0] = json.dumps(observation, ensure_ascii=False, allow_nan=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    with pytest.raises(EvidenceInvalid, match=message):
-        verify_batch(base)
+    ]
+    for index, (mutation, message) in enumerate(cases):
+        case_dir = tmp_path / f"invalid-row-{index}"
+        shutil.copytree(base, case_dir)
+        path = case_dir / "ocr_observations.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        observation = json.loads(lines[0])
+        mutation(observation["ocr_lines"][0])
+        lines[0] = json.dumps(observation, ensure_ascii=False, allow_nan=True)
+        path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+        with pytest.raises(EvidenceInvalid, match=message):
+            verify_batch(case_dir)
 
 
 def test_probe_rejects_overflowing_exponent_in_unconsumed_fields(tmp_path, monkeypatch):
