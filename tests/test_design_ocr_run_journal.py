@@ -438,8 +438,8 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
 
         with sqlite3.connect(ocr_paths) as connection:
             connection.execute(
-                "UPDATE design_ocr_runs SET status='UNKNOWN', reason='RECOVERED_AFTER_RESTART'"
-                " WHERE operation_id=?",
+                "UPDATE design_ocr_runs SET status='UNKNOWN', observations_json=NULL,"
+                " runtime_json=NULL, reason='RECOVERED_AFTER_RESTART' WHERE operation_id=?",
                 (payload["operation_id"],),
             )
         uncertain = client.get(endpoint, headers=_headers())
@@ -852,10 +852,15 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
             _url(doc) + "/" + payload["operation_id"],
             headers=_headers(),
         )
+        expected_code = (
+            "OCR_SOURCE_MISMATCH"
+            if corruption.startswith("observation_")
+            else "OCR_JOURNAL_CORRUPT"
+        )
         assert status.status_code == 409, status.text
-        assert status.json()["error"]["code"] == "OCR_JOURNAL_CORRUPT"
+        assert status.json()["error"]["code"] == expected_code
 
         replay = client.post(_url(doc), json=payload, headers=_headers())
         assert replay.status_code == 409, replay.text
-        assert replay.json()["error"]["code"] == "OCR_JOURNAL_CORRUPT"
+        assert replay.json()["error"]["code"] == expected_code
         assert len(calls) == 1
