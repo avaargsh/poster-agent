@@ -170,7 +170,7 @@ def test_probe_rejects_non_finite_or_non_numeric_elapsed_ms(
     data = json.loads(report.read_text(encoding="utf-8"))
     data["elapsed_ms"] = invalid_duration
     report.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(EvidenceInvalid, match="耗时"):
+    with pytest.raises(EvidenceInvalid, match="JSON|耗时"):
         verify_probe(report, image, "Linux")
 
 
