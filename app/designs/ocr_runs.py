@@ -28,7 +28,7 @@ from .errors import (
 )
 from .models import PAGE_MAX_SIZE, RENDERER_VERSION, validate_plain_text
 from .ocr_model_policy import LocalOCRModelProfile, OCRModelProfileError, load_model_profile
-from .rasterization import rasterize_svg
+from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .repository import DesignRepository, _now
 
 _SHA256 = r"^[0-9a-f]{64}$"
@@ -315,7 +315,18 @@ class OCRRunJournal:
                         or not hmac.compare_digest(svg_hash, row["svg_sha256"])
                     ):
                         raise OCRSourceMismatch()
-                except DesignError:
+                    # Verify exact approved pixels after OCR, not just the SVG.
+                    # The approval transaction fences concurrent revision edits.
+                    raster = rasterize_svg(svg)
+                    if (
+                        not hmac.compare_digest(raster.svg_sha256, row["svg_sha256"])
+                        or not hmac.compare_digest(raster.png_sha256, row["png_sha256"])
+                        or raster.rasterizer != row["rasterizer"]
+                    ):
+                        raise OCRSourceMismatch()
+                except (DesignError, RasterInvalid, RasterUnavailable):
+                    # The model may already have run. Never emit stale EXECUTED
+                    # observations or retry the same admitted operation.
                     status = "UNKNOWN"
                     reason = "SOURCE_CHANGED"
                     observations = None
