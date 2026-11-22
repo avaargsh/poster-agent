@@ -807,11 +807,12 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
                     ),
                 )
             elif corruption == "observation_non_finite_score":
-                rows = json.loads(observations)
-                rows[0]["score"] = float("nan")
                 connection.execute(
                     "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
-                    (json.dumps(rows), payload["operation_id"]),
+                    (
+                        '[{"text":"not-finite","score":1e999,"bbox":null}]',
+                        payload["operation_id"],
+                    ),
                 )
             elif corruption == "runtime_claims_attestation":
                 runtime_data["attested"] = True
