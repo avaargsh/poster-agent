@@ -162,7 +162,7 @@ def test_batch_rejects_fake_not_run_summary(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "invalid_duration",
-    [True, False, float("nan"), float("inf"), -float("inf"), "5"],
+    [True, False, float("nan"), float("inf"), -float("inf"), "5", 10**400],
 )
 def test_probe_rejects_non_finite_or_non_numeric_elapsed_ms(
     tmp_path, monkeypatch, invalid_duration
@@ -231,6 +231,7 @@ def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch):
     cases = [
         (lambda row: row.update(bbox=None), "坐标框"),
         (lambda row: row.update(score=1.01), "score"),
+        (lambda row: row.update(score=10**400), "score"),
         (lambda row: row.update(score=float("nan")), "JSON"),
         (lambda row: row.update(text=""), "text"),
         (lambda row: row.update(release_ready=True), "schema"),
