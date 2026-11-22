@@ -190,13 +190,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         raise EvidenceInvalid("不是成功的真实推理记录：mode=inference 且 status=OK 才可验收")
     if probe.get("model_invocation_completed") is not True:
         raise EvidenceInvalid("模型调用没有完成")
-    for field in (
-        "paddlepaddle_distribution",
-        "paddleocr_distribution",
-        "platform",
-        "machine",
-        "python",
-    ):
+    for field in ("paddlepaddle_distribution", "paddleocr_distribution"):
         if not isinstance(environment.get(field), str) or not environment[field]:
             raise EvidenceInvalid("缺少 PaddlePaddle/PaddleOCR 已安装版本证据")
     for field in ("platform", "machine", "python"):
