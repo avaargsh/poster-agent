@@ -173,6 +173,59 @@ def _load_journal_json(raw: str, *, max_bytes: int):
     )
 
 
+def _decode_observations(raw: object) -> list[dict]:
+    if not isinstance(raw, str):
+        raise OCRSourceMismatch()
+    try:
+        parsed = _load_journal_json(raw, max_bytes=_MAX_OBSERVATIONS_JSON_BYTES)
+        if not isinstance(parsed, list) or len(parsed) > 200:
+            raise ValueError("invalid OCR observations")
+        observations = []
+        for item in parsed:
+            line = _CapturedLine.model_validate(item)
+            if line.bbox is not None and not (
+                line.bbox[0] < line.bbox[2] and line.bbox[1] < line.bbox[3]
+            ):
+                raise ValueError("invalid OCR rectangle")
+            observations.append(line.model_dump(mode="json"))
+        return observations
+    except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, ValidationError):
+        # Preserve the established OCR_SOURCE_MISMATCH contract for malformed
+        # observation payloads, including invalid geometry.
+        raise OCRSourceMismatch() from None
+
+
+def _decode_runtime(
+    raw: object, *, model_profile_sha256: str | None, observation_count: int
+) -> dict | None:
+    if raw is None:
+        # Historical records predating pinned model profiles may lack runtime
+        # metadata; current pinned executions may not.
+        if model_profile_sha256 is not None:
+            raise OCRJournalCorrupt()
+        return None
+    try:
+        runtime = _load_journal_json(raw, max_bytes=_MAX_RUNTIME_JSON_BYTES)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        # Keep malformed JSON reads compatible with the existing API contract.
+        raise OCRSourceMismatch() from None
+    if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
+        raise OCRJournalCorrupt()
+    if (
+        runtime["source"] != "local_paddleocr_adapter"
+        or type(runtime["line_count"]) is not int
+        or runtime["line_count"] != observation_count
+        or runtime["model_weights_sha256"] is not None
+        or runtime["attested"] is not False
+    ):
+        raise OCRJournalCorrupt()
+    for field in _RUNTIME_TEXT_FIELDS:
+        value = runtime[field]
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            raise OCRJournalCorrupt()
+    return runtime
+
+
 def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
     """Validate persisted bytes before replay; SQLite is not an attestation source."""
     try:
@@ -190,42 +243,12 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
             raise ValueError("missing operation start time")
 
         if status == "EXECUTED":
-            if not isinstance(observations_raw, str):
-                raise ValueError("executed OCR run has no observations")
-            parsed = _load_journal_json(observations_raw, max_bytes=_MAX_OBSERVATIONS_JSON_BYTES)
-            if not isinstance(parsed, list) or len(parsed) > 200:
-                raise ValueError("invalid OCR observations")
-            observations = []
-            for item in parsed:
-                line = _CapturedLine.model_validate(item)
-                if line.bbox is not None and not (
-                    line.bbox[0] < line.bbox[2] and line.bbox[1] < line.bbox[3]
-                ):
-                    raise ValueError("invalid OCR rectangle")
-                observations.append(line.model_dump(mode="json"))
-
-            if runtime_raw is None:
-                # Historical records predating pinned model profiles may lack
-                # runtime metadata; current pinned executions may not.
-                if model_profile_sha256 is not None:
-                    raise ValueError("pinned OCR run has no runtime metadata")
-                runtime = None
-            else:
-                runtime = _load_journal_json(runtime_raw, max_bytes=_MAX_RUNTIME_JSON_BYTES)
-                if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
-                    raise ValueError("invalid OCR runtime schema")
-                if (
-                    runtime["source"] != "local_paddleocr_adapter"
-                    or type(runtime["line_count"]) is not int
-                    or runtime["line_count"] != len(observations)
-                    or runtime["model_weights_sha256"] is not None
-                    or runtime["attested"] is not False
-                ):
-                    raise ValueError("invalid OCR runtime values")
-                for field in _RUNTIME_TEXT_FIELDS:
-                    value = runtime[field]
-                    if value is not None and (not isinstance(value, str) or len(value) > 128):
-                        raise ValueError("invalid OCR runtime text")
+            observations = _decode_observations(observations_raw)
+            runtime = _decode_runtime(
+                runtime_raw,
+                model_profile_sha256=model_profile_sha256,
+                observation_count=len(observations),
+            )
             if row["reason"] is not None:
                 raise ValueError("executed OCR run has a failure reason")
             if not isinstance(row["finished_at"], str) or not row["finished_at"]:
@@ -253,33 +276,12 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
             observations, runtime = [], None
         else:
             raise ValueError("unsupported OCR journal state")
+    except (OCRSourceMismatch, OCRJournalCorrupt):
+        raise
     except (ValueError, TypeError, UnicodeError, KeyError, RecursionError, ValidationError):
         raise OCRJournalCorrupt() from None
 
     return {
-        "operation_id": row["operation_id"],
-        "document_id": row["document_id"],
-        "revision": row["revision"],
-        "approval_id": row["approval_id"],
-        "principal_id": row["principal_id"],
-        "spec_digest": row["spec_digest"],
-        "asset_manifest_digest": row["asset_manifest_digest"],
-        "renderer_version": row["renderer_version"],
-        "svg_sha256": row["svg_sha256"],
-        "png_sha256": row["png_sha256"],
-        "rasterizer": row["rasterizer"],
-        "model_profile_sha256": row["model_profile_sha256"],
-        "status": row["status"],
-        "reason": row["reason"],
-        "observations": observations,
-        "runtime": runtime,
-        "started_at": row["started_at"],
-        "finished_at": row["finished_at"],
-        "replayed": replayed,
-        "runtime_attested": False,
-        "quality_verified": False,
-        "release_ready": False,
-    }
 
 
 class OCRRunJournal:
