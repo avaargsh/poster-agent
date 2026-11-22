@@ -437,6 +437,10 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
         endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
 
         with sqlite3.connect(ocr_paths) as connection:
+            observations_json, runtime_json = connection.execute(
+                "SELECT observations_json, runtime_json FROM design_ocr_runs WHERE operation_id=?",
+                (payload["operation_id"],),
+            ).fetchone()
             connection.execute(
                 "UPDATE design_ocr_runs SET status='UNKNOWN', observations_json=NULL,"
                 " runtime_json=NULL, reason='RECOVERED_AFTER_RESTART' WHERE operation_id=?",
@@ -449,8 +453,9 @@ def test_journaled_ocr_comparison_never_promotes_unknown_or_corrupt_source(
 
         with sqlite3.connect(ocr_paths) as connection:
             connection.execute(
-                "UPDATE design_ocr_runs SET status='EXECUTED', svg_sha256=? WHERE operation_id=?",
-                ("0" * 64, payload["operation_id"]),
+                "UPDATE design_ocr_runs SET status='EXECUTED', observations_json=?, runtime_json=?,"
+                " reason=NULL, svg_sha256=? WHERE operation_id=?",
+                (observations_json, runtime_json, "0" * 64, payload["operation_id"]),
             )
         wrong_source = client.get(endpoint, headers=_headers())
         assert wrong_source.status_code == 409, wrong_source.text
