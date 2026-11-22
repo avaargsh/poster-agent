@@ -167,9 +167,7 @@ def _valid_duration(value: object) -> bool:
 
 
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
-    probe_raw = _read_bounded_bytes(
-        probe_file, max_bytes=_MAX_JSON_BYTES, label="probe JSON"
-    )
+    probe_raw = _read_bounded_bytes(probe_file, max_bytes=_MAX_JSON_BYTES, label="probe JSON")
     probe = _loads_strict(probe_raw, max_bytes=_MAX_JSON_BYTES)
     if not isinstance(probe, dict):
         raise EvidenceInvalid("probe JSON must be an object")
@@ -208,9 +206,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     actual = _sha256(image_bytes)
     if image.get("sha256") != actual:
         raise EvidenceInvalid("实际 PNG 图片 SHA-256 与探针报告不一致")
-    width, height, image_format, raw_size = _image_dimensions(
-        image_bytes, require_png=False
-    )
+    width, height, image_format, raw_size = _image_dimensions(image_bytes, require_png=False)
     reported_size = image.get("pixel_size")
     if (
         not isinstance(reported_size, list)
@@ -228,9 +224,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
         raise EvidenceInvalid("缺少真实 OCR 原始识别行；请使用 --include-text 运行")
     if type(probe.get("line_count")) is not int or probe["line_count"] != len(rows):
         raise EvidenceInvalid("OCR 行数与原始证据不一致")
-    valid_count = _validate_ocr_rows(
-        rows, width=width, height=height, context="probe"
-    )
+    valid_count = _validate_ocr_rows(rows, width=width, height=height, context="probe")
     duration = probe.get("elapsed_ms")
     if not _valid_duration(duration):
         raise EvidenceInvalid("缺少合法推理耗时")
