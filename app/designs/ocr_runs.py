@@ -282,6 +282,29 @@ def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
         raise OCRJournalCorrupt() from None
 
     return {
+        "operation_id": row["operation_id"],
+        "document_id": row["document_id"],
+        "revision": row["revision"],
+        "approval_id": row["approval_id"],
+        "principal_id": row["principal_id"],
+        "spec_digest": row["spec_digest"],
+        "asset_manifest_digest": row["asset_manifest_digest"],
+        "renderer_version": row["renderer_version"],
+        "svg_sha256": row["svg_sha256"],
+        "png_sha256": row["png_sha256"],
+        "rasterizer": row["rasterizer"],
+        "model_profile_sha256": row["model_profile_sha256"],
+        "status": row["status"],
+        "reason": row["reason"],
+        "observations": observations,
+        "runtime": runtime,
+        "started_at": row["started_at"],
+        "finished_at": row["finished_at"],
+        "replayed": replayed,
+        "runtime_attested": False,
+        "quality_verified": False,
+        "release_ready": False,
+    }
 
 
 class OCRRunJournal:
