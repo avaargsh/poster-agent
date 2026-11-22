@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from io import BytesIO
 
 from PIL import Image
 from pydantic import ValidationError
@@ -85,14 +86,6 @@ def _read_bounded_bytes(path: Path, *, max_bytes: int, label: str) -> bytes:
     return raw
 
 
-def _read_json(path: Path) -> dict:
-    raw = _read_bounded_bytes(path, max_bytes=_MAX_JSON_BYTES, label="JSON evidence")
-    obj = _loads_strict(raw, max_bytes=_MAX_JSON_BYTES)
-    if not isinstance(obj, dict):
-        raise EvidenceInvalid("JSON 证据必须为对象")
-    return obj
-
-
 def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
@@ -106,19 +99,19 @@ def _valid_bbox(box: object, *, width: int, height: int) -> bool:
     return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
 
 
-def _image_dimensions(path: Path, *, require_png: bool) -> tuple[int, int, str, int]:
+def _image_dimensions(raw: bytes, *, require_png: bool) -> tuple[int, int, str, int]:
+    raw_size = len(raw)
+    if raw_size < 1 or raw_size > _MAX_IMAGE_BYTES:
+        raise EvidenceInvalid("OCR 输入图像大小超出允许范围")
     try:
-        raw_size = path.stat().st_size
-        with Image.open(path) as source:
+        with Image.open(BytesIO(raw)) as source:
             image_format = source.format
             width, height = source.size
             source.verify()
     except (OSError, ValueError, Image.DecompressionBombError):
         raise EvidenceInvalid("OCR 输入图像不是有效的受支持图像") from None
     if (
-        raw_size < 1
-        or raw_size > _MAX_IMAGE_BYTES
-        or (require_png and image_format != "PNG")
+        (require_png and image_format != "PNG")
         or image_format not in {"PNG", "JPEG", "WEBP"}
         or width < 1
         or height < 1
@@ -170,7 +163,12 @@ def _valid_duration(value: object) -> bool:
 
 
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
-    probe = _read_json(probe_file)
+    probe_raw = _read_bounded_bytes(
+        probe_file, max_bytes=_MAX_JSON_BYTES, label="probe JSON"
+    )
+    probe = _loads_strict(probe_raw, max_bytes=_MAX_JSON_BYTES)
+    if not isinstance(probe, dict):
+        raise EvidenceInvalid("probe JSON must be an object")
     environment = probe.get("environment")
     if not isinstance(environment, dict):
         raise EvidenceInvalid("缺少有效的推理环境记录")
@@ -201,7 +199,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     if image.get("sha256") != actual:
         raise EvidenceInvalid("实际 PNG 图片 SHA-256 与探针报告不一致")
     width, height, image_format, raw_size = _image_dimensions(
-        image_file, require_png=False
+        image_bytes, require_png=False
     )
     reported_size = image.get("pixel_size")
     if (
@@ -227,9 +225,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     if not _valid_duration(duration):
         raise EvidenceInvalid("缺少合法推理耗时")
     return {
-        "probe_sha256": _sha256(
-            _read_bounded_bytes(probe_file, max_bytes=_MAX_JSON_BYTES, label="probe JSON")
-        ),
+        "probe_sha256": _sha256(probe_raw),
         "input_image_sha256": actual,
         "platform": environment["platform"],
         "machine": environment["machine"],
@@ -252,14 +248,19 @@ def verify_batch(batch_dir: Path) -> dict:
         manifest_path, max_bytes=_MAX_JSON_BYTES, label="image manifest"
     )
     manifest_data = _loads_strict(manifest_raw, max_bytes=_MAX_JSON_BYTES)
-    if not isinstance(manifest_data, dict) or set(manifest_data) != {
-        "dataset_id",
-        "dataset_kind",
-        "caveat",
-        "expected_spec",
-        "target_fields",
-        "fixtures",
-    }:
+    if (
+        not isinstance(manifest_data, dict)
+        or set(manifest_data)
+        != {
+            "dataset_id",
+            "dataset_kind",
+            "caveat",
+            "expected_spec",
+            "target_fields",
+            "fixtures",
+        }
+        or not isinstance(manifest_data.get("fixtures"), list)
+    ):
         raise EvidenceInvalid("image manifest schema is invalid")
     try:
         manifest = ImageManifest.model_validate(manifest_data)
@@ -280,7 +281,12 @@ def verify_batch(batch_dir: Path) -> dict:
     ):
         raise EvidenceInvalid("image fixture schema is invalid")
 
-    report = _read_json(report_file)
+    report_raw = _read_bounded_bytes(
+        report_file, max_bytes=_MAX_JSON_BYTES, label="benchmark summary"
+    )
+    report = _loads_strict(report_raw, max_bytes=_MAX_JSON_BYTES)
+    if not isinstance(report, dict):
+        raise EvidenceInvalid("benchmark summary must be an object")
     if report.get("ocr_mode") != "paddle" or report.get("model_executed") is not True:
         raise EvidenceInvalid("批量报告没有记录 PaddleOCR 完成")
     if report.get("dataset_kind") != "code_rendered_png_fixtures":
@@ -335,7 +341,7 @@ def verify_batch(batch_dir: Path) -> dict:
             raise EvidenceInvalid(f"{fixture.case_id} PNG SHA-256 与 manifest 不一致")
         if observation.get("image_sha256") != actual:
             raise EvidenceInvalid(f"{fixture.case_id} OCR 记录与输入图像哈希不一致")
-        width, height, _, _ = _image_dimensions(image_path, require_png=True)
+        width, height, _, _ = _image_dimensions(image_bytes, require_png=True)
         if not _valid_duration(observation.get("elapsed_ms")):
             raise EvidenceInvalid(f"{fixture.case_id} OCR elapsed_ms is invalid")
         _validate_ocr_rows(
@@ -345,9 +351,6 @@ def verify_batch(batch_dir: Path) -> dict:
             context=fixture.case_id,
         )
 
-    report_raw = _read_bounded_bytes(
-        report_file, max_bytes=_MAX_JSON_BYTES, label="benchmark summary"
-    )
     return {
         "dataset_kind": manifest.dataset_kind,
         "fixture_count": EXPECTED_FIXTURES,
