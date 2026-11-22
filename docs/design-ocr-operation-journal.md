@@ -76,7 +76,15 @@ inference; drift or unreadable weights after admission yields
 
 Any **present** model-reported bounding box must also have strictly positive area and remain entirely inside the exact approved PNG dimensions. Invalid rectangles are rejected before an `EXECUTED` receipt can persist; because the model may already have run, the journal records `UNKNOWN / OCR_EXECUTION_AMBIGUOUS` and replay cannot re-invoke it. A missing box is retained as `null`, with spatial comparison `BLOCKED / MISSING_BBOX` rather than fabricated placement evidence. These synthetic checks do not prove the real OCR adapter's accuracy.
 
-The terminal update again validates the current approved snapshot. Successful
+The terminal update again validates the current approved snapshot.
+While holding the serialized approval transaction, the server also re-renders
+the approved SVG and compares the postflight PNG SHA-256 and rasterizer identity
+with the exact raster journaled before OCR inference. If pixels, rasterizer,
+or approval change, or postflight rasterization becomes unavailable, the
+operation remains a durable `UNKNOWN / SOURCE_CHANGED`, with observations and
+runtime telemetry discarded. The same operation ID is replay-only and never
+triggers another OCR inference. This is local evidence consistency, **not**
+cryptographic model attestation. Successful
 local adapter output is bounded to at most 200 lines of plain text, confidence,
 and optional 4-integer bounding boxes. Valid results are stored alongside
 sanitized diagnostic package/platform telemetry, with `model_weights_sha256`
