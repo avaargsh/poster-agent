@@ -102,6 +102,14 @@ def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _is_finite_number(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    # JSON integers are finite by definition; converting an arbitrarily large
+    # integer to float for math.isfinite() can raise OverflowError.
+    return not isinstance(value, float) or math.isfinite(value)
+
+
 def _valid_bbox(box: object, *, width: int, height: int) -> bool:
     if not isinstance(box, list) or len(box) != 4:
         return False
@@ -145,12 +153,7 @@ def _validate_ocr_rows(rows: object, *, width: int, height: int, context: str) -
         if not isinstance(text, str) or not text.strip() or len(text) > _MAX_OCR_TEXT_LENGTH:
             raise EvidenceInvalid(f"{context}: OCR text is invalid")
         score = row["score"]
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, (int, float))
-            or not math.isfinite(score)
-            or not 0 <= score <= 1
-        ):
+        if not _is_finite_number(score) or not 0 <= score <= 1:
             raise EvidenceInvalid(f"{context}: OCR score is invalid")
         if not _valid_bbox(row["bbox"], width=width, height=height):
             raise EvidenceInvalid(
@@ -167,13 +170,19 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+_MAX_ELAPSED_MS = 24 * 60 * 60 * 1000
+
+
+def _is_finite_number(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    # JSON integers are finite by definition; converting an arbitrarily large
+    # integer to float for math.isfinite() can raise OverflowError.
+    return not isinstance(value, float) or math.isfinite(value)
+
+
 def _valid_duration(value: object) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and math.isfinite(value)
-        and value >= 0
-    )
+    return _is_finite_number(value) and 0 <= value <= _MAX_ELAPSED_MS
 
 
 def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | None = None) -> dict:
