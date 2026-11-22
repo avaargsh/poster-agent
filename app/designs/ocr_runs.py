@@ -15,7 +15,14 @@ from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 
 from app.ocr_provider import OCRUnavailable, recognize
 
