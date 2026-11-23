@@ -30,6 +30,19 @@ _PROFILE_KEYS = {
 
 
 def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate model profile key")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_json(value: str):
+    raise ValueError("non-finite model profile value")
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
     value = {}
     for key, item in pairs:
         if key in value:
