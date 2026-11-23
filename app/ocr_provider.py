@@ -101,7 +101,9 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
         engine = _engine() if model_dirs is None else _local_engine(*model_dirs)
         inference_started_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         inference_started_ns = perf_counter_ns()
-        results = engine.predict(str(image_path))
+        # Materialize the iterator inside the timed region: PaddleOCR may
+        # defer inference until its result generator is consumed.
+        results = list(engine.predict(str(image_path)))
         inference_elapsed_ns = perf_counter_ns() - inference_started_ns
         inference_finished_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         inference_elapsed_ms = inference_elapsed_ns / 1_000_000
@@ -127,9 +129,6 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
             lines,
             {
                 "source": "paddleocr_adapter",
-                "inference_started_at": inference_started_at,
-                "inference_finished_at": inference_finished_at,
-                "inference_elapsed_ms": inference_elapsed_ms,
                 "paddleocr_package_version": _package_version("paddleocr"),
                 "paddlepaddle_package_version": _package_version("paddlepaddle"),
                 "python_version": python_version(),
