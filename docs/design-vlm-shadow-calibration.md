@@ -27,6 +27,8 @@ uv run --locked python -m scripts.evaluate_design_vlm_shadow \
   > /path/to/private/shadow_calibration_report.json
 ```
 
+The label CSV is opened as a single regular-file descriptor (a symlinked CSV is refused) and the read is capped at **2 MiB plus one sentinel byte** before parsing; no earlier file-size metadata is trusted to enforce the limit. This is a local input-safety control, not a guarantee that a concurrently writable file is frozen. For actual assessment, stage the cohort CSV and image evidence on read-only storage or take a controlled snapshot.
+
 Keep the original CSV private, and retain the CSV SHA-256 and selected SQLite-row digest from the report to detect ordinary replay drift. Those are **content fingerprints**, not signatures or proof that humans looked at images.
 
 ## Metrics and denominator

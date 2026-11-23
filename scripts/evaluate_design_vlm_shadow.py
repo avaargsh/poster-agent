@@ -13,8 +13,10 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 import sqlite3
+import stat
 import sys
 from collections import Counter
 from datetime import datetime
@@ -85,9 +87,19 @@ def _require(value: object, pattern: re.Pattern[str]) -> None:
 
 def _read_labels(path: Path) -> tuple[list[dict[str, str]], str]:
     try:
-        if not path.is_file() or path.stat().st_size > MAX_CSV_BYTES:
+        # The CSV is untrusted operator input. Open a single regular-file
+        # descriptor and bound the actual read, not a stale path.stat() value.
+        # O_NONBLOCK avoids blocking on a substituted pipe or device.
+        if path.is_symlink():
+            raise CalibrationError("cohort CSV must be a regular file, not a symlink")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise CalibrationError("cohort CSV must be a regular file")
+            raw = source.read(MAX_CSV_BYTES + 1)
+        if not raw or len(raw) > MAX_CSV_BYTES:
             raise CalibrationError("cohort CSV is missing or exceeds size limit")
-        raw = path.read_bytes()
         decoded = raw.decode("utf-8-sig")
         with io.StringIO(decoded, newline="") as stream:
             reader = csv.DictReader(stream, strict=True)
