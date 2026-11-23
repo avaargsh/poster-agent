@@ -333,7 +333,7 @@ def test_postflight_rejects_source_drift_after_inference_started(tmp_path, mutat
                     )
                 elif mutation == "review_csv":
                     with (package / "m6_output_reviews.csv").open("ab") as stream:
-                        stream.write(b"\\n")
+                        stream.write(b"\n")
                 else:
                     (package / completed["output_image_path"]).write_bytes(
                         b"changed-after-infer"
