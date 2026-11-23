@@ -92,7 +92,8 @@ def _read_labels(path: Path) -> tuple[list[dict[str, str]], str]:
         # O_NONBLOCK avoids blocking on a substituted pipe or device.
         if path.is_symlink():
             raise CalibrationError("cohort CSV must be a regular file, not a symlink")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
         with os.fdopen(os.open(path, flags), "rb") as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 raise CalibrationError("cohort CSV must be a regular file")
