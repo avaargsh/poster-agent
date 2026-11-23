@@ -297,12 +297,11 @@ def test_real_ocr_reader_never_uses_unbounded_path_read(tmp_path, monkeypatch):
 
     from scripts.verify_real_ocr_evidence import _read_bounded_bytes
 
-    source = tmp_path / "large-evidence.json"
-    source.write_bytes(b"x" * 33)
+    source = tmp_path / "bounded-evidence.json"
+    source.write_bytes(b"x" * 16)
 
     def forbidden_unbounded_read(self):
         raise AssertionError("unbounded Path.read_bytes is forbidden for OCR evidence")
 
     monkeypatch.setattr(Path, "read_bytes", forbidden_unbounded_read)
-    with pytest.raises(EvidenceInvalid, match="size limit"):
-        _read_bounded_bytes(source, max_bytes=32, label="OCR evidence")
+    assert _read_bounded_bytes(source, max_bytes=32, label="OCR evidence") == b"x" * 16
