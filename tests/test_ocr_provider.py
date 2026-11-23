@@ -1,7 +1,6 @@
 """Verify PaddleOCR 3.x parsing without loading its large model weights."""
 
 from datetime import datetime
-from datetime import datetime
 from pathlib import Path
 
 from app import ocr_provider
