@@ -52,6 +52,8 @@ A successful workflow uploads an artifact named `real-ocr-linux-cpu-evidence`, c
 
 Only runs where the real smoke + verifier steps COMPLETE count as verified evidence. A green PR unit-test badge, a diagnostic NOT_RUN report, or a mocked integration test is **not** proof of real inference. GitHub-hosted Actions minutes, storage and downloads depend on repository/account limits.
 
+**Read-only verifier input boundary:** `scripts.verify_real_ocr_evidence` reads the probe JSON, submitted input PNG, benchmark manifest, summary, OCR JSONL and fixture PNGs through a bounded regular-file descriptor. Symlinked leaf paths and special files (including devices/FIFOs) are rejected; each read is capped at the configured per-file limit plus one detection byte, even if an input grows after its size check. Hashes still bind only the bytes observed by this local verifier, not a signed external execution record. For stronger source immutability, freeze and mount the containing evidence directory read-only; local checks alone cannot independently attest model weights or real customer-SKU quality.
+
 ## Failures and next steps
 
 If the real job fails, inspect the installation or model download/initialization logs. Correct the environment before claiming results; **do not change `mode` or return fake OCR rows to make the run green**.
