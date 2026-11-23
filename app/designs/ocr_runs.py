@@ -267,6 +267,40 @@ def _decode_runtime(
     return runtime
 
 
+
+
+def _validate_inference_timing(runtime: dict, *, required: bool) -> None:
+    started = runtime.get("inference_started_at")
+    finished = runtime.get("inference_finished_at")
+    elapsed = runtime.get("inference_elapsed_ms")
+    if not required and started is None and finished is None and elapsed is None:
+        return
+    if not isinstance(started, str) or not isinstance(finished, str):
+        raise ValueError("missing PaddleOCR inference timestamps")
+    try:
+        start_time = datetime.fromisoformat(started)
+        finish_time = datetime.fromisoformat(finished)
+    except ValueError:
+        raise ValueError("invalid PaddleOCR inference timestamps") from None
+    if (
+        start_time.tzinfo is None
+        or start_time.utcoffset() is None
+        or finish_time.tzinfo is None
+        or finish_time.utcoffset() is None
+        or finish_time < start_time
+    ):
+        raise ValueError("non-monotonic or timezone-naive PaddleOCR inference timestamps")
+    if (
+        isinstance(elapsed, bool)
+        or not isinstance(elapsed, (int, float))
+        or isinstance(elapsed, float)
+        and not math.isfinite(elapsed)
+        or elapsed < 0
+        or elapsed > 24 * 60 * 60 * 1000
+    ):
+        raise ValueError("invalid PaddleOCR monotonic inference duration")
+
+
 def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
     """Validate persisted bytes before replay; SQLite is not an attestation source."""
     try:
