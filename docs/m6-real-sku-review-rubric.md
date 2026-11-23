@@ -280,7 +280,7 @@ uv run --locked --extra ocr python -m scripts.capture_m6_paddle_ocr \
   --device cpu
 ```
 
-采集脚本在本机有界读取 `m6_output_reviews.csv` 与当前图片，检查完整 SKU×方形/4:5 行、同一 SKU 的来源哈希一致性，强制 PNG SHA-256 和 1024×1024 / 1080×1350 尺寸匹配，并记录 PaddleOCR 3.x 实际 `predict()` 的 `rec_texts/rec_scores`、OCR/运行时版本、模型目录 SHA-256 指纹、耗时与每个输出的 SHA。任何失配/推理失败会阻断整个批次，不发布部分 `m6_paddle_ocr_evidence.json`；已有文件不可覆盖。
+采集脚本在本机有界读取 `m6_output_reviews.csv` 与当前图片，检查完整 SKU×方形/4:5 行、同一 SKU 的来源哈希一致性，强制 PNG SHA-256 和 1024×1024 / 1080×1350 尺寸匹配，并记录 PaddleOCR 3.x 实际 `predict()` 的 `rec_texts/rec_scores`、OCR/运行时版本、模型目录 SHA-256 指纹、耗时与每个输出的 SHA。在最后一张图片推理结束、发布证据之前，采集器会重新核对原始评审 CSV 的完整字节摘要、整批 PNG 的实际像素文件摘要与尺寸，以及两份模型目录的完整内容指纹；即使已经识别完成的图片在过程中被替换，也会拒绝产生证据。任何失配/推理失败会阻断整个批次，不发布部分 `m6_paddle_ocr_evidence.json`；已有文件不可覆盖。复核与最终写入之间仍可能存在 TOCTOU 窗口，因此正式执行应使用只读模型挂载和冻结审核包，且本机 SHA-256 不构成独立模型运行认证。
 
 **这仍是证据采集，不是评分。** `CAPTURED_REVIEW_REQUIRED` 明确要求人工和规格核对，不代表价格正确、文字位置正确或海报可投放。`m6_paddle_ocr_evidence.json` 现在可通过上述 `--ocr-evidence --require-ocr-evidence` 参数在 `validate_m6_cohort` 中进行一致性核验，但它仍不能单独证明真实模型执行、OCR 正确率或 M5j/M6 质量验收。文件包含识别出的敏感文案，仅在本机 Git 忽略目录保存，不要公开提交。使用显式模型路径并不构成绝对断网保证；严格离线运行须通过系统或容器网络策略阻断出站连接。Mac M1 的 PaddlePaddle 可用性须与官方安装矩阵核对，必要时用 Linux CPU 环境执行；单元测试使用注入的假引擎，并不代表真实模型已运行。
 

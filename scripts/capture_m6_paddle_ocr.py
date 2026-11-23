@@ -386,6 +386,15 @@ def capture(
         if progress is not None:
             # Report only completed predictions. Never publish partial OCR JSON.
             progress(len(observations), len(rows))
+    # Revalidate every frozen input after the last inference, including images
+    # already used earlier in the batch. No evidence is published on drift.
+    post_csv_sha, _ = _review_rows(package)
+    if post_csv_sha != csv_sha:
+        raise OCREvidenceError("M6 评审 CSV 在 OCR 推理期间发生变化")
+    _preflight_frozen_images(package, rows)
+    if _model_fingerprint(det_dir) != det_digest or _model_fingerprint(rec_dir) != rec_digest:
+        raise OCREvidenceError("本地 OCR 模型文件在推理期间发生变化")
+
     summary = {
         "schema_version": "m6-paddle-ocr-evidence-1",
         "cohort_id": cohort,
