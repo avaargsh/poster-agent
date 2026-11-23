@@ -31,7 +31,15 @@ def test_real_adapter_records_wall_clock_and_monotonic_predict_timing(monkeypatc
     class FakeOCR:
         def predict(self, path):
             assert Path(path).exists()
-            return [{"res": {"rec_texts": ["标题"], "rec_scores": [0.99], "rec_boxes": [[1, 2, 20, 30]]}}]
+            return [
+                {
+                    "res": {
+                        "rec_texts": ["标题"],
+                        "rec_scores": [0.99],
+                        "rec_boxes": [[1, 2, 20, 30]],
+                    }
+                }
+            ]
 
     monkeypatch.setattr(ocr_provider, "_engine", lambda: FakeOCR())
     image = tmp_path / "approved.png"
