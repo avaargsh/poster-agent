@@ -87,7 +87,13 @@ triggers another OCR inference. This is local evidence consistency, **not**
 cryptographic model attestation. Successful
 local adapter output is bounded to at most 200 lines of plain text, confidence,
 and optional 4-integer bounding boxes. Valid results are stored alongside
-sanitized diagnostic package/platform telemetry, with `model_weights_sha256`
+sanitized diagnostic package/platform telemetry. The PaddleOCR adapter records UTC
+wall-clock `inference_started_at` / `inference_finished_at` and monotonic
+`inference_elapsed_ms` around the materialized `predict()` result iterator.
+These are process-local timing observations, not trusted timestamps or model
+attestation. Older journal rows using the pre-timing runtime schema remain
+readable without synthetic timing backfills. The journal stores
+`model_weights_sha256`
 explicitly `null`: a locally computed full-tree digest binds files in the
 journal but is **not** an independent authenticated model signature or
 a guarantee that the loaded inference weights equal those files.

@@ -118,7 +118,14 @@ def _ocr_lines():
             {"text": "¥199.90", "score": 0.98, "bbox": [2, 65, 210, 115]},
             {"text": "立即抢购", "score": 0.97, "bbox": [2, 125, 210, 170]},
         ],
-        {"source": "paddleocr_adapter", "line_count": 3, "attested": True},
+        {
+            "source": "paddleocr_adapter",
+            "line_count": 3,
+            "attested": True,
+            "inference_started_at": "2026-11-23T03:00:00+00:00",
+            "inference_finished_at": "2026-11-23T03:00:00.125000+00:00",
+            "inference_elapsed_ms": 125.0,
+        },
     )
 
 
@@ -148,6 +155,9 @@ def test_explicit_ocr_run_is_journaled_idempotent_and_survives_restart(
         assert data["quality_verified"] is False
         assert data["release_ready"] is False
         assert data["runtime"]["attested"] is False
+        assert data["runtime"]["inference_started_at"] == "2026-11-23T03:00:00+00:00"
+        assert data["runtime"]["inference_finished_at"] == "2026-11-23T03:00:00.125000+00:00"
+        assert data["runtime"]["inference_elapsed_ms"] == 125.0
         assert data["replayed"] is False
         assert len(seen) == 1
         replay = client.post(_url(doc), json=payload, headers=_headers())
@@ -759,6 +769,10 @@ def test_postflight_ocr_raster_drift_is_unknown_and_cannot_reinvoke(
         "runtime_claims_attestation",
         "runtime_extra_authority",
         "runtime_line_count_mismatch",
+        "runtime_timing_partial",
+        "runtime_timing_naive",
+        "runtime_timing_reversed",
+        "runtime_timing_bool",
         "missing_runtime_for_pinned_model",
         "unknown_retains_observations",
         "unavailable_retains_runtime",
@@ -837,6 +851,30 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
                     "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
                     (json.dumps(runtime_data), payload["operation_id"]),
                 )
+            elif corruption == "runtime_timing_partial":
+                runtime_data.pop("inference_finished_at", None)
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "runtime_timing_naive":
+                runtime_data["inference_started_at"] = "2026-11-23T03:00:00"
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "runtime_timing_reversed":
+                runtime_data["inference_finished_at"] = "2026-11-23T02:59:59+00:00"
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
+            elif corruption == "runtime_timing_bool":
+                runtime_data["inference_elapsed_ms"] = True
+                connection.execute(
+                    "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                    (json.dumps(runtime_data), payload["operation_id"]),
+                )
             elif corruption == "missing_runtime_for_pinned_model":
                 connection.execute(
                     "UPDATE design_ocr_runs SET runtime_json = NULL WHERE operation_id = ?",
@@ -869,3 +907,62 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
         assert replay.status_code == 409, replay.text
         assert replay.json()["error"]["code"] == expected_code
         assert len(calls) == 1
+
+
+def test_legacy_runtime_schema_remains_readable_after_timing_extension(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        with sqlite3.connect(ocr_paths) as connection:
+            runtime = connection.execute(
+                "SELECT runtime_json FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+            runtime_data = json.loads(runtime)
+            for key in (
+                "inference_started_at",
+                "inference_finished_at",
+                "inference_elapsed_ms",
+            ):
+                runtime_data.pop(key, None)
+            connection.execute(
+                "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                (json.dumps(runtime_data), payload["operation_id"]),
+            )
+        replay = client.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["runtime"] == runtime_data
+
+
+def test_duplicate_model_profile_keys_are_rejected_before_operation_admission(
+    ocr_paths, product_bytes, monkeypatch
+):
+    import os
+
+    raw = os.environ["POSTER_DESIGN_OCR_MODEL_CONFIG_JSON"]
+    assert '"schema_version": 1' in raw
+    monkeypatch.setenv(
+        "POSTER_DESIGN_OCR_MODEL_CONFIG_JSON",
+        raw.replace('"schema_version": 1', '"schema_version": 0, "schema_version": 1', 1),
+    )
+    calls = []
+    monkeypatch.setattr(
+        ocr_runs, "recognize", lambda path, **kwargs: calls.append(1) or _ocr_lines()
+    )
+
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 503, response.text
+        assert response.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        assert calls == []
+        with sqlite3.connect(ocr_paths) as connection:
+            count = connection.execute(
+                "SELECT count(*) FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+        assert count == 0

@@ -6,10 +6,12 @@ does not download large OCR weights.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from platform import machine, python_version
+from time import perf_counter_ns
 
 
 class OCRLines(list):
@@ -97,7 +99,14 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
     """Return per-line text, score and optional pixel bbox (PaddleOCR 3.x)."""
     try:
         engine = _engine() if model_dirs is None else _local_engine(*model_dirs)
-        results = engine.predict(str(image_path))
+        inference_started_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        inference_started_ns = perf_counter_ns()
+        # Materialize the iterator inside the timed region: PaddleOCR may
+        # defer inference until its result generator is consumed.
+        results = list(engine.predict(str(image_path)))
+        inference_elapsed_ns = perf_counter_ns() - inference_started_ns
+        inference_finished_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        inference_elapsed_ms = inference_elapsed_ns / 1_000_000
         lines = []
         for result in results:
             data = _json_dict(result)
@@ -125,6 +134,9 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
                 "python_version": python_version(),
                 "machine": machine(),
                 "line_count": len(lines),
+                "inference_started_at": inference_started_at,
+                "inference_finished_at": inference_finished_at,
+                "inference_elapsed_ms": inference_elapsed_ms,
                 "attested": False,
             },
         )

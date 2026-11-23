@@ -29,6 +29,19 @@ _PROFILE_KEYS = {
 }
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate model profile key")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError("non-finite model profile value")
+
+
 class OCRModelProfileError(RuntimeError):
     """Required model paths or their pinned file contents are unverifiable."""
 
@@ -117,11 +130,17 @@ def model_directory_sha256(directory: Path) -> str:
 
 def load_model_profile(raw: str | None) -> LocalOCRModelProfile:
     """Fail closed unless operator pins two exact local model trees."""
-    if not isinstance(raw, str) or len(raw) > 4096:
+    if not isinstance(raw, str):
         raise OCRModelProfileError("local OCR model profile is required")
     try:
-        cfg = json.loads(raw)
-    except (TypeError, ValueError):
+        if len(raw.encode("utf-8")) > 4096:
+            raise ValueError("local OCR model profile exceeds size limit")
+        cfg = json.loads(
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_non_finite_json,
+        )
+    except (TypeError, ValueError, UnicodeError):
         raise OCRModelProfileError("invalid local OCR model profile JSON") from None
     if (
         not isinstance(cfg, dict)
