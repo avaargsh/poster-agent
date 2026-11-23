@@ -29,6 +29,15 @@ _PROFILE_KEYS = {
 }
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
 class OCRModelProfileError(RuntimeError):
     """Required model paths or their pinned file contents are unverifiable."""
 
@@ -120,7 +129,7 @@ def load_model_profile(raw: str | None) -> LocalOCRModelProfile:
     if not isinstance(raw, str) or len(raw) > 4096:
         raise OCRModelProfileError("local OCR model profile is required")
     try:
-        cfg = json.loads(raw)
+        cfg = json.loads(raw, object_pairs_hook=_unique_json_object)
     except (TypeError, ValueError):
         raise OCRModelProfileError("invalid local OCR model profile JSON") from None
     if (
