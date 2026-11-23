@@ -135,6 +135,9 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
                 "python_version": python_version(),
                 "machine": machine(),
                 "line_count": len(lines),
+                "inference_started_at": inference_started_at,
+                "inference_finished_at": inference_finished_at,
+                "inference_elapsed_ms": inference_elapsed_ms,
                 "attested": False,
             },
         )
