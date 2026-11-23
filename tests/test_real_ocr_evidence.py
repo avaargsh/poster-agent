@@ -256,3 +256,13 @@ def test_probe_rejects_overflowing_exponent_in_unconsumed_fields(tmp_path, monke
     report.write_text(raw[:-1] + ', "untrusted_extra": 1e999}', encoding="utf-8")
     with pytest.raises(EvidenceInvalid, match="JSON"):
         verify_probe(report, image, "Linux")
+
+
+def test_batch_rejects_metrics_not_derived_from_ocr_observations(tmp_path, monkeypatch):
+    base = _make_valid_batch(tmp_path, monkeypatch)
+    report_path = base / "image_benchmark_summary.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["case_metrics"]["confusion"]["TP"] = 20
+    report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="metrics"):
+        verify_batch(base)
