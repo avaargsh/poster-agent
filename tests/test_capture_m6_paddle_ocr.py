@@ -328,12 +328,16 @@ def test_postflight_rejects_source_drift_after_inference_started(tmp_path, mutat
             called.append(1)
             if len(called) == 1:
                 if mutation == "model":
-                    (det / "inference.json").write_text('{"model":"changed"}', encoding="utf-8")
+                    (det / "inference.json").write_text(
+                        '{"model":"changed"}', encoding="utf-8"
+                    )
                 elif mutation == "review_csv":
                     with (package / "m6_output_reviews.csv").open("ab") as stream:
                         stream.write(b"\\n")
                 else:
-                    (package / completed["output_image_path"]).write_bytes(b"changed-after-infer")
+                    (package / completed["output_image_path"]).write_bytes(
+                        b"changed-after-infer"
+                    )
             return output
 
     with pytest.raises(OCREvidenceError, match="模型|CSV|PNG"):
