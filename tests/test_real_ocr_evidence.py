@@ -266,3 +266,42 @@ def test_batch_rejects_metrics_not_derived_from_ocr_observations(tmp_path, monke
     report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(EvidenceInvalid, match="metrics"):
         verify_batch(base)
+
+
+@pytest.mark.parametrize("link", ["probe", "image"])
+def test_probe_rejects_symlinked_evidence_inputs(tmp_path, monkeypatch, link):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    selected = report if link == "probe" else image
+    source = selected.with_name("source-" + selected.name)
+    selected.rename(source)
+    selected.symlink_to(source)
+
+    with pytest.raises(EvidenceInvalid):
+        verify_probe(report, image, "Linux")
+
+
+def test_real_ocr_reader_rejects_character_devices():
+    import os
+    from pathlib import Path
+
+    from scripts.verify_real_ocr_evidence import _read_bounded_bytes
+
+    if os.name != "posix":
+        pytest.skip("character device contract is POSIX-only")
+    with pytest.raises(EvidenceInvalid, match="regular"):
+        _read_bounded_bytes(Path(os.devnull), max_bytes=32, label="device")
+
+
+def test_real_ocr_reader_never_uses_unbounded_path_read(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from scripts.verify_real_ocr_evidence import _read_bounded_bytes
+
+    source = tmp_path / "bounded-evidence.json"
+    source.write_bytes(b"x" * 16)
+
+    def forbidden_unbounded_read(self):
+        raise AssertionError("unbounded Path.read_bytes is forbidden for OCR evidence")
+
+    monkeypatch.setattr(Path, "read_bytes", forbidden_unbounded_read)
+    assert _read_bounded_bytes(source, max_bytes=32, label="OCR evidence") == b"x" * 16
