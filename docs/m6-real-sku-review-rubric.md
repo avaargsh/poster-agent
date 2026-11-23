@@ -171,6 +171,8 @@ uv run --locked python -m scripts.prepare_m6_review \
 
 严格 M6 校验支持旧版无检测框的 JSON，但会校验新版每个 `bbox` 对应的画布尺寸，报告 `ocr_capture_positioned_line_count` 与 `ocr_capture_unlocated_line_count`。若存在未定位文字，则显示警告。**这些是坐标记录与范围的检查，不是价格正确或价格区域正确的评分。** 原有 M3/M4 价格区域判定有特定模板范围，不可将方形范围直接用于 4:5。
 
+**OCR 证据 JSON 重复字段拒绝：** M6 只读校验会在完整解析阶段拒绝任何层级的重复 JSON 键，包括顶层 `automatically_accepted`、`model_digests` 内的 SHA-256 与 OCR 行的 `confidence`。不允许使用“后一个字段覆盖前一个字段”的解析方式绕过冻结证据的歧义检测；修复后的校验仍只是本地结构与哈希一致性检查，**不能证明真实 PaddleOCR 执行或质量验收**。
+
 
 ### 网页人工审核草稿转换为 CSV（操作员交接）
 

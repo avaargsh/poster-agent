@@ -210,3 +210,30 @@ def test_verifier_rejects_invalid_spatial_evidence(tmp_path, bad_box):
     path.write_text(json.dumps(data, allow_nan=True), encoding="utf-8")
     with pytest.raises(OCRCaptureEvidenceError, match="检测框|NaN"):
         _verify(path, rows)
+
+
+@pytest.mark.parametrize(
+    ("old_field", "ambiguous_field"),
+    [
+        (
+            '"automatically_accepted": false',
+            '"automatically_accepted": true, "automatically_accepted": false',
+        ),
+        (
+            '"sha256": "' + "c" * 64 + '"',
+            '"sha256": "' + "0" * 64 + '", "sha256": "' + "c" * 64 + '"',
+        ),
+        (
+            '"confidence": 0.98',
+            '"confidence": -1, "confidence": 0.98',
+        ),
+    ],
+)
+def test_reject_duplicate_json_fields_at_any_depth(tmp_path, old_field, ambiguous_field):
+    path, data, rows = _fixture(tmp_path)
+    raw = json.dumps(data)
+    assert raw.count(old_field) >= 1
+    path.write_text(raw.replace(old_field, ambiguous_field, 1), encoding="utf-8")
+
+    with pytest.raises(OCRCaptureEvidenceError):
+        _verify(path, rows)
