@@ -10,6 +10,8 @@ import hashlib
 import hmac
 import json
 import sqlite3
+from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -120,7 +122,7 @@ def _request_fingerprint(
 
 _MAX_OBSERVATIONS_JSON_BYTES = 256 * 1024
 _MAX_RUNTIME_JSON_BYTES = 4096
-_RUNTIME_FIELDS = {
+_LEGACY_RUNTIME_FIELDS = {
     "source",
     "adapter_reported_source",
     "paddleocr_package_version",
@@ -131,12 +133,20 @@ _RUNTIME_FIELDS = {
     "model_weights_sha256",
     "attested",
 }
+_RUNTIME_TIMING_FIELDS = {
+    "inference_started_at",
+    "inference_finished_at",
+    "inference_elapsed_ms",
+}
+_RUNTIME_FIELDS = _LEGACY_RUNTIME_FIELDS | _RUNTIME_TIMING_FIELDS
 _RUNTIME_TEXT_FIELDS = {
     "adapter_reported_source",
     "paddleocr_package_version",
     "paddlepaddle_package_version",
     "python_version",
     "machine",
+    "inference_started_at",
+    "inference_finished_at",
 }
 
 
@@ -195,6 +205,35 @@ def _decode_observations(raw: object) -> list[dict]:
         raise OCRSourceMismatch() from None
 
 
+def _validate_runtime_timing(runtime: dict) -> None:
+    started_at = runtime["inference_started_at"]
+    finished_at = runtime["inference_finished_at"]
+    elapsed_ms = runtime["inference_elapsed_ms"]
+    if started_at is None and finished_at is None and elapsed_ms is None:
+        return
+    if (
+        not isinstance(started_at, str)
+        or not isinstance(finished_at, str)
+        or type(elapsed_ms) not in (int, float)
+        or not isfinite(elapsed_ms)
+        or not 0 <= elapsed_ms <= 24 * 60 * 60 * 1000
+    ):
+        raise OCRJournalCorrupt()
+    try:
+        started = datetime.fromisoformat(started_at)
+        finished = datetime.fromisoformat(finished_at)
+    except (TypeError, ValueError, OverflowError):
+        raise OCRJournalCorrupt() from None
+    if (
+        started.tzinfo is None
+        or started.utcoffset() is None
+        or finished.tzinfo is None
+        or finished.utcoffset() is None
+        or finished < started
+    ):
+        raise OCRJournalCorrupt()
+
+
 def _decode_runtime(
     raw: object, *, model_profile_sha256: str | None, observation_count: int
 ) -> dict | None:
@@ -209,7 +248,7 @@ def _decode_runtime(
     except (ValueError, TypeError, UnicodeError, RecursionError):
         # Keep malformed JSON reads compatible with the existing API contract.
         raise OCRSourceMismatch() from None
-    if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
+    if not isinstance(runtime, dict) or set(runtime) not in (_LEGACY_RUNTIME_FIELDS, _RUNTIME_FIELDS):
         raise OCRJournalCorrupt()
     if (
         runtime["source"] != "local_paddleocr_adapter"
@@ -219,10 +258,12 @@ def _decode_runtime(
         or runtime["attested"] is not False
     ):
         raise OCRJournalCorrupt()
-    for field in _RUNTIME_TEXT_FIELDS:
+    for field in _RUNTIME_TEXT_FIELDS.intersection(runtime):
         value = runtime[field]
         if value is not None and (not isinstance(value, str) or len(value) > 128):
             raise OCRJournalCorrupt()
+    if set(runtime) == _RUNTIME_FIELDS:
+        _validate_runtime_timing(runtime)
     return runtime
 
 
@@ -541,6 +582,23 @@ def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[lis
         value = telemetry.get(key)
         return value[:128] if isinstance(value, str) else None
 
+    timing = (
+        telemetry.get("inference_started_at"),
+        telemetry.get("inference_finished_at"),
+        telemetry.get("inference_elapsed_ms"),
+    )
+    if any(value is not None for value in timing):
+        started_at, finished_at, elapsed_ms = timing
+        if (
+            not isinstance(started_at, str)
+            or not isinstance(finished_at, str)
+            or type(elapsed_ms) not in (int, float)
+            or not isfinite(elapsed_ms)
+        ):
+            raise ValueError("invalid PaddleOCR inference timing telemetry")
+    else:
+        started_at = finished_at = elapsed_ms = None
+
     runtime = {
         "source": "local_paddleocr_adapter",
         "adapter_reported_source": safe_text("source"),
@@ -551,7 +609,11 @@ def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[lis
         "line_count": len(observed),
         "model_weights_sha256": None,
         "attested": False,
+        "inference_started_at": started_at,
+        "inference_finished_at": finished_at,
+        "inference_elapsed_ms": elapsed_ms,
     }
+    _validate_runtime_timing(runtime)
     return observed, runtime
 
 
