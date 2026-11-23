@@ -205,17 +205,20 @@ def _decode_observations(raw: object) -> list[dict]:
         raise OCRSourceMismatch() from None
 
 
-def _validate_runtime_timing(runtime: dict) -> None:
-    started_at = runtime["inference_started_at"]
-    finished_at = runtime["inference_finished_at"]
-    elapsed_ms = runtime["inference_elapsed_ms"]
+def _validate_runtime_timing(runtime: dict, *, required: bool = False) -> None:
+    started_at = runtime.get("inference_started_at")
+    finished_at = runtime.get("inference_finished_at")
+    elapsed_ms = runtime.get("inference_elapsed_ms")
     if started_at is None and finished_at is None and elapsed_ms is None:
+        if required:
+            raise OCRJournalCorrupt()
         return
     if (
         not isinstance(started_at, str)
         or not isinstance(finished_at, str)
         or type(elapsed_ms) not in (int, float)
-        or not isfinite(elapsed_ms)
+        or isinstance(elapsed_ms, float)
+        and not isfinite(elapsed_ms)
         or not 0 <= elapsed_ms <= 24 * 60 * 60 * 1000
     ):
         raise OCRJournalCorrupt()
@@ -263,42 +266,12 @@ def _decode_runtime(
         if value is not None and (not isinstance(value, str) or len(value) > 128):
             raise OCRJournalCorrupt()
     if set(runtime) == _RUNTIME_FIELDS:
-        _validate_runtime_timing(runtime)
+        _validate_runtime_timing(
+            runtime,
+            required=runtime["adapter_reported_source"] == "paddleocr_adapter",
+        )
     return runtime
 
-
-
-
-def _validate_inference_timing(runtime: dict, *, required: bool) -> None:
-    started = runtime.get("inference_started_at")
-    finished = runtime.get("inference_finished_at")
-    elapsed = runtime.get("inference_elapsed_ms")
-    if not required and started is None and finished is None and elapsed is None:
-        return
-    if not isinstance(started, str) or not isinstance(finished, str):
-        raise ValueError("missing PaddleOCR inference timestamps")
-    try:
-        start_time = datetime.fromisoformat(started)
-        finish_time = datetime.fromisoformat(finished)
-    except ValueError:
-        raise ValueError("invalid PaddleOCR inference timestamps") from None
-    if (
-        start_time.tzinfo is None
-        or start_time.utcoffset() is None
-        or finish_time.tzinfo is None
-        or finish_time.utcoffset() is None
-        or finish_time < start_time
-    ):
-        raise ValueError("non-monotonic or timezone-naive PaddleOCR inference timestamps")
-    if (
-        isinstance(elapsed, bool)
-        or not isinstance(elapsed, (int, float))
-        or isinstance(elapsed, float)
-        and not math.isfinite(elapsed)
-        or elapsed < 0
-        or elapsed > 24 * 60 * 60 * 1000
-    ):
-        raise ValueError("invalid PaddleOCR monotonic inference duration")
 
 
 def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
@@ -616,23 +589,6 @@ def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[lis
         value = telemetry.get(key)
         return value[:128] if isinstance(value, str) else None
 
-    timing = (
-        telemetry.get("inference_started_at"),
-        telemetry.get("inference_finished_at"),
-        telemetry.get("inference_elapsed_ms"),
-    )
-    if any(value is not None for value in timing):
-        started_at, finished_at, elapsed_ms = timing
-        if (
-            not isinstance(started_at, str)
-            or not isinstance(finished_at, str)
-            or type(elapsed_ms) not in (int, float)
-            or not isfinite(elapsed_ms)
-        ):
-            raise ValueError("invalid PaddleOCR inference timing telemetry")
-    else:
-        started_at = finished_at = elapsed_ms = None
-
     runtime = {
         "source": "local_paddleocr_adapter",
         "adapter_reported_source": safe_text("source"),
@@ -643,11 +599,14 @@ def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[lis
         "line_count": len(observed),
         "model_weights_sha256": None,
         "attested": False,
-        "inference_started_at": started_at,
-        "inference_finished_at": finished_at,
-        "inference_elapsed_ms": elapsed_ms,
+        "inference_started_at": safe_text("inference_started_at"),
+        "inference_finished_at": safe_text("inference_finished_at"),
+        "inference_elapsed_ms": telemetry.get("inference_elapsed_ms"),
     }
-    _validate_runtime_timing(runtime)
+    _validate_runtime_timing(
+        runtime,
+        required=runtime["adapter_reported_source"] == "paddleocr_adapter",
+    )
     return observed, runtime
 
 
