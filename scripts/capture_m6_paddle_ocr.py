@@ -392,10 +392,7 @@ def capture(
     if post_csv_sha != csv_sha:
         raise OCREvidenceError("M6 评审 CSV 在 OCR 推理期间发生变化")
     _preflight_frozen_images(package, rows)
-    if (
-        _model_fingerprint(det_dir) != det_digest
-        or _model_fingerprint(rec_dir) != rec_digest
-    ):
+    if _model_fingerprint(det_dir) != det_digest or _model_fingerprint(rec_dir) != rec_digest:
         raise OCREvidenceError("本地 OCR 模型文件在推理期间发生变化")
 
     summary = {
