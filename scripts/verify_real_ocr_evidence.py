@@ -254,9 +254,7 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
 
 
 
-def _recompute_batch_metrics(
-    manifest: ImageManifest, observations: dict[str, dict]
-) -> dict:
+def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, dict]) -> dict:
     field_outcomes = []
     case_outcomes = []
     category_outcomes: dict[str, list[str]] = defaultdict(list)
