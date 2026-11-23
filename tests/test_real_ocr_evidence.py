@@ -127,6 +127,7 @@ def test_tampered_input_and_missing_installed_versions_rejected(tmp_path, monkey
 
 def test_batch_manifest_observations_and_hashes_are_checked(tmp_path, monkeypatch):
     manifest = generate_fixture_set(tmp_path / "images")
+    monkeypatch.setattr("evals.image_runner.metadata.version", lambda name: "3.3.0")
     monkeypatch.setattr(
         "evals.image_runner.recognize",
         lambda path: [{"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}],
@@ -161,7 +162,7 @@ def test_batch_rejects_fake_not_run_summary(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "invalid_duration",
-    [True, False, float("nan"), float("inf"), -float("inf"), "5"],
+    [True, False, float("nan"), float("inf"), -float("inf"), "5", 10**400],
 )
 def test_probe_rejects_non_finite_or_non_numeric_elapsed_ms(
     tmp_path, monkeypatch, invalid_duration
@@ -170,5 +171,98 @@ def test_probe_rejects_non_finite_or_non_numeric_elapsed_ms(
     data = json.loads(report.read_text(encoding="utf-8"))
     data["elapsed_ms"] = invalid_duration
     report.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(EvidenceInvalid, match="耗时"):
+    with pytest.raises(EvidenceInvalid, match="JSON|耗时"):
         verify_probe(report, image, "Linux")
+
+
+def test_probe_rejects_duplicate_json_keys_even_when_last_value_is_valid(tmp_path, monkeypatch):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    raw = report.read_text(encoding="utf-8")
+    assert '"status": "OK"' in raw
+    report.write_text(
+        raw.replace('"status": "OK"', '"status": "NOT_RUN", "status": "OK"', 1),
+        encoding="utf-8",
+    )
+    with pytest.raises(EvidenceInvalid, match="JSON"):
+        verify_probe(report, image, "Linux")
+
+
+def test_probe_rejects_non_finite_values_in_unconsumed_fields(tmp_path, monkeypatch):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    raw = report.read_text(encoding="utf-8").rstrip()
+    assert raw.endswith("}")
+    report.write_text(raw[:-1] + ', "untrusted_extra": NaN}', encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="JSON"):
+        verify_probe(report, image, "Linux")
+
+
+def _make_valid_batch(tmp_path, monkeypatch):
+    import shutil
+
+    manifest = generate_fixture_set(tmp_path / "source")
+    monkeypatch.setattr("evals.image_runner.metadata.version", lambda name: "3.3.0")
+    monkeypatch.setattr(
+        "evals.image_runner.recognize",
+        lambda path: [{"text": "¥199", "score": 0.90, "bbox": [10, 10, 90, 30]}],
+    )
+    base = tmp_path / "bench"
+    evaluate_image_manifest(manifest, base, "paddle")
+    shutil.copytree(manifest.parent, base / "images")
+    return base
+
+
+def test_batch_rejects_duplicate_jsonl_keys(tmp_path, monkeypatch):
+    base = _make_valid_batch(tmp_path, monkeypatch)
+    path = base / "ocr_observations.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert '"case_id": "F01"' in lines[0]
+    needle = '"case_id": "F01"'
+    replacement = '"case_id": "spoofed", "case_id": "F01"'
+    lines[0] = lines[0].replace(needle, replacement, 1)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="JSON"):
+        verify_batch(base)
+
+
+def test_batch_rejects_invalid_ocr_observation_rows(tmp_path, monkeypatch):
+    import shutil
+
+    base = _make_valid_batch(tmp_path, monkeypatch)
+    cases = [
+        (lambda row: row.update(bbox=None), "坐标框"),
+        (lambda row: row.update(score=1.01), "score"),
+        (lambda row: row.update(score=10**400), "score"),
+        (lambda row: row.update(score=float("nan")), "JSON"),
+        (lambda row: row.update(text=""), "text"),
+        (lambda row: row.update(release_ready=True), "schema"),
+    ]
+    for index, (mutation, message) in enumerate(cases):
+        case_dir = tmp_path / f"invalid-row-{index}"
+        shutil.copytree(base, case_dir)
+        path = case_dir / "ocr_observations.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        observation = json.loads(lines[0])
+        mutation(observation["ocr_lines"][0])
+        lines[0] = json.dumps(observation, ensure_ascii=False, allow_nan=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with pytest.raises(EvidenceInvalid, match=message):
+            verify_batch(case_dir)
+
+
+def test_probe_rejects_overflowing_exponent_in_unconsumed_fields(tmp_path, monkeypatch):
+    report, image = _make_probe(tmp_path, monkeypatch)
+    raw = report.read_text(encoding="utf-8").rstrip()
+    assert raw.endswith("}")
+    report.write_text(raw[:-1] + ', "untrusted_extra": 1e999}', encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="JSON"):
+        verify_probe(report, image, "Linux")
+
+
+def test_batch_rejects_metrics_not_derived_from_ocr_observations(tmp_path, monkeypatch):
+    base = _make_valid_batch(tmp_path, monkeypatch)
+    report_path = base / "image_benchmark_summary.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["case_metrics"]["confusion"]["TP"] = 20
+    report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(EvidenceInvalid, match="metrics"):
+        verify_batch(base)
