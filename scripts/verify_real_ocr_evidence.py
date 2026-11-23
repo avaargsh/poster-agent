@@ -9,6 +9,7 @@ provide external evidence that the real model process was launched.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import hashlib
 import json
 import math
@@ -18,6 +19,8 @@ from pathlib import Path
 from PIL import Image
 from pydantic import ValidationError
 
+from app.acceptance import _field_checks
+from evals.benchmark import _classification, metrics
 from evals.image_fixtures import ImageManifest
 
 SHA_LENGTH = 64
@@ -250,6 +253,52 @@ def verify_probe(probe_file: Path, image_file: Path, expected_platform: str | No
     }
 
 
+
+def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, dict]) -> dict:
+    field_outcomes = []
+    case_outcomes = []
+    category_outcomes: dict[str, list[str]] = defaultdict(list)
+
+    for fixture in manifest.fixtures:
+        observation = observations[fixture.case_id]
+        checks = {
+            check.name.removeprefix("ocr_"): check
+            for check in _field_checks(
+                manifest.expected_spec, "OK", observation["ocr_lines"]
+            )
+        }
+        predictions = []
+        for field in manifest.target_fields:
+            if field not in checks:
+                raise EvidenceInvalid(
+                    f"{fixture.case_id}: OCR metrics cannot be recomputed for {field}"
+                )
+            prediction = checks[field].status
+            predictions.append(prediction)
+            field_outcomes.append(
+                _classification(prediction, field in fixture.truth_defects)
+            )
+
+        case_status = (
+            "FAIL"
+            if "FAIL" in predictions
+            else "UNVERIFIED"
+            if "UNVERIFIED" in predictions
+            else "PASS"
+        )
+        case_outcome = _classification(case_status, bool(fixture.truth_defects))
+        case_outcomes.append(case_outcome)
+        category_outcomes[fixture.category].append(case_outcome)
+
+    return {
+        "case_metrics": metrics(case_outcomes),
+        "field_metrics": metrics(field_outcomes),
+        "by_category": {
+            category: metrics(outcomes)
+            for category, outcomes in sorted(category_outcomes.items())
+        },
+    }
+
 def verify_batch(batch_dir: Path) -> dict:
     root = batch_dir / "images"
     manifest_path = root / "manifest.json"
@@ -364,6 +413,10 @@ def verify_batch(batch_dir: Path) -> dict:
             height=height,
             context=fixture.case_id,
         )
+
+    recomputed = _recompute_batch_metrics(manifest, observation_by_id)
+    if any(report.get(key) != value for key, value in recomputed.items()):
+        raise EvidenceInvalid("batch metrics do not match the manifest and OCR observations")
 
     return {
         "dataset_kind": manifest.dataset_kind,
