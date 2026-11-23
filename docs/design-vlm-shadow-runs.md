@@ -14,7 +14,7 @@ This slice adds a **real, explicit local Ollama /api/chat adapter** and a SQLite
 {"schema_version":1,"model":"llava:latest","digest":"sha256:<64 lowercase hex characters from the local Ollama /api/tags entry>"}
 ```
 
-Set both environment variables before starting the server; they are frozen at lifespan startup. A configured model name alone never enables execution. The model/digest pair is checked against the **local server's claimed model listing** before and after the invocation; this does not independently prove weights or provider identity.
+Set both environment variables before starting the server; they are frozen at lifespan startup. A configured model name alone never enables execution. The model/digest pair is checked against the **local server's claimed model listing** before and after the invocation. The pinned name must appear **exactly once**; duplicate entries fail closed even if one reports the expected digest. A preflight ambiguity refuses admission; a postflight ambiguity cannot certify the completed operation. These local assertions do not independently prove weights or provider identity.
 
 ## Explicit operation
 

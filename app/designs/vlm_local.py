@@ -156,13 +156,13 @@ def verify_ollama_model(profile: VLMModelProfile) -> None:
     entries = listed.get("models")
     if not isinstance(entries, list) or len(entries) > 128:
         raise VLMProviderUnavailable("local model listing invalid")
-    if not any(
-        isinstance(item, dict)
-        and item.get("name") == profile.model
-        and item.get("digest") == profile.digest
-        for item in entries
-    ):
-        raise VLMProviderUnavailable("pinned model digest missing")
+    # A matching row does not prove uniqueness. Reject duplicate tags for
+    # the pinned name, even when one (or both) claims the expected digest.
+    selected = [
+        item for item in entries if isinstance(item, dict) and item.get("name") == profile.model
+    ]
+    if len(selected) != 1 or selected[0].get("digest") != profile.digest:
+        raise VLMProviderUnavailable("pinned model digest missing or ambiguous")
 
 
 def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> list[dict]:
