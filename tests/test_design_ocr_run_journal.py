@@ -118,7 +118,14 @@ def _ocr_lines():
             {"text": "¥199.90", "score": 0.98, "bbox": [2, 65, 210, 115]},
             {"text": "立即抢购", "score": 0.97, "bbox": [2, 125, 210, 170]},
         ],
-        {"source": "paddleocr_adapter", "line_count": 3, "attested": True, "inference_started_at": "2026-11-23T03:00:00+00:00", "inference_finished_at": "2026-11-23T03:00:00.125000+00:00", "inference_elapsed_ms": 125.0},
+        {
+            "source": "paddleocr_adapter",
+            "line_count": 3,
+            "attested": True,
+            "inference_started_at": "2026-11-23T03:00:00+00:00",
+            "inference_finished_at": "2026-11-23T03:00:00.125000+00:00",
+            "inference_elapsed_ms": 125.0,
+        },
     )
 
 
@@ -902,7 +909,6 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
         assert len(calls) == 1
 
 
-
 def test_legacy_runtime_schema_remains_readable_after_timing_extension(
     ocr_paths, product_bytes, monkeypatch
 ):
@@ -917,7 +923,11 @@ def test_legacy_runtime_schema_remains_readable_after_timing_extension(
                 (payload["operation_id"],),
             ).fetchone()[0]
             runtime_data = json.loads(runtime)
-            for key in ("inference_started_at", "inference_finished_at", "inference_elapsed_ms"):
+            for key in (
+                "inference_started_at",
+                "inference_finished_at",
+                "inference_elapsed_ms",
+            ):
                 runtime_data.pop(key, None)
             connection.execute(
                 "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
