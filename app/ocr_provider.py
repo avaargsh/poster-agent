@@ -6,9 +6,9 @@ does not download large OCR weights.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
-from datetime import datetime, timezone
 from pathlib import Path
 from platform import machine, python_version
 from time import perf_counter_ns
