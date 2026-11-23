@@ -189,7 +189,15 @@ def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> list[dict]:
         )
     if response.get("model") != profile.model:
         raise VLMProviderUnavailable("local model identity changed")
+    # Non-streaming Ollama replies must be complete assistant messages.
+    # A plausible JSON findings body is not evidence of finished inference.
+    if response.get("done") is not True:
+        raise VLMProviderUnavailable("local model reply is incomplete")
     message = response.get("message")
-    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-        raise VLMProviderUnavailable("missing local model findings")
+    if (
+        not isinstance(message, dict)
+        or message.get("role") != "assistant"
+        or not isinstance(message.get("content"), str)
+    ):
+        raise VLMProviderUnavailable("missing local assistant findings")
     return parse_findings(message["content"])

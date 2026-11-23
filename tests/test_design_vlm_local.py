@@ -52,7 +52,12 @@ def test_fixed_loopback_tags_and_bounded_ollama_chat(monkeypatch):
         assert body["options"]["num_predict"] <= 512
         assert base64.b64decode(body["messages"][1]["images"][0]) == b"synthetic-png"
         return httpx.Response(
-            200, json={"model": "llava:latest", "message": {"content": '{"findings":[]}'}}
+            200,
+            json={
+                "model": "llava:latest",
+                "done": True,
+                "message": {"role": "assistant", "content": '{"findings":[]}'},
+            },
         )
 
     _install_httpx_transport(monkeypatch, handler)
@@ -143,3 +148,31 @@ def test_unrelated_ollama_tags_do_not_block_one_pinned_model(monkeypatch):
     }
     _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=listing))
     local.verify_ollama_model(_profile())
+
+
+@pytest.mark.parametrize("done_value", ["absent", None, False, 0, 1, "true"])
+def test_chat_findings_reject_missing_or_unfinished_completion(monkeypatch, done_value):
+    """Syntactically valid findings cannot be scored from an incomplete response."""
+    payload = {
+        "model": "llava:latest",
+        "message": {"role": "assistant", "content": '{"findings":[]}'},
+    }
+    if done_value != "absent":
+        payload["done"] = done_value
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+    with pytest.raises(local.VLMProviderUnavailable):
+        local.inspect_approved_png(b"synthetic-png", _profile())
+
+
+@pytest.mark.parametrize("role_value", ["absent", None, "user", "tool"])
+def test_chat_findings_require_assistant_role(monkeypatch, role_value):
+    payload = {
+        "model": "llava:latest",
+        "done": True,
+        "message": {"content": '{"findings":[]}'},
+    }
+    if role_value != "absent":
+        payload["message"]["role"] = role_value
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+    with pytest.raises(local.VLMProviderUnavailable):
+        local.inspect_approved_png(b"synthetic-png", _profile())
