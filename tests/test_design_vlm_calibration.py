@@ -327,7 +327,9 @@ def test_shadow_calibration_rejects_symlinked_label_csv(tmp_path):
         evaluate_shadow_cohort(db, labels)
 
 
-def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(tmp_path, monkeypatch):
+def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(
+    tmp_path, monkeypatch
+):
     from pathlib import Path
     from types import SimpleNamespace
 
