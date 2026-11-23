@@ -318,8 +318,7 @@ def test_postflight_rejects_source_drift_after_inference_started(tmp_path, mutat
     """A completed prediction cannot authorize evidence after source drift."""
     package, det, rec, rows = package_fixture(tmp_path)
     completed = next(
-        row for row in rows
-        if row["sku_id"] == "sku-one" and row["variant_id"] == "feed_4x5_native"
+        row for row in rows if row["sku_id"] == "sku-one" and row["variant_id"] == "feed_4x5_native"
     )
     called = []
 
