@@ -311,3 +311,34 @@ def test_capture_reports_actual_completed_variant_progress_without_publishing_pa
     assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
     assert report["captured_variant_count"] == 4
     assert (package / "m6_paddle_ocr_evidence.json").is_file()
+
+
+@pytest.mark.parametrize("mutation", ["model", "review_csv", "completed_image"])
+def test_postflight_rejects_source_drift_after_inference_started(tmp_path, mutation):
+    """A completed prediction cannot authorize evidence after source drift."""
+    package, det, rec, rows = package_fixture(tmp_path)
+    completed = next(
+        row for row in rows
+        if row["sku_id"] == "sku-one" and row["variant_id"] == "feed_4x5_native"
+    )
+    called = []
+
+    class MutatingPredict(PredictStub):
+        def predict(self, image):
+            output = super().predict(image)
+            called.append(1)
+            if len(called) == 1:
+                if mutation == "model":
+                    (det / "inference.json").write_text('{"model":"changed"}', encoding="utf-8")
+                elif mutation == "review_csv":
+                    with (package / "m6_output_reviews.csv").open("ab") as stream:
+                        stream.write(b"\\n")
+                else:
+                    (package / completed["output_image_path"]).write_bytes(b"changed-after-infer")
+            return output
+
+    with pytest.raises(OCREvidenceError, match="模型|CSV|PNG"):
+        capture(package, det, rec, engine_factory=MutatingPredict)
+    assert len(called) >= 1
+    assert not (package / "m6_paddle_ocr_evidence.json").exists()
+    assert not list(package.glob(".m6-ocr-*.tmp"))
