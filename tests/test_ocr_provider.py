@@ -1,5 +1,6 @@
 """Verify PaddleOCR 3.x parsing without loading its large model weights."""
 
+from datetime import datetime
 from pathlib import Path
 
 from app import ocr_provider
@@ -49,8 +50,6 @@ def test_real_adapter_records_wall_clock_and_monotonic_predict_timing(monkeypatc
     started = result.runtime["inference_started_at"]
     finished = result.runtime["inference_finished_at"]
     elapsed = result.runtime["inference_elapsed_ms"]
-    from datetime import datetime
-
     start_time = datetime.fromisoformat(started)
     finish_time = datetime.fromisoformat(finished)
     assert start_time.tzinfo is not None
