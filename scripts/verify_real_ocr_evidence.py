@@ -12,6 +12,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import stat
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
@@ -90,10 +92,23 @@ def _loads_strict(raw: bytes | str, *, max_bytes: int) -> object:
 
 
 def _read_bounded_bytes(path: Path, *, max_bytes: int, label: str) -> bytes:
+    """Read a bounded snapshot from one regular-file descriptor, never a link.
+
+    Checking path size and then calling read_bytes() leaves a TOCTOU window and
+    can allocate arbitrarily much memory if the file grows during the read.
+    """
+    if path.is_symlink():
+        raise EvidenceInvalid(f"{label} must not be a symlink")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        if path.stat().st_size > max_bytes:
-            raise EvidenceInvalid(f"{label} exceeds size limit")
-        raw = path.read_bytes()
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise EvidenceInvalid(f"{label} must be a regular file")
+            if info.st_size > max_bytes:
+                raise EvidenceInvalid(f"{label} exceeds size limit")
+            raw = source.read(max_bytes + 1)
     except OSError:
         raise EvidenceInvalid(f"{label} is missing or unreadable") from None
     if len(raw) > max_bytes:
