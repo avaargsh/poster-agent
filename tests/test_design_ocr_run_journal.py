@@ -883,7 +883,9 @@ def test_duplicate_model_profile_keys_are_rejected_before_operation_admission(
         raw.replace('"schema_version": 1', '"schema_version": 0, "schema_version": 1', 1),
     )
     calls = []
-    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: calls.append(1) or _ocr_lines())
+    monkeypatch.setattr(
+        ocr_runs, "recognize", lambda path, **kwargs: calls.append(1) or _ocr_lines()
+    )
 
     with TestClient(app) as client:
         doc, payload = _prepare(client, product_bytes)
