@@ -327,9 +327,7 @@ def test_shadow_calibration_rejects_symlinked_label_csv(tmp_path):
         evaluate_shadow_cohort(db, labels)
 
 
-def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(
-    tmp_path, monkeypatch
-):
+def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(tmp_path, monkeypatch):
     from pathlib import Path
     from types import SimpleNamespace
 
@@ -339,7 +337,7 @@ def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(
     # Blank lines are valid CSV whitespace, so a stale pre-read stat can
     # otherwise permit the full oversize file to be parsed and scored.
     with labels.open("ab") as stream:
-        stream.write(b"\\n" * (MAX_CSV_BYTES + 1))
+        stream.write(b"\n" * (MAX_CSV_BYTES + 1))
     original_stat = Path.stat
 
     def stale_stat(self, *args, **kwargs):
