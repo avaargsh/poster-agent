@@ -128,15 +128,8 @@ def test_duplicate_json_keys_and_untrusted_claims_do_not_parse():
 )
 def test_duplicate_pinned_model_tags_are_ambiguous_and_rejected(monkeypatch, digests):
     """A valid-looking tag cannot authorize another entry for the same model."""
-    listing = {
-        "models": [
-            {"name": "llava:latest", "digest": digest}
-            for digest in digests
-        ]
-    }
-    _install_httpx_transport(
-        monkeypatch, lambda request: httpx.Response(200, json=listing)
-    )
+    listing = {"models": [{"name": "llava:latest", "digest": digest} for digest in digests]}
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=listing))
     with pytest.raises(local.VLMProviderUnavailable):
         local.verify_ollama_model(_profile())
 
@@ -148,7 +141,5 @@ def test_unrelated_ollama_tags_do_not_block_one_pinned_model(monkeypatch):
             {"name": "llava:latest", "digest": DIGEST},
         ]
     }
-    _install_httpx_transport(
-        monkeypatch, lambda request: httpx.Response(200, json=listing)
-    )
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=listing))
     local.verify_ollama_model(_profile())
