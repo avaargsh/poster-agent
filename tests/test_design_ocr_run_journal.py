@@ -869,3 +869,31 @@ def test_corrupt_ocr_journal_is_never_replayed_as_valid_evidence(
         assert replay.status_code == 409, replay.text
         assert replay.json()["error"]["code"] == expected_code
         assert len(calls) == 1
+
+
+def test_duplicate_model_profile_keys_are_rejected_before_operation_admission(
+    ocr_paths, product_bytes, monkeypatch
+):
+    import os
+
+    raw = os.environ["POSTER_DESIGN_OCR_MODEL_CONFIG_JSON"]
+    assert '"schema_version": 1' in raw
+    monkeypatch.setenv(
+        "POSTER_DESIGN_OCR_MODEL_CONFIG_JSON",
+        raw.replace('"schema_version": 1', '"schema_version": 0, "schema_version": 1', 1),
+    )
+    calls = []
+    monkeypatch.setattr(ocr_runs, "recognize", lambda path, **kwargs: calls.append(1) or _ocr_lines())
+
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 503, response.text
+        assert response.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        assert calls == []
+        with sqlite3.connect(ocr_paths) as connection:
+            count = connection.execute(
+                "SELECT count(*) FROM design_ocr_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()[0]
+        assert count == 0
