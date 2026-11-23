@@ -39,6 +39,16 @@ def _valid_sha(value: object) -> bool:
     return isinstance(value, str) and bool(_SHA.fullmatch(value))
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate fields at any JSON nesting level before validation."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 def _read_snapshot(path: Path) -> tuple[dict[str, Any], str]:
     if path.is_symlink():
         raise _blocked("拒绝符号链接")
@@ -58,7 +68,9 @@ def _read_snapshot(path: Path) -> tuple[dict[str, Any], str]:
         def reject_constant(value: str) -> None:
             raise ValueError(f"non-finite JSON constant: {value}")
 
-        document = json.loads(raw, parse_constant=reject_constant)
+        document = json.loads(
+            raw, parse_constant=reject_constant, object_pairs_hook=_unique_json_object
+        )
     except (UnicodeError, ValueError, TypeError) as exc:
         raise _blocked("OCR 证据 JSON 非法或置信度包含 NaN/Infinity") from exc
     if not isinstance(document, dict):
