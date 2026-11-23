@@ -315,3 +315,39 @@ def test_calibration_rejects_unresolved_record_with_stale_runtime(tmp_path):
         )
     with pytest.raises(CalibrationError):
         _eval(db, labels)
+
+
+def test_shadow_calibration_rejects_symlinked_label_csv(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+    frozen = tmp_path / "actual-frozen-labels.csv"
+    labels.rename(frozen)
+    labels.symlink_to(frozen)
+
+    with pytest.raises(CalibrationError):
+        evaluate_shadow_cohort(db, labels)
+
+
+def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from scripts.evaluate_design_vlm_shadow import MAX_CSV_BYTES
+
+    db, labels, _ = _fixture(tmp_path)
+    # Blank lines are valid CSV whitespace, so a stale pre-read stat can
+    # otherwise permit the full oversize file to be parsed and scored.
+    with labels.open("ab") as stream:
+        stream.write(b"\\n" * (MAX_CSV_BYTES + 1))
+    original_stat = Path.stat
+
+    def stale_stat(self, *args, **kwargs):
+        observed = original_stat(self, *args, **kwargs)
+        if self == labels:
+            return SimpleNamespace(st_mode=observed.st_mode, st_size=100)
+        return observed
+
+    monkeypatch.setattr(Path, "stat", stale_stat)
+    with pytest.raises(CalibrationError, match="size|exceed|limit"):
+        evaluate_shadow_cohort(db, labels)
