@@ -9,10 +9,10 @@ provide external evidence that the real model process was launched.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import hashlib
 import json
 import math
+from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
 
@@ -298,6 +298,7 @@ def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, di
             for category, outcomes in sorted(category_outcomes.items())
         },
     }
+
 
 def verify_batch(batch_dir: Path) -> dict:
     root = batch_dir / "images"
