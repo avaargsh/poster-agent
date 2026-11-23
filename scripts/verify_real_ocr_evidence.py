@@ -263,9 +263,7 @@ def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, di
         observation = observations[fixture.case_id]
         checks = {
             check.name.removeprefix("ocr_"): check
-            for check in _field_checks(
-                manifest.expected_spec, "OK", observation["ocr_lines"]
-            )
+            for check in _field_checks(manifest.expected_spec, "OK", observation["ocr_lines"])
         }
         predictions = []
         for field in manifest.target_fields:
@@ -275,9 +273,7 @@ def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, di
                 )
             prediction = checks[field].status
             predictions.append(prediction)
-            field_outcomes.append(
-                _classification(prediction, field in fixture.truth_defects)
-            )
+            field_outcomes.append(_classification(prediction, field in fixture.truth_defects))
 
         case_status = (
             "FAIL"
@@ -294,8 +290,7 @@ def _recompute_batch_metrics(manifest: ImageManifest, observations: dict[str, di
         "case_metrics": metrics(case_outcomes),
         "field_metrics": metrics(field_outcomes),
         "by_category": {
-            category: metrics(outcomes)
-            for category, outcomes in sorted(category_outcomes.items())
+            category: metrics(outcomes) for category, outcomes in sorted(category_outcomes.items())
         },
     }
 
