@@ -251,7 +251,10 @@ def _decode_runtime(
     except (ValueError, TypeError, UnicodeError, RecursionError):
         # Keep malformed JSON reads compatible with the existing API contract.
         raise OCRSourceMismatch() from None
-    if not isinstance(runtime, dict) or set(runtime) not in (_LEGACY_RUNTIME_FIELDS, _RUNTIME_FIELDS):
+    if not isinstance(runtime, dict) or set(runtime) not in (
+        _LEGACY_RUNTIME_FIELDS,
+        _RUNTIME_FIELDS,
+    ):
         raise OCRJournalCorrupt()
     if (
         runtime["source"] != "local_paddleocr_adapter"
@@ -271,7 +274,6 @@ def _decode_runtime(
             required=runtime["adapter_reported_source"] == "paddleocr_adapter",
         )
     return runtime
-
 
 
 def _row_result(row: sqlite3.Row, *, replayed: bool) -> dict:
