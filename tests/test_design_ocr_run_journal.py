@@ -1320,6 +1320,13 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
 
     from scripts.run_design_ocr_smoke import SmokeError, run_smoke
 
+    malformed_outcomes = (
+        "malformed_line",
+        "duplicate_status",
+        "invalid_score",
+        "invalid_timing",
+        "bool_revision",
+    )
     calls = []
 
     def recognize(image, **kwargs):
@@ -1346,13 +1353,7 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                 # Commit the model operation, then simulate the response being lost.
                 client.post(url, **kwargs)
                 raise httpx.ReadTimeout("synthetic lost response")
-            if outcome in (
-                "malformed_line",
-                "duplicate_status",
-                "invalid_score",
-                "invalid_timing",
-                "bool_revision",
-            ) and method == "POST" and url.endswith("/ocr-runs"):
+            if outcome in malformed_outcomes and method == "POST" and url.endswith("/ocr-runs"):
                 response = client.post(url, **kwargs)
                 assert response.status_code == 201
                 journal = response.json()
@@ -1401,13 +1402,7 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
             )
             if outcome == "stale_accepted":
                 assert report["stage"] == "stale_revision_probe"
-            if outcome in (
-                "malformed_line",
-                "duplicate_status",
-                "invalid_score",
-                "invalid_timing",
-                "bool_revision",
-            ):
+            if outcome in malformed_outcomes:
                 assert report["stage"] == "submit"
                 assert exported == []
             assert not anchor.exists()
