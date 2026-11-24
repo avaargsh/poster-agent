@@ -213,9 +213,13 @@ def inspect_isolation(
 ) -> dict:
     """Inspect a running server's namespaces, interfaces, routes and model mounts."""
     _require(type(server_pid) is int and 1 < server_pid <= 999_999_999, "invalid server PID")
+    detection_path = _canonical_model_path(detection_model_dir)
+    recognition_path = _canonical_model_path(recognition_model_dir)
     _require(
-        detection_model_dir != recognition_model_dir,
-        "detection and recognition model directories must differ",
+        detection_path != recognition_path
+        and detection_path not in PurePosixPath(recognition_path).parents
+        and recognition_path not in PurePosixPath(detection_path).parents,
+        "detection and recognition model directories must be separate",
     )
     process = proc_root / str(server_pid)
     try:
@@ -271,10 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         repo = args.repo.resolve(strict=True)
-        output = args.output.resolve()
-        _require(not output.exists() and not output.is_symlink(), "output already exists")
+        _require(args.output.is_absolute(), "output path must be absolute")
+        _require(not args.output.is_symlink() and not args.output.exists(), "output already exists")
+        output = args.output.parent.resolve(strict=True) / args.output.name
+        _require(not output.exists(), "output already exists")
         _require(not output.is_relative_to(repo), "output must be outside the repository")
-        _require(output.parent.is_dir(), "output parent directory must exist")
         report = inspect_isolation(
             Path("/proc"),
             args.server_pid,
