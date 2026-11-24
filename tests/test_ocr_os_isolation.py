@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,7 @@ def _proc_fixture(
     ipv6_routes: str = _IPV6_ROUTES,
     mountinfo: str = _MOUNTINFO,
     children: str = "",
+    model_profile: dict | None = None,
 ) -> Path:
     process = tmp_path / "proc" / str(_PID)
     server_root = tmp_path / "server-root"
@@ -67,6 +69,17 @@ def _proc_fixture(
     (process / "task" / str(_PID)).mkdir(parents=True)
     (process / "task" / str(_PID) / "children").write_text(children, encoding="ascii")
     (process / "cmdline").write_bytes(cmdline)
+    profile = model_profile or {
+        "schema_version": 1,
+        "text_detection_model_dir": "/models/det",
+        "text_recognition_model_dir": "/models/rec",
+        "text_detection_sha256": "a" * 64,
+        "text_recognition_sha256": "b" * 64,
+    }
+    raw_profile = json.dumps(profile, separators=(",", ":")).encode("utf-8")
+    (process / "environ").write_bytes(
+        b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON=" + raw_profile + b"\0"
+    )
     (process / "status").write_text(f"Name:\tpython\nPid:\t{_PID}\n", encoding="ascii")
     (process / "mountinfo").write_text(mountinfo, encoding="utf-8")
     (process / "net").mkdir()
@@ -92,6 +105,9 @@ def test_reports_loopback_only_and_read_only_model_mounts_without_authority(tmp_
 
     assert report["status"] == "LOCAL_OS_ISOLATION_OBSERVED_UNATTESTED"
     assert report["network_interfaces"] == ["lo"]
+    assert len(report["model_profile_sha256"]) == 64
+    assert report["detection_model_sha256"] == "a" * 64
+    assert report["recognition_model_sha256"] == "b" * 64
     assert report["ipv4_route_interfaces"] == ["lo"]
     assert report["ipv6_route_interfaces"] == ["lo"]
     assert report["egress_policy_observed"] == "LOOPBACK_ONLY_NO_DEFAULT_ROUTE"
@@ -331,6 +347,44 @@ def test_rejects_uvicorn_name_embedded_in_unrelated_command(tmp_path):
 def test_rejects_uvicorn_reload_mode(tmp_path):
     tokens = _CMDLINE.rstrip(b"\0").split(b"\0") + [b"--reload"]
     proc_root = _proc_fixture(tmp_path, cmdline=b"\0".join(tokens) + b"\0")
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_model_paths_that_do_not_match_server_environment(tmp_path):
+    profile = {
+        "schema_version": 1,
+        "text_detection_model_dir": "/models/other",
+        "text_recognition_model_dir": "/models/rec",
+        "text_detection_sha256": "a" * 64,
+        "text_recognition_sha256": "b" * 64,
+    }
+    proc_root = _proc_fixture(tmp_path, model_profile=profile)
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_duplicate_model_profile_environment_entries(tmp_path):
+    proc_root = _proc_fixture(tmp_path)
+    environment = proc_root / str(_PID) / "environ"
+    raw = environment.read_bytes()
+    environment.write_bytes(raw + raw)
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_invalid_model_profile_digest(tmp_path):
+    profile = {
+        "schema_version": 1,
+        "text_detection_model_dir": "/models/det",
+        "text_recognition_model_dir": "/models/rec",
+        "text_detection_sha256": "not-a-sha",
+        "text_recognition_sha256": "b" * 64,
+    }
+    proc_root = _proc_fixture(tmp_path, model_profile=profile)
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
