@@ -15,7 +15,9 @@ from pathlib import Path
 
 from scripts.verify_ocr_evidence_bundle import (
     _MAX_FILE_BYTES,
+    EvidenceError,
     _canonical,
+    _read_bounded_regular_file,
     _verify,
 )
 
@@ -74,10 +76,11 @@ def _nonfinite(value: str) -> None:
     raise ManifestBindingError("non-finite JSON number")
 
 
-def _read_json(path: Path, limit: int) -> dict:
-    with path.open("rb") as stream:
-        raw = stream.read(limit + 1)
-    _require(len(raw) <= limit, "input exceeds size limit")
+def _read_json(path: Path, limit: int, *, label: str = "input") -> dict:
+    try:
+        raw = _read_bounded_regular_file(path, limit, label=label)
+    except EvidenceError as exc:
+        raise ManifestBindingError(str(exc)) from None
     try:
         value = json.loads(
             raw.decode("utf-8"),
@@ -228,8 +231,8 @@ def verify_smoke_files(
     expected_bundle_sha256: str,
     expected_git_commit: str,
 ) -> dict:
-    manifest = _read_json(manifest_path, _MAX_MANIFEST_BYTES)
-    bundle = _read_json(bundle_path, _MAX_FILE_BYTES)
+    manifest = _read_json(manifest_path, _MAX_MANIFEST_BYTES, label="manifest")
+    bundle = _read_json(bundle_path, _MAX_FILE_BYTES, label="bundle")
     try:
         evidence = _verify(bundle, expected_bundle_sha256)
     except (ValueError, KeyError, TypeError, RecursionError):

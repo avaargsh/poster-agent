@@ -405,30 +405,35 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
     }
 
 
-def _read_bounded_bundle(path: Path) -> bytes:
+def _read_bounded_regular_file(path: Path, max_bytes: int, *, label: str) -> bytes:
     """Read one bounded snapshot from a regular file without following links.
 
     O_NONBLOCK prevents a substituted FIFO from hanging the offline verifier;
-    fstat then rejects FIFOs, devices, sockets and directories before reading.
+    fstat rejects FIFOs, devices, sockets and directories before reading.
     O_NOFOLLOW closes the final-component symlink race between the path check
     and opening the file.
     """
     try:
         if path.is_symlink():
-            raise EvidenceError("bundle must not be a symlink")
+            raise EvidenceError(f"{label} must not be a symlink")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
-            _require(stat.S_ISREG(info.st_mode), "bundle must be a regular file")
-            _require(info.st_size <= _MAX_FILE_BYTES, "bundle exceeds size limit")
-            raw = stream.read(_MAX_FILE_BYTES + 1)
+            _require(stat.S_ISREG(info.st_mode), f"{label} must be a regular file")
+            _require(info.st_size <= max_bytes, f"{label} exceeds size limit")
+            raw = stream.read(max_bytes + 1)
     except EvidenceError:
         raise
     except OSError:
-        raise EvidenceError("bundle is missing or unreadable") from None
-    _require(len(raw) <= _MAX_FILE_BYTES, "bundle exceeds size limit")
+        raise EvidenceError(f"{label} is missing or unreadable") from None
+    _require(len(raw) <= max_bytes, f"{label} exceeds size limit")
     return raw
+
+
+def _read_bounded_bundle(path: Path) -> bytes:
+    """Read a bounded regular evidence bundle without following links."""
+    return _read_bounded_regular_file(path, _MAX_FILE_BYTES, label="bundle")
 
 
 def verify_bundle(path: Path, expected_sha256: str) -> dict:
