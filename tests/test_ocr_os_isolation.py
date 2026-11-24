@@ -77,9 +77,7 @@ def _proc_fixture(
         "text_recognition_sha256": "b" * 64,
     }
     raw_profile = json.dumps(profile, separators=(",", ":")).encode("utf-8")
-    (process / "environ").write_bytes(
-        b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON=" + raw_profile + b"\0"
-    )
+    (process / "environ").write_bytes(b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON=" + raw_profile + b"\0")
     (process / "status").write_text(f"Name:\tpython\nPid:\t{_PID}\n", encoding="ascii")
     stat_fields = ["S", *("0" for _ in range(18)), "123456"]
     (process / "stat").write_text(
