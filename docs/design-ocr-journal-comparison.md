@@ -136,3 +136,35 @@ include SVG bytes, model files, signed runtime claims or human labels.
 Repeated export of unchanged inputs has the same digest. All trust flags
 remain false. A successful export is neither proof of genuine execution
 nor quality acceptance nor a permit to publish.
+
+## Offline consistency verifier (v1)
+
+Retain the expected bundle SHA-256 through a separate trusted operational
+channel. Do not take that expected value from the file being verified.
+Run from the repository root using its locked environment:
+
+```sh
+uv run --locked python -m scripts.verify_ocr_evidence_bundle \
+  --bundle /path/to/ocr-evidence-v1.json \
+  --expected-sha256 <separately-retained-64-lowercase-hex-digest>
+```
+
+The read-only tool checks the bounded JSON file (36 MiB maximum), rejects
+duplicate keys and non-finite JSON, verifies the outer canonical digest
+against the separately supplied digest, and decodes and checks the bounded
+PNG bytes, dimensions and journal hash. It validates local journal fields,
+observations and runtime metadata, recomputes text comparison and spatial
+fingerprints using the bundled expected text, and checks the content
+fingerprint and internal consistency of the layout hints. The reported OCR
+box must equal the recomputed spatial box; node envelopes must be in bounds;
+overlap fractions, field outcomes and aggregate status must agree with the
+supplied geometry. This does not authenticate the supplied node envelopes.
+It does not access SQLite or run OCR.
+
+Exit 0 means `CONSISTENT_LOCAL_EVIDENCE_ONLY`; exit 2 means evidence was
+refused. The report does not echo OCR text, image bytes, or local paths.
+It cannot independently reconstruct authoring-node geometry without the
+DesignDocument, verify the live revision, authenticate the expected digest,
+prove model execution or establish human acceptance. All authority flags
+remain false. Store the input and external digest separately; never commit
+customer evidence to the repository.

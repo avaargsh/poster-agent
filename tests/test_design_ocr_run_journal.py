@@ -1203,3 +1203,97 @@ def test_model_drift_invalidates_cached_engine_before_next_operation(
     finally:
         weights.write_bytes(original)
         ocr_provider._local_engine.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "none",
+        "png",
+        "journal",
+        "trust_flag",
+        "report",
+        "duplicate",
+        "anchor",
+        "layout_bbox",
+        "layout_fraction",
+        "layout_status",
+    ],
+)
+def test_offline_evidence_verifier_rechecks_bundle(
+    ocr_paths, product_bytes, monkeypatch, tmp_path, capsys, mutation
+):
+    from scripts.verify_ocr_evidence_bundle import main
+
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/evidence-bundle"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 200, response.text
+        bundle = response.json()
+
+    # A recomputed outer digest cannot conceal inconsistent internal fields.
+    if mutation == "png":
+        bundle["png_base64"] = "YWJj"
+    elif mutation == "journal":
+        bundle["journal"]["observations"][0]["text"] = "篡改标题"
+    elif mutation == "trust_flag":
+        bundle["comparison"]["quality_verified"] = True
+    elif mutation == "report":
+        bundle["comparison"]["field_checks"][0]["matched_line_index"] = 1
+    elif mutation.startswith("layout_"):
+        report = bundle["comparison"]
+        finding = report["design_node_overlap_checks"][0]
+        if mutation == "layout_bbox":
+            finding["ocr_bbox"] = [1, 1, 2, 2]
+        elif mutation == "layout_fraction":
+            finding["overlap_fraction"] = 2.0
+        else:
+            report["design_node_overlap_status"] = (
+                "BLOCKED"
+                if report["design_node_overlap_status"] == "OVERLAP_ONLY_UNCALIBRATED"
+                else "OVERLAP_ONLY_UNCALIBRATED"
+            )
+        # Even an internally rehashed layout claim must obey geometry and
+        # agree with the recomputed spatial result.
+        layout_input = {
+            "schema_version": 1,
+            "spatial_source_sha256": report["spatial_source_sha256"],
+            "canvas": bundle["canvas"],
+            "design_node_overlap_status": report["design_node_overlap_status"],
+            "design_node_overlap_checks": report["design_node_overlap_checks"],
+        }
+        layout_json = json.dumps(
+            layout_input, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        report["design_node_overlap_fingerprint_sha256"] = hashlib.sha256(
+            layout_json.encode("utf-8")
+        ).hexdigest()
+
+    bundle.pop("bundle_sha256")
+    canonical = json.dumps(
+        bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    bundle["bundle_sha256"] = digest
+    raw = json.dumps(bundle, ensure_ascii=False)
+    if mutation == "duplicate":
+        raw = '{"schema_version":1,' + raw[1:]
+    path = tmp_path / "bundle.json"
+    path.write_text(raw, encoding="utf-8")
+    expected = "0" * 64 if mutation == "anchor" else digest
+    code = main(["--bundle", str(path), "--expected-sha256", expected])
+    captured = capsys.readouterr()
+    if mutation == "none":
+        assert code == 0
+        result = json.loads(captured.out)
+        assert result["status"] == "CONSISTENT_LOCAL_EVIDENCE_ONLY"
+        assert result["bundle_sha256"] == digest
+        assert result["runtime_attested"] is False
+        assert result["quality_verified"] is False
+        assert result["release_ready"] is False
+    else:
+        assert code == 2
+        assert captured.out == ""
