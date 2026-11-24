@@ -1012,3 +1012,67 @@ def test_transient_model_drift_inside_engine_lock_cannot_be_certified(
         assert replay.json()["status"] == "UNKNOWN"
         assert replay.json()["replayed"] is True
         assert calls == expected_calls
+
+
+def test_model_drift_invalidates_cached_engine_before_next_operation(
+    ocr_paths, product_bytes, monkeypatch
+):
+    """A rejected run must not leave its potentially tainted engine reusable."""
+    import sys
+    from types import SimpleNamespace
+
+    from app import ocr_provider
+
+    weights = ocr_paths.parent / "local-detector" / "weights.bin"
+    original = weights.read_bytes()
+    created = []
+    predictions = []
+
+    class FakeOCR:
+        def __init__(self, **kwargs):
+            if not created:
+                # Simulate drift during initial model load, after pin verification.
+                weights.write_bytes(b"transient unpinned weights")
+            self.loaded = weights.read_bytes()
+            created.append(self.loaded)
+
+        def predict(self, path):
+            predictions.append(self.loaded)
+            return [
+                {
+                    "res": {
+                        "rec_texts": ["双十一牙刷"],
+                        "rec_scores": [0.99],
+                        "rec_boxes": [[2, 4, 210, 55]],
+                    }
+                }
+            ]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakeOCR))
+    ocr_provider._local_engine.cache_clear()
+    try:
+        with TestClient(app) as client:
+            doc, payload = _prepare(client, product_bytes)
+            first = client.post(_url(doc), json=payload, headers=_headers())
+            assert first.status_code == 201, first.text
+            assert first.json()["status"] == "UNKNOWN"
+            assert first.json()["reason"] == "MODEL_PROFILE_CHANGED"
+            assert first.json()["observations"] == []
+
+            weights.write_bytes(original)
+            replay = client.post(_url(doc), json=payload, headers=_headers())
+            assert replay.status_code == 200, replay.text
+            assert replay.json()["status"] == "UNKNOWN"
+            assert len(predictions) == 1
+
+            next_payload = {**payload, "operation_id": "ocr_" + uuid.uuid4().hex}
+            second = client.post(_url(doc), json=next_payload, headers=_headers())
+            assert second.status_code == 201, second.text
+            assert second.json()["status"] == "EXECUTED"
+            assert second.json()["quality_verified"] is False
+            assert second.json()["release_ready"] is False
+            assert created == [b"transient unpinned weights", original]
+            assert predictions == created
+    finally:
+        weights.write_bytes(original)
+        ocr_provider._local_engine.cache_clear()
