@@ -59,7 +59,7 @@ _JOURNAL_KEYS = {
     "finished_at",
     "replayed",
 }
-_BUNDLE_KEYS = {
+_BUNDLE_V1_KEYS = {
     *_FLAGS,
     "schema_version",
     "evidence_kind",
@@ -69,6 +69,21 @@ _BUNDLE_KEYS = {
     "journal",
     "comparison",
     "bundle_sha256",
+}
+_BUNDLE_V2_KEYS = _BUNDLE_V1_KEYS | {"approval"}
+_APPROVAL_KEYS = {
+    "document_id",
+    "revision",
+    "approval_id",
+    "spec_digest",
+    "asset_manifest_digest",
+    "renderer_version",
+    "principal_id",
+    "policy_digest",
+    "created_at",
+    "attributed_at",
+    "is_current_head",
+    "matches_current_snapshot",
 }
 
 
@@ -189,13 +204,17 @@ def _check_layout_claims(layout: dict, spatial: dict, canvas: dict) -> None:
 
 
 def _verify(bundle: dict, expected_sha256: str) -> dict:
-    _require(isinstance(bundle, dict) and set(bundle) == _BUNDLE_KEYS, "invalid bundle fields")
-    _require(
-        type(bundle["schema_version"]) is int
-        and bundle["schema_version"] == 1
-        and bundle["evidence_kind"] == "LOCAL_OCR_UNATTESTED",
-        "unsupported bundle schema",
-    )
+    _require(isinstance(bundle, dict), "invalid bundle fields")
+    schema_version = bundle.get("schema_version")
+    _require(type(schema_version) is int, "unsupported bundle schema")
+    if schema_version == 1:
+        expected_keys = _BUNDLE_V1_KEYS
+    elif schema_version == 2:
+        expected_keys = _BUNDLE_V2_KEYS
+    else:
+        raise EvidenceError("unsupported bundle schema")
+    _require(set(bundle) == expected_keys, "invalid bundle fields")
+    _require(bundle["evidence_kind"] == "LOCAL_OCR_UNATTESTED", "unsupported bundle schema")
     claimed = bundle["bundle_sha256"]
     _require(_sha(claimed) and _sha(expected_sha256), "invalid digest")
     computed = _digest({key: value for key, value in bundle.items() if key != "bundle_sha256"})
@@ -239,6 +258,40 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", journal["principal_id"]) is not None,
         "invalid operation or principal",
     )
+    approval_attribution_verified = False
+    if schema_version == 2:
+        approval = bundle["approval"]
+        _require(
+            isinstance(approval, dict) and set(approval) == _APPROVAL_KEYS,
+            "invalid approval attribution fields",
+        )
+        _require(
+            approval["document_id"] == journal["document_id"]
+            and type(approval["revision"]) is int
+            and approval["revision"] == journal["revision"]
+            and approval["approval_id"] == journal["approval_id"]
+            and approval["spec_digest"] == journal["spec_digest"]
+            and approval["asset_manifest_digest"] == journal["asset_manifest_digest"]
+            and approval["renderer_version"] == journal["renderer_version"],
+            "approval attribution does not match OCR source",
+        )
+        _require(
+            isinstance(approval["principal_id"], str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approval["principal_id"]) is not None
+            and approval["principal_id"] != journal["principal_id"]
+            and _sha(approval["policy_digest"]),
+            "invalid or non-independent approval principal",
+        )
+        _require(
+            all(
+                isinstance(approval[key], str) and 0 < len(approval[key]) <= 256
+                for key in ("created_at", "attributed_at")
+            )
+            and approval["is_current_head"] is True
+            and approval["matches_current_snapshot"] is True,
+            "approval is not bound to the current snapshot",
+        )
+        approval_attribution_verified = True
     _check_png(bundle["png_base64"], canvas, journal)
 
     # Reuse the repository's bounded OCR observation/runtime validation.
@@ -344,6 +397,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         "layout_geometry_independently_verified": False,
         "current_design_verified": False,
         "expected_digest_authenticity_verified": False,
+        "approval_attribution_verified": approval_attribution_verified,
         **dict.fromkeys(_FLAGS, False),
     }
 
