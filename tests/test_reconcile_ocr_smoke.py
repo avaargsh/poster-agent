@@ -14,7 +14,6 @@ def _saved_request():
     source = {
         "document_id": "design-1",
         "revision": 1,
-        "expected_revision": 1,
         "approval_id": "approval-1",
         "spec_digest": "d" * 64,
         "asset_manifest_digest": "e" * 64,
