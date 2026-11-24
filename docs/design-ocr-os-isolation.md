@@ -7,10 +7,10 @@ This is a read-only observer for the manual OCR smoke in [Issue #57](https://git
 Run the server directly as one Uvicorn process in the already prepared isolated Linux network and mount namespaces. The command line must explicitly include:
 
 ```sh
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-The process must have no child processes. The network namespace must expose only `lo`, with no default route and no route through a non-loopback interface. Both exact model directories configured in `POSTER_DESIGN_OCR_MODEL_CONFIG_JSON` must exist in the server's mount namespace and be covered by read-only mounts. Prepare these OS controls before starting the server; this observer will not change them.
+The process must have no child processes. The network namespace must expose only `lo`, with no usable default route and no route through a non-loopback interface. Both exact model directories configured in `POSTER_DESIGN_OCR_MODEL_CONFIG_JSON` must exist in the server's mount namespace and be covered by read-only mounts. Prepare these OS controls before starting the server; this observer will not change them.
 
 Record the PID of the Uvicorn process itself, not a shell, `uv`, systemd or other launcher PID. Run from the clean repository root and use an existing private output parent outside the checkout:
 
@@ -30,7 +30,7 @@ Use the exact absolute model paths visible inside the server's mount namespace. 
 The observer reads `/proc/<pid>/cmdline`, `status`, every thread's `task/<tid>/children`, namespace links, `environ`, `net/dev`, IPv4/IPv6 route tables and `mountinfo` for the target process. It parses the server's unique `POSTER_DESIGN_OCR_MODEL_CONFIG_JSON`, requires the two CLI paths to match the configured paths exactly, and records the configured model-tree SHA-256 pins and canonical model-profile fingerprint. It does not rehash model files; the application model-profile loader and the separate runtime manifest collector perform those checks. It requires:
 
 - the exact `uvicorn app.main:app` command, explicit `--host 127.0.0.1`, explicit `--workers 1`, and no child process;
-- only the loopback interface, no IPv4 or IPv6 default route, and no non-loopback route;
+- only the loopback interface, no usable IPv4 or IPv6 default route, and no non-loopback route; the exact Linux IPv6 unreachable null-route sentinel (`00200200` reject/non-nexthop flags, metric `ffffffff`, zero source and gateway, `lo`) is not a forwarding route; other default routes are refused;
 - both configured model directories to exist in the target process root and resolve without symlink traversal;
 - the CLI model paths to match the server process environment's exact pinned profile and valid tree digests;
 - the nearest covering mount and every nested mount within each model directory to have the per-mount `ro` option.
