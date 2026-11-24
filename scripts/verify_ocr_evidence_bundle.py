@@ -258,7 +258,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", journal["principal_id"]) is not None,
         "invalid operation or principal",
     )
-    approval_attribution_verified = False
+    approval_attribution_consistent = False
     if schema_version == 2:
         approval = bundle["approval"]
         _require(
@@ -291,7 +291,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
             and approval["matches_current_snapshot"] is True,
             "approval is not bound to the current snapshot",
         )
-        approval_attribution_verified = True
+        approval_attribution_consistent = True
     _check_png(bundle["png_base64"], canvas, journal)
 
     # Reuse the repository's bounded OCR observation/runtime validation.
@@ -397,7 +397,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         "layout_geometry_independently_verified": False,
         "current_design_verified": False,
         "expected_digest_authenticity_verified": False,
-        "approval_attribution_verified": approval_attribution_verified,
+        "approval_attribution_consistent": approval_attribution_consistent,
         **dict.fromkeys(_FLAGS, False),
     }
 
