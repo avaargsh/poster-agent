@@ -434,10 +434,16 @@ def evaluate_shadow_cohort(
         for key in ("tp", "fp", "fn", "tn")
     }
     complete = len(labels) >= MINIMUM_SKUS and fully_reviewed == len(labels)
+    executed_operation_count = statuses["EXECUTED"]
+    zero_findings_not_a_pass = executed_operation_count > 0 and model_findings_count == 0
     signal_status = (
-        "NO_FINDINGS_NOT_A_PASS"
-        if model_findings_count == 0
-        else "FINDINGS_RECORDED_REQUIRES_HUMAN_REVIEW"
+        "NO_EXECUTED_MODEL_RUNS_NOT_A_PASS"
+        if executed_operation_count == 0
+        else (
+            "NO_FINDINGS_NOT_A_PASS"
+            if zero_findings_not_a_pass
+            else "FINDINGS_RECORDED_REQUIRES_HUMAN_REVIEW"
+        )
     )
     cost = _cost_report(rate, durations, statuses["UNKNOWN"] + statuses["EXECUTING"])
     return {
@@ -454,7 +460,7 @@ def evaluate_shadow_cohort(
         "signal_status": signal_status,
         "model_findings_count": model_findings_count,
         "sku_with_model_findings": sku_with_model_findings,
-        "zero_findings_not_a_pass": model_findings_count == 0,
+        "zero_findings_not_a_pass": zero_findings_not_a_pass,
         "minimum_complete_skus_required": MINIMUM_SKUS,
         "minimum_complete_skus_met": complete,
         "journal_status_counts": {state: statuses[state] for state in _STATUSES},
