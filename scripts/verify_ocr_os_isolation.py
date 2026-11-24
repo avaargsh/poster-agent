@@ -27,6 +27,14 @@ _PID = re.compile(r"[1-9][0-9]{0,8}")
 _NAMESPACE = re.compile(r"(?:net|mnt):\[[0-9]+\]")
 _HEX8 = re.compile(r"[0-9a-fA-F]{8}")
 _HEX32 = re.compile(r"[0-9a-fA-F]{32}")
+_MODEL_PROFILE_ENV = b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON"
+_MODEL_PROFILE_KEYS = {
+    "schema_version",
+    "text_detection_model_dir",
+    "text_recognition_model_dir",
+    "text_detection_sha256",
+    "text_recognition_sha256",
+}
 
 
 class IsolationError(ValueError):
@@ -174,16 +182,84 @@ def _server_command(raw: bytes) -> dict:
     }
 
 
+def _unique_model_profile(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        _require(key not in result, "duplicate model profile key")
+        result[key] = value
+    return result
+
+
+def _reject_model_profile_constant(value: str) -> None:
+    raise IsolationError("non-finite model profile value")
+
+
+def _model_profile(environment: bytes, detection_path: str, recognition_path: str) -> dict:
+    _require(environment.endswith(b"\\0"), "invalid process environment")
+    entries = environment.split(b"\\0")[:-1]
+    values = [
+        entry.partition(b"=")[2]
+        for entry in entries
+        if entry.startswith(_MODEL_PROFILE_ENV + b"=")
+    ]
+    _require(len(values) == 1, "model profile environment must be unique")
+    try:
+        profile = json.loads(
+            values[0].decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_model_profile,
+            parse_constant=_reject_model_profile_constant,
+        )
+    except IsolationError:
+        raise
+    except (UnicodeError, ValueError, TypeError):
+        raise IsolationError("invalid model profile environment") from None
+    _require(
+        isinstance(profile, dict)
+        and set(profile) == _MODEL_PROFILE_KEYS
+        and type(profile["schema_version"]) is int
+        and profile["schema_version"] == 1,
+        "unsupported model profile schema",
+    )
+    _require(
+        profile["text_detection_model_dir"] == detection_path
+        and profile["text_recognition_model_dir"] == recognition_path,
+        "model paths do not match the server environment",
+    )
+    detection_sha = profile["text_detection_sha256"]
+    recognition_sha = profile["text_recognition_sha256"]
+    _require(
+        isinstance(detection_sha, str)
+        and re.fullmatch(r"[0-9a-f]{64}", detection_sha) is not None
+        and isinstance(recognition_sha, str)
+        and re.fullmatch(r"[0-9a-f]{64}", recognition_sha) is not None,
+        "invalid model profile digest",
+    )
+    canonical = json.dumps(
+        profile,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return {
+        "model_profile_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "detection_model_sha256": detection_sha,
+        "recognition_model_sha256": recognition_sha,
+    }
+
+
 def _process_snapshot(process: Path, pid: int) -> dict:
     _status_pid(process, pid)
     start_before = _process_start_time(process, pid)
     command_line = _read(process / "cmdline", _MAX_CMDLINE)
+    environment = _read(process / "environ", _MAX_PROC_FILE)
     command = _server_command(command_line)
     children = _children_snapshot(process, pid)
     start_after = _process_start_time(process, pid)
     _require(start_before == start_after, "server process identity changed during observation")
     return {
         "command_line": command_line,
+        "environment": environment,
         "children": children,
         "start_time": start_before,
         "command": command,
@@ -458,6 +534,9 @@ def inspect_isolation(
         network_namespace = _namespace(process / "ns" / "net", "net")
         mount_namespace = _namespace(process / "ns" / "mnt", "mnt")
         process_before = _process_snapshot(process, server_pid)
+        model_profile = _model_profile(
+            process_before["environment"], detection_path, recognition_path
+        )
 
         interface_table = _text(process / "net" / "dev")
         interfaces = _interfaces(interface_table)
@@ -522,6 +601,7 @@ def inspect_isolation(
         **model_profile,
         "model_mounts": model_mounts,
         "model_mounts_read_only_observed": True,
+        **model_profile,
         **process_before["command"],
         **_FLAGS,
     }
