@@ -132,12 +132,27 @@ The report deliberately keeps `server_process_verified`,
 `font_selection_verified`, `egress_denied_verified`, `runtime_attested`,
 `quality_verified` and `release_ready` false.
 
+## Observe OS-level isolation before the real smoke
+
+Before running the OCR client, inspect the actual Uvicorn process, its network
+namespace and its model mounts using
+[the Linux OS isolation observer](design-ocr-os-isolation.md). The observer
+requires an explicit single-worker loopback Uvicorn command, only the loopback
+interface, no default or non-loopback routes, and read-only mounts covering
+both configured model directories. It only reads the target process's procfs
+state; it does not configure isolation or provide independent attestation.
+Retain its report privately because it contains local model paths and
+namespace identifiers.
+
 ## Remaining #57 work
 
-Prove isolated server startup and OS-level egress policy; execute the existing
-model/asset source-drift negative probes; execute the real pinned smoke. A
-20-authorized-SKU human evaluation remains #14, and is not replaced by this
-client or the manifest binding report.
+Complete the operator-controlled isolated server startup and retain the OS
+isolation observation, same-environment runtime manifest, actual pinned
+PaddleOCR execution, model/asset source-drift negative probes, stale-revision
+negative probe and private evidence bundle/digest. Synthetic tests and procfs
+fixtures do not substitute for those operations. A 20-authorized-SKU human
+evaluation remains #14 and is not replaced by this smoke client or its
+manifest/isolation reports.
 
 
 ## Approval attribution verification boundary
