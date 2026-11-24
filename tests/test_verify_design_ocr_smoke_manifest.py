@@ -288,6 +288,4 @@ def test_manifest_binding_rejects_symlinked_manifest_and_bundle(tmp_path, monkey
         bundle_path.symlink_to(bundle_source)
 
     with pytest.raises(ManifestBindingError, match="symlink"):
-        manifest_verifier.verify_smoke_files(
-            manifest_path, bundle_path, "f" * 64, "a" * 40
-        )
+        manifest_verifier.verify_smoke_files(manifest_path, bundle_path, "f" * 64, "a" * 40)
