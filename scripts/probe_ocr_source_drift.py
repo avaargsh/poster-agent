@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from scripts.run_design_ocr_smoke import SmokeError, _check, _object, _request
+from scripts.run_design_ocr_smoke import _FLAGS, SmokeError, _check, _object, _request
 from scripts.verify_ocr_evidence_bundle import _MAX_FILE_BYTES, _canonical, _verify
 
 _EXPECTED = {
@@ -56,6 +56,7 @@ def probe_drift(client, baseline: bytes, expected_sha256: str, exporter: str, dr
             "error_code": code,
             "journal_unchanged": True,
             "source_mutation_independently_verified": False,
+            **_FLAGS,
         }
     except Exception:
         # The probe must not echo a server body, credential, or local path.
