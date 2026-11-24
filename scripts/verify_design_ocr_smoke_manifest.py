@@ -54,11 +54,7 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _text(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and 0 < len(value) <= 128
-        and "\x00" not in value
-    )
+    return isinstance(value, str) and 0 < len(value) <= 128 and "\x00" not in value
 
 
 def _sha(value: object) -> bool:
@@ -134,9 +130,7 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
         and all(_text(value) for value in packages.values()),
         "exactly one Paddle distribution and CairoSVG are required",
     )
-    paddle_distribution = (
-        "paddlepaddle" if "paddlepaddle" in packages else "paddlepaddle-gpu"
-    )
+    paddle_distribution = "paddlepaddle" if "paddlepaddle" in packages else "paddlepaddle-gpu"
 
     fonts = manifest["fonts"]
     _require(isinstance(fonts, list) and 1 <= len(fonts) <= 8, "invalid font identities")
