@@ -1449,8 +1449,11 @@ def test_read_only_ocr_drift_probe(ocr_paths, product_bytes, monkeypatch, tmp_pa
             assert result["journal_unchanged"] is True
             assert result["release_ready"] is False
             assert result["operation_id"] == payload["operation_id"]
-            assert result["error_code"] == {
-                "model": "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE",
-                "asset": "ASSET_INVALID",
-            }[drift]
+            assert (
+                result["error_code"]
+                == {
+                    "model": "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE",
+                    "asset": "ASSET_INVALID",
+                }[drift]
+            )
         assert calls == [1]
