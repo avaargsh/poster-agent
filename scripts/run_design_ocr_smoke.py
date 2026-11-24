@@ -214,7 +214,8 @@ def run_smoke(
             and isinstance(target.get("renderer_version"), str)
             and approval_evidence["renderer_version"] == target["renderer_version"]
             and isinstance(approval_evidence["principal_id"], str)
-            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approval_evidence["principal_id"]) is not None
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approval_evidence["principal_id"])
+            is not None
             and _sha(approval_evidence["policy_digest"])
             and approval_evidence["replayed"] is False,
             "approval identity or policy mismatch",
