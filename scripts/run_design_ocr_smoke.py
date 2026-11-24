@@ -28,6 +28,7 @@ from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, 
 _FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 _MAX_RESPONSE = 36 * 1024 * 1024
 _MAX_APPROVED_PNG_BYTES = 24 * 1024 * 1024
+_PNG_IEND = b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"
 _SHA = re.compile(r"[0-9a-f]{64}")
 
 
@@ -48,6 +49,9 @@ def _valid_approved_png(raw: bytes) -> bool:
     """Decode and bound the server-supplied raster before an OCR side effect."""
     if not 8 <= len(raw) <= _MAX_APPROVED_PNG_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return False
+    # PNG IEND must be the final twelve bytes; reject appended payloads.
+    if not raw.endswith(_PNG_IEND):
+        return False
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -55,6 +59,8 @@ def _valid_approved_png(raw: bytes) -> bool:
                 width, height = image.size
                 if (
                     image.format != "PNG"
+                    or getattr(image, "is_animated", False)
+                    or getattr(image, "n_frames", 1) != 1
                     or not 64 <= width <= PAGE_MAX_SIZE
                     or not 64 <= height <= PAGE_MAX_SIZE
                     or width * height > MAX_ASSET_PIXELS
