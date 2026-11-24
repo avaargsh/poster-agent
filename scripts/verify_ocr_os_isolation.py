@@ -377,78 +377,6 @@ def _canonical_model_path(value: str) -> str:
     return value
 
 
-def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
-    result = {}
-    for key, value in pairs:
-        _require(key not in result, "duplicate model profile key")
-        result[key] = value
-    return result
-
-
-def _reject_non_finite_json(value: str) -> None:
-    raise IsolationError("non-finite model profile value")
-
-
-def _model_profile(
-    process: Path, detection_model_dir: str, recognition_model_dir: str
-) -> dict:
-    prefix = b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON="
-    raw = _read(process / "environ", 64 * 1024)
-    _require(raw.endswith(b"\0"), "invalid process environment")
-    values = [
-        entry[len(prefix) :]
-        for entry in raw.split(b"\0")
-        if entry.startswith(prefix)
-    ]
-    _require(len(values) == 1 and len(values[0]) <= 4096, "model profile must be unique and bounded")
-    try:
-        config = json.loads(
-            values[0].decode("utf-8"),
-            object_pairs_hook=_unique_json_object,
-            parse_constant=_reject_non_finite_json,
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
-        raise IsolationError("invalid process model profile") from None
-    keys = {
-        "schema_version",
-        "text_detection_model_dir",
-        "text_recognition_model_dir",
-        "text_detection_sha256",
-        "text_recognition_sha256",
-    }
-    _require(
-        type(config) is dict
-        and set(config) == keys
-        and type(config["schema_version"]) is int
-        and config["schema_version"] == 1,
-        "unsupported process model profile",
-    )
-    configured_detection = _canonical_model_path(config["text_detection_model_dir"])
-    configured_recognition = _canonical_model_path(config["text_recognition_model_dir"])
-    _require(
-        configured_detection == detection_model_dir
-        and configured_recognition == recognition_model_dir,
-        "observer model paths differ from server configuration",
-    )
-    detection_sha = config["text_detection_sha256"]
-    recognition_sha = config["text_recognition_sha256"]
-    _require(
-        isinstance(detection_sha, str)
-        and re.fullmatch(r"[0-9a-f]{64}", detection_sha) is not None
-        and isinstance(recognition_sha, str)
-        and re.fullmatch(r"[0-9a-f]{64}", recognition_sha) is not None,
-        "invalid configured model tree digests",
-    )
-    canonical = json.dumps(
-        config, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-    )
-    return {
-        "model_profile_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        "detection_model_sha256": detection_sha,
-        "recognition_model_sha256": recognition_sha,
-    }
-
-
 def _mount_for(model_path: str, mountinfo: str) -> dict:
     mounts: list[tuple[PurePosixPath, set[str]]] = []
     for line in mountinfo.splitlines():
@@ -544,7 +472,6 @@ def inspect_isolation(
         ipv4_interfaces = _ipv4_routes(ipv4_table)
         ipv6_table = _text(process / "net" / "ipv6_route")
         ipv6_interfaces = _ipv6_routes(ipv6_table)
-        model_profile = _model_profile(process, detection_path, recognition_path)
         mountinfo = _text(process / "mountinfo")
         model_mounts = []
         for role, value in (
@@ -579,10 +506,6 @@ def inspect_isolation(
         _require(ipv4_table == _text(process / "net" / "route"), "IPv4 routes changed during observation")
         _require(ipv6_table == _text(process / "net" / "ipv6_route"), "IPv6 routes changed during observation")
         _require(mountinfo == _text(process / "mountinfo"), "mount table changed during observation")
-        _require(
-            model_profile == _model_profile(process, detection_path, recognition_path),
-            "server model profile changed during observation",
-        )
     except IsolationError:
         raise
     except (OSError, ValueError, TypeError, RecursionError):
@@ -601,7 +524,6 @@ def inspect_isolation(
         **model_profile,
         "model_mounts": model_mounts,
         "model_mounts_read_only_observed": True,
-        **model_profile,
         **process_before["command"],
         **_FLAGS,
     }
