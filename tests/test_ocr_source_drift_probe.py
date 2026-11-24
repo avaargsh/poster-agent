@@ -136,9 +136,7 @@ def test_probe_rejects_success_or_wrong_error_code_as_drift_evidence(monkeypatch
         if request.url.path == endpoint:
             return httpx.Response(200, json=journal)
         if request.url.path.endswith("/comparison-preview"):
-            return httpx.Response(
-                503, json={"error": {"code": "UNEXPECTED_PROVIDER_FAILURE"}}
-            )
+            return httpx.Response(503, json={"error": {"code": "UNEXPECTED_PROVIDER_FAILURE"}})
         pytest.fail(f"probe continued after an invalid refusal: {request.url.path}")
 
     with (
