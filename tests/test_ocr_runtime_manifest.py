@@ -41,6 +41,7 @@ def test_manifest_binds_local_bytes_without_paths_or_authority(inputs):
     root, font, profile = inputs
     result = collect_manifest(root, [font], json.dumps(profile))
     assert result["git_commit"] == "a" * 40
+    assert result["schema_version"] == 2
     assert result["renderer_version"] == RENDERER_VERSION
     assert result["packages"]["paddleocr"] == "1.2.3"
     assert result["fonts"] == [

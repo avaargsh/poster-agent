@@ -1,5 +1,7 @@
 # Operator-local OCR runtime manifest
 
+Schema version: **2**. Version 2 adds a required renderer identity and binds it, plus the CairoSVG rasterizer, to the executed journal. Version 1 manifests are intentionally refused because they cannot prove these bindings.
+
 This command measures the invoking environment without loading or invoking
 PaddleOCR. It is an observation, not attestation of a server process.
 

@@ -100,7 +100,7 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
     _require(type(manifest) is dict and set(manifest) == _MANIFEST_KEYS, "invalid manifest fields")
     _require(
         type(manifest["schema_version"]) is int
-        and manifest["schema_version"] == 1
+        and manifest["schema_version"] == 2
         and manifest["evidence_kind"] == "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
         "unsupported manifest schema",
     )

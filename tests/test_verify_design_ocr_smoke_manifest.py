@@ -8,7 +8,7 @@ from scripts.verify_design_ocr_smoke_manifest import (
 
 def _manifest_and_journal():
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_kind": "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
         "git_commit": "a" * 40,
         "renderer_version": "design-svg@1",
@@ -83,6 +83,7 @@ def test_manifest_binds_checkout_model_and_runtime_to_executed_journal():
     ("mutation", "expected_commit"),
     [
         (lambda manifest, journal: None, "0" * 40),
+        (lambda manifest, journal: manifest.update(schema_version=1), "a" * 40),
         (lambda manifest, journal: journal.update(model_profile_sha256="0" * 64), "a" * 40),
         (lambda manifest, journal: journal["runtime"].update(python_version="3.11.9"), "a" * 40),
         (lambda manifest, journal: journal["runtime"].update(machine="aarch64"), "a" * 40),

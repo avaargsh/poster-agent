@@ -103,7 +103,7 @@ def collect_manifest(repo: Path, fonts: list[Path], raw_profile: str | None) -> 
         profile = load_model_profile(raw_profile)
         config = json.loads(raw_profile)
         result = {
-            "schema_version": 1,
+            "schema_version": 2,
             "evidence_kind": "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
             "git_commit": commit,
             "renderer_version": RENDERER_VERSION,
