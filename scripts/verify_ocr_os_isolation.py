@@ -92,13 +92,16 @@ def _server_command(process: Path) -> dict:
 
     _require(option("--host") == "127.0.0.1", "server must bind IPv4 loopback")
     _require(option("--workers") == "1", "server must explicitly use one worker")
+
     def require_no_children() -> None:
         task_root = process / "task"
         tasks = sorted(
             (entry for entry in task_root.iterdir() if entry.is_dir()),
             key=lambda entry: entry.name,
         )
-        _require(bool(tasks) and any(task.name == process.name for task in tasks), "missing server task")
+        _require(
+            bool(tasks) and any(task.name == process.name for task in tasks), "missing server task"
+        )
         for task in tasks:
             _require(_PID.fullmatch(task.name) is not None, "invalid task identity")
             _require(
@@ -219,7 +222,9 @@ def _mount_for(model_path: str, mountinfo: str) -> dict:
     ]
     _require(bool(covering), "model directory has no covering mount")
     longest = max(len(mountpoint) for mountpoint, _ in covering)
-    nearest = [(mountpoint, options) for mountpoint, options in covering if len(mountpoint) == longest]
+    nearest = [
+        (mountpoint, options) for mountpoint, options in covering if len(mountpoint) == longest
+    ]
     _require(len(nearest) == 1, "ambiguous covering model mount")
     mountpoint, options = nearest[0]
     _require("ro" in options and "rw" not in options, "model mount is not read-only")
