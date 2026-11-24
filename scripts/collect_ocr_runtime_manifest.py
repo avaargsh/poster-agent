@@ -42,6 +42,18 @@ def _git_identity(repo: Path) -> str:
     return commit
 
 
+def _font_file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    # Ignore atime: a concurrent reader need not change the measured file.
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def _font_identity(path: Path) -> dict:
     if not path.is_absolute() or path.resolve(strict=True) != path:
         raise ManifestError("font path must be canonical and absolute")
@@ -51,16 +63,18 @@ def _font_identity(path: Path) -> dict:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as stream:
         before = os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before != initial:
+        if not stat.S_ISREG(before.st_mode) or _font_file_identity(before) != _font_file_identity(
+            initial
+        ):
             raise ManifestError("font changed before measurement")
         data = stream.read(_MAX_FONT_BYTES + 1)
         after = os.fstat(stream.fileno())
         # Reading may alter atime; compare the relevant identity and write metadata.
         if (
             len(data) != before.st_size
-            or after.st_size != before.st_size
-            or after.st_mtime_ns != before.st_mtime_ns
-            or after.st_ctime_ns != before.st_ctime_ns
+            or _font_file_identity(after) != _font_file_identity(before)
+            or path.resolve(strict=True) != path
+            or _font_file_identity(path.lstat()) != _font_file_identity(before)
         ):
             raise ManifestError("font changed during measurement")
     return {"size_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}

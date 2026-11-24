@@ -82,3 +82,28 @@ def test_manifest_rejects_symlink_font(inputs):
     link.symlink_to(font)
     with pytest.raises(ManifestError):
         collect_manifest(root, [link], json.dumps(profile))
+
+
+def test_font_identity_rejects_parent_directory_replacement(tmp_path, monkeypatch):
+    from scripts import collect_ocr_runtime_manifest as collector
+
+    directory = tmp_path / "fonts"
+    directory.mkdir()
+    font = directory / "font.ttf"
+    font.write_bytes(b"original")
+    original_fstat = collector.os.fstat
+    calls = 0
+
+    def replace_parent(fd):
+        nonlocal calls
+        result = original_fstat(fd)
+        calls += 1
+        if calls == 2:
+            directory.rename(tmp_path / "old-fonts")
+            directory.mkdir()
+            font.write_bytes(b"replaced")
+        return result
+
+    monkeypatch.setattr(collector.os, "fstat", replace_parent)
+    with pytest.raises(ManifestError):
+        collector._font_identity(font)
