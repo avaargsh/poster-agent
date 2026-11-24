@@ -18,6 +18,8 @@ _EXPECTED = {
     "asset": (409, "ASSET_INVALID"),
 }
 
+_FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
+
 
 def probe_drift(client, baseline: bytes, expected_sha256: str, exporter: str, drift: str) -> dict:
     """Read an existing journal and require explicit rejection of both artifacts."""
@@ -56,6 +58,7 @@ def probe_drift(client, baseline: bytes, expected_sha256: str, exporter: str, dr
             "error_code": code,
             "journal_unchanged": True,
             "source_mutation_independently_verified": False,
+            **_FLAGS,
         }
     except Exception:
         # The probe must not echo a server body, credential, or local path.
