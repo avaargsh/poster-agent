@@ -58,8 +58,22 @@ LOCAL_SMOKE_CONSISTENT_UNATTESTED does not imply genuine runtime attestation,
 quality acceptance or a release permit. Synthetic unit tests substitute
 the adapter and rasterizer; an actual operator run is separate evidence.
 
+## Reuse the approved baseline for source drift probes
+
+Add `--keep-approved` to the command above to retain the exact approved
+revision for the [source drift probe](design-ocr-source-drift-probe.md).
+The client still submits one OCR operation and verifies its replay and
+bundle, but does not mutate the synthetic title or run the stale-revision
+check. It retains the digest and reports
+`LOCAL_BASELINE_CONSISTENT_UNATTESTED`, with
+`stale_revision_rejected=false` and all authority flags false.
+This is a partial smoke result, not completion of #57.
+Use only disposable state and independently controlled copies of the
+sources for drift testing. Run the default stale-revision smoke separately
+if needed; never repeat an ambiguous operation.
+
 ## Remaining #57 work
 
 Record exact server commit/environment/font/model identity separately;
-prove isolated server startup and egress policy; implement the model/asset source-drift negative probe; execute the real pinned smoke. A 20-authorized-SKU
+prove isolated server startup and egress policy; execute the existing model/asset source-drift negative probes; execute the real pinned smoke. A 20-authorized-SKU
 human evaluation remains #14, and is not replaced by this client.
