@@ -135,7 +135,9 @@ def recognize(image_path: Path, *, model_dirs: tuple[str, str, str] | None = Non
             {
                 "source": "paddleocr_adapter",
                 "paddleocr_package_version": _package_version("paddleocr"),
-                "paddlepaddle_package_version": _package_version("paddlepaddle") or _package_version("paddlepaddle-gpu"),
+                "paddlepaddle_package_version": (
+                    _package_version("paddlepaddle") or _package_version("paddlepaddle-gpu")
+                ),
                 "python_version": python_version(),
                 "machine": machine(),
                 "line_count": len(lines),
