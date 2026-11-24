@@ -16,6 +16,8 @@ from uuid import uuid4
 
 import httpx
 
+from app.designs.errors import DesignError
+from app.designs.ocr_runs import _decode_observations, _decode_runtime, _validate_runtime_timing
 from scripts.design_demo import _programmatic_product_png
 from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, verify_bundle
 
@@ -145,8 +147,11 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         _check(
             journal.get("operation_id") == operation_id
             and journal.get("document_id") == doc
+            and type(journal.get("revision")) is int
             and journal.get("revision") == revision
             and journal.get("approval_id") == approval_id
+            and journal.get("spec_digest") == approval["spec_digest"]
+            and journal.get("asset_manifest_digest") == approval["asset_manifest_digest"]
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False
@@ -158,20 +163,25 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         if status != "EXECUTED":
             execution = status
             raise SmokeError("OCR did not complete")
-        observations, runtime = journal["observations"], journal["runtime"]
         _check(
-            isinstance(observations, list)
-            and bool(observations)
-            and all(isinstance(line, dict) for line in observations)
-            and any(line.get("bbox") is not None for line in observations)
-            and isinstance(runtime, dict)
-            and runtime.get("attested") is False
-            and all(
-                runtime.get(key) is not None
-                for key in ("inference_started_at", "inference_finished_at", "inference_elapsed_ms")
-            ),
-            "missing smoke observations or timing",
+            _sha(journal.get("model_profile_sha256")) and journal.get("reason") is None,
+            "invalid executed journal identity",
         )
+        observations = _decode_observations(_canonical(journal["observations"]))
+        runtime = _decode_runtime(
+            _canonical(journal["runtime"]),
+            model_profile_sha256=journal["model_profile_sha256"],
+            observation_count=len(observations),
+        )
+        _check(
+            _canonical(observations) == _canonical(journal["observations"])
+            and _canonical(runtime) == _canonical(journal["runtime"])
+            and bool(observations)
+            and any(line["bbox"] is not None for line in observations)
+            and isinstance(runtime, dict),
+            "invalid smoke observations or runtime",
+        )
+        _validate_runtime_timing(runtime, required=True)
         execution = "EXECUTED"
 
         # A successful run may be replayed once with the exact same key.
@@ -239,7 +249,7 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         }
         _json_file(output / "outcome.json", report)
         return report
-    except (ValueError, OSError, KeyError, TypeError, RecursionError, httpx.HTTPError):
+    except (ValueError, OSError, KeyError, TypeError, RecursionError, DesignError, httpx.HTTPError):
         _json_file(
             output / "outcome.json",
             {
