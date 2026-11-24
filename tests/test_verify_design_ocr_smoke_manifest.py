@@ -201,3 +201,61 @@ def test_manifest_rejects_missing_renderer_identity_on_both_sides():
 
     with pytest.raises(ManifestBindingError):
         verify_manifest_binding(manifest, journal, "a" * 40)
+
+
+# File-path hardening: manifest and bundle inputs must be regular files.
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import scripts.verify_design_ocr_smoke_manifest as manifest_verifier
+
+
+def test_manifest_json_reader_accepts_a_bounded_regular_file(tmp_path):
+    path = tmp_path / "manifest.json"
+    path.write_text('{"kind":"manifest"}', encoding="utf-8")
+
+    assert manifest_verifier._read_json(path, 1024) == {"kind": "manifest"}
+
+
+def test_manifest_json_reader_rejects_a_symlink(tmp_path):
+    source = tmp_path / "source.json"
+    source.write_text("{}", encoding="utf-8")
+    selected = tmp_path / "manifest.json"
+    selected.symlink_to(source)
+
+    with pytest.raises(ManifestBindingError, match="symlink"):
+        manifest_verifier._read_json(selected, 1024)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX device-file contract")
+def test_manifest_json_reader_rejects_character_devices():
+    with pytest.raises(ManifestBindingError, match="regular file"):
+        manifest_verifier._read_json(Path(os.devnull), 1024)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO is POSIX-only")
+def test_manifest_json_reader_rejects_fifo_without_blocking(tmp_path):
+    fifo = tmp_path / "manifest.fifo"
+    os.mkfifo(fifo)
+    script = """
+import sys
+from pathlib import Path
+from scripts.verify_design_ocr_smoke_manifest import ManifestBindingError, _read_json
+
+try:
+    _read_json(Path(sys.argv[1]), 65536)
+except ManifestBindingError as exc:
+    if "regular file" not in str(exc):
+        raise
+else:
+    raise AssertionError("FIFO was accepted as a manifest input")
+"""
+    subprocess.run(
+        [sys.executable, "-c", script, str(fifo)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
