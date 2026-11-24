@@ -189,6 +189,33 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         # This is a separately retained *local* digest, not an independent signer.
         verified = verify_bundle(evidence_path, digest)
         _check(verified["png_sha256"] == png_hash, "verified raster differs from submitted input")
+        # Invalidate only the synthetic design created by this smoke. An old
+        # evidence bundle remains offline-verifiable but must not be exportable
+        # again as current. This negative probe never invokes the OCR POST.
+        stage = "stale_revision_probe"
+        _request(
+            client,
+            "POST",
+            root + "/commands",
+            200,
+            json={
+                "command_id": "smoke-stale-" + uuid4().hex,
+                "expected_revision": revision,
+                "actor": "user",
+                "operations": [{"op": "set_text", "node_id": "title", "text": "已变更的合成标题"}],
+            },
+        )
+        raw, _ = _request(
+            client, "GET", f"{endpoint}/{operation_id}/evidence-bundle", 409, headers=export
+        )
+        _check(
+            _object(raw)["error"]["code"] == "REVISION_CONFLICT",
+            "stale revision was not explicitly rejected",
+        )
+        _json_file(
+            output / "stale-rejection.json", {"http_status": 409, "code": "REVISION_CONFLICT"}
+        )
+        stage = "retain_digest"
         with os.fdopen(os.open(anchor, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
             stream.write(digest + "\n")
         report = {
@@ -196,6 +223,7 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
             "status": "LOCAL_SMOKE_CONSISTENT_UNATTESTED",
             "execution_state": execution,
             "synthetic_asset": True,
+            "stale_revision_rejected": True,
             "independent_anchor_verified": False,
         }
         _json_file(output / "outcome.json", report)
