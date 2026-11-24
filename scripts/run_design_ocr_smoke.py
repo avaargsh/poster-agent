@@ -46,9 +46,7 @@ def _sha(value: object) -> bool:
 
 def _valid_approved_png(raw: bytes) -> bool:
     """Decode and bound the server-supplied raster before an OCR side effect."""
-    if not 8 <= len(raw) <= _MAX_APPROVED_PNG_BYTES or not raw.startswith(
-        b"\x89PNG\r\n\x1a\n"
-    ):
+    if not 8 <= len(raw) <= _MAX_APPROVED_PNG_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return False
     try:
         with warnings.catch_warnings():
