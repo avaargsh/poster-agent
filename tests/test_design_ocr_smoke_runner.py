@@ -126,7 +126,21 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
         output, anchor = _run(client, smoke_environment)
 
     outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
     journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
+    assert approval == {
+        "document_id": journal["document_id"],
+        "revision": journal["revision"],
+        "approval_id": journal["approval_id"],
+        "spec_digest": journal["spec_digest"],
+        "asset_manifest_digest": journal["asset_manifest_digest"],
+        "renderer_version": journal["renderer_version"],
+        "principal_id": "smoke-approver",
+        "policy_digest": approval["policy_digest"],
+        "replayed": False,
+    }
+    assert len(approval["policy_digest"]) == 64
+    assert approval["principal_id"] != journal["principal_id"]
     assert outcome["status"] == "LOCAL_SMOKE_CONSISTENT_UNATTESTED"
     assert outcome["execution_state"] == "EXECUTED"
     assert outcome["stale_revision_rejected"] is True
@@ -141,6 +155,9 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
     assert anchor.read_text(encoding="utf-8").strip() == outcome["bundle_sha256"]
     assert len(calls) == 1
     assert Path(output).stat().st_mode & 0o777 == 0o700
+    retained = b"".join(path.read_bytes() for path in output.iterdir() if path.is_file())
+    assert APPROVER.encode() not in retained
+    assert EXPORTER.encode() not in retained
 
 
 def test_smoke_maps_unavailable_engine_without_replay_or_success_digest(
