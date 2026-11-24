@@ -72,9 +72,9 @@ def _hash_regular_file(path: Path, *, expected: os.stat_result) -> str:
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             observed = os.fstat(stream.fileno())
-            if not stat.S_ISREG(observed.st_mode) or _file_identity(observed) != _file_identity(
-                expected
-            ):
+            if not stat.S_ISREG(observed.st_mode):
+                raise OCRModelProfileError("local model file changed during verification")
+            if _file_identity(observed) != _file_identity(expected):
                 raise OCRModelProfileError("local model file changed during verification")
             digest = hashlib.sha256()
             total = 0
