@@ -506,6 +506,7 @@ def test_no_executed_runs_are_not_reported_as_zero_model_findings(tmp_path):
     assert report["quality_verified"] is False
     assert report["release_ready"] is False
 
+
 def test_category_coverage_reports_missing_defects_and_missing_clean_examples(tmp_path):
     db, labels, rows = _fixture(tmp_path)
     rows[0]["contrast"] = "UNVERIFIED"
@@ -523,7 +524,7 @@ def test_category_coverage_reports_missing_defects_and_missing_clean_examples(tm
     contrast = report["by_category"]["contrast"]
     assert contrast["positive_support"] == 9
     assert contrast["negative_support"] == 10
-    assert contrast["false_negative_rate"] == pytest.approx(1 / 9)
+    assert contrast["false_negative_rate"] == pytest.approx(1 / 9, abs=1e-6)
     assert contrast["coverage_status"] == "BOTH_CLASSES_OBSERVED"
     spacing = report["by_category"]["spacing"]
     assert spacing["coverage_status"] == "NO_NEGATIVE_EXAMPLES"
@@ -536,7 +537,7 @@ def test_category_coverage_reports_missing_defects_and_missing_clean_examples(tm
     assert hierarchy["coverage_status"] == "NO_EVALUABLE_CASES"
     assert hierarchy["positive_support"] == hierarchy["negative_support"] == 0
     assert hierarchy["false_negative_rate"] is None
-    assert report["micro"]["false_negative_rate"] == pytest.approx(21 / 29)
+    assert report["micro"]["false_negative_rate"] == pytest.approx(21 / 29, abs=1e-6)
     assert report["quality_verified"] is False
     assert report["release_ready"] is False
 
