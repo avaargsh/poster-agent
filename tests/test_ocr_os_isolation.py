@@ -113,9 +113,7 @@ def test_rejects_non_loopback_network_interface(tmp_path):
 
 
 def test_rejects_ipv4_route_through_non_loopback_interface(tmp_path):
-    routes = _IPV4_ROUTES + (
-        "eth0 00000000 0100000A 0003 0 0 100 00000000 0 0 0\n"
-    )
+    routes = _IPV4_ROUTES + ("eth0 00000000 0100000A 0003 0 0 100 00000000 0 0 0\n")
     proc_root = _proc_fixture(tmp_path, ipv4_routes=routes)
 
     with pytest.raises(IsolationError):
@@ -123,9 +121,7 @@ def test_rejects_ipv4_route_through_non_loopback_interface(tmp_path):
 
 
 def test_rejects_ipv4_default_route_even_when_bound_to_loopback(tmp_path):
-    routes = _IPV4_ROUTES + (
-        "lo 00000000 00000000 0001 0 0 0 00000000 0 0 0\n"
-    )
+    routes = _IPV4_ROUTES + ("lo 00000000 00000000 0001 0 0 0 00000000 0 0 0\n")
     proc_root = _proc_fixture(tmp_path, ipv4_routes=routes)
 
     with pytest.raises(IsolationError):
@@ -157,9 +153,7 @@ def test_rejects_ipv6_default_route(tmp_path):
 
 
 def test_rejects_writable_detection_model_mount(tmp_path):
-    mountinfo = _MOUNTINFO.replace(
-        "/models/det ro,nosuid,nodev", "/models/det rw,nosuid,nodev"
-    )
+    mountinfo = _MOUNTINFO.replace("/models/det ro,nosuid,nodev", "/models/det rw,nosuid,nodev")
     proc_root = _proc_fixture(tmp_path, mountinfo=mountinfo)
 
     with pytest.raises(IsolationError):
@@ -188,7 +182,7 @@ def test_rejects_non_loopback_or_multiworker_server_command(tmp_path, option, va
 
 
 def test_rejects_server_without_explicit_single_worker_flag(tmp_path):
-    tokens = [token for token in _CMDLINE.rstrip(b"\0").split(b"\0") if token != b"--workers" and token != b"1"]
+    tokens = [\n        token\n        for token in _CMDLINE.rstrip(b"\\0").split(b"\\0")\n        if token != b"--workers" and token != b"1"\n    ]
     proc_root = _proc_fixture(tmp_path, cmdline=b"\0".join(tokens) + b"\0")
 
     with pytest.raises(IsolationError):
