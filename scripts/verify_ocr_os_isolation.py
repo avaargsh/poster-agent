@@ -229,8 +229,7 @@ def _model_profile(environment: bytes, detection_path: str, recognition_path: st
     configured_detection = _canonical_model_path(profile["text_detection_model_dir"])
     configured_recognition = _canonical_model_path(profile["text_recognition_model_dir"])
     _require(
-        configured_detection == detection_path
-        and configured_recognition == recognition_path,
+        configured_detection == detection_path and configured_recognition == recognition_path,
         "model paths do not match the server environment",
     )
     detection_sha = profile["text_detection_sha256"]
