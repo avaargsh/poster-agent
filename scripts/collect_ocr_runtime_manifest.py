@@ -63,9 +63,8 @@ def _font_identity(path: Path) -> dict:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as stream:
         before = os.fstat(stream.fileno())
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or _font_file_identity(before) != _font_file_identity(initial)
+        if not stat.S_ISREG(before.st_mode) or _font_file_identity(before) != _font_file_identity(
+            initial
         ):
             raise ManifestError("font changed before measurement")
         data = stream.read(_MAX_FONT_BYTES + 1)
