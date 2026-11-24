@@ -147,6 +147,20 @@ def compare_journaled_ocr_run(
         height=raster.height,
         spatial_source_sha256=spatial["spatial_source_sha256"],
     )
+    # The expensive raster/layout work must not turn an earlier model or
+    # journal snapshot into a claim about the current source. Recheck both
+    # before the last authoritative design read; never rerun the OCR engine.
+    if load_model_profile(model_config_raw) != model_profile:
+        raise OCRSourceMismatch()
+    current_row = OCRRunJournal(repository).get(
+        document_id,
+        revision,
+        operation_id,
+        principal=principal,
+        policy=policy,
+    )
+    if current_row != row:
+        raise OCRSourceMismatch()
     if repository.ocr_target(document_id, revision, required_policy_digest=policy) != target:
         raise OCRSourceMismatch()
 
