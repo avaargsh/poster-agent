@@ -1528,7 +1528,8 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
 
 
 @pytest.mark.parametrize(
-    "mutation", ["invalid_png", "wrong_media_type", "png_signature_only", "truncated_png"]
+    "mutation",
+    ["invalid_png", "wrong_media_type", "png_signature_only", "truncated_png", "oversized_png"],
 )
 def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
     ocr_paths, tmp_path, monkeypatch, mutation
@@ -1561,6 +1562,10 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
                     body = b"\x89PNG\r\n\x1a\n" + b"forged"
                 elif mutation == "truncated_png":
                     body = body[:24]
+                elif mutation == "oversized_png":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (4097, 64), "white").save(image_bytes, format="PNG")
+                    body = image_bytes.getvalue()
                 else:
                     headers["content-type"] = "application/octet-stream"
                 if mutation != "wrong_media_type":
