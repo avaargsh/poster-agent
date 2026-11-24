@@ -33,7 +33,7 @@ _NET_DEV = (
 )
 _IPV4_ROUTES = (
     "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
-    "lo 0000007F 00000000 00000003 0 0 0 000000FF 0 0 0\n"
+    "lo 0000007F 00000000 0003 0 0 0 000000FF 0 0 0\n"
 )
 _IPV6_ROUTES = (
     "00000000000000000000000000000001 80 "
