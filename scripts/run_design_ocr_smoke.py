@@ -173,7 +173,43 @@ def run_smoke(
             "spec_digest": target["spec_digest"],
             "asset_manifest_digest": target["asset_manifest_digest"],
         }
-        _request(client, "POST", root + "/approvals", 201, json=approval, headers=approve)
+        raw, _ = _request(
+            client, "POST", root + "/approvals", 201, json=approval, headers=approve
+        )
+        approval_result = _object(raw)
+        approver_principal = approval_result.get("principal_id")
+        approval_policy = approval_result.get("policy_digest")
+        renderer_version = approval_result.get("renderer_version")
+        _check(
+            approval_result.get("document_id") == doc
+            and type(approval_result.get("revision")) is int
+            and approval_result.get("revision") == revision
+            and approval_result.get("approval_id") == approval_id
+            and approval_result.get("spec_digest") == approval["spec_digest"]
+            and approval_result.get("asset_manifest_digest")
+            == approval["asset_manifest_digest"]
+            and isinstance(renderer_version, str)
+            and 0 < len(renderer_version) <= 128
+            and isinstance(approver_principal, str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approver_principal) is not None
+            and _sha(approval_policy)
+            and approval_result.get("replayed") is False,
+            "approval attribution or identity mismatch",
+        )
+        _json_file(
+            output / "approval.json",
+            {
+                "document_id": doc,
+                "revision": revision,
+                "approval_id": approval_id,
+                "spec_digest": approval["spec_digest"],
+                "asset_manifest_digest": approval["asset_manifest_digest"],
+                "renderer_version": renderer_version,
+                "principal_id": approver_principal,
+                "policy_digest": approval_policy,
+                "replayed": False,
+            },
+        )
         stage = "raster"
         revision_root = f"{root}/revisions/{revision}"
         png, headers = _request(client, "GET", revision_root + "/approved.png", 200, headers=export)
@@ -221,8 +257,11 @@ def run_smoke(
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False
+            and isinstance(journal.get("principal_id"), str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", journal["principal_id"]) is not None
+            and journal["principal_id"] != approver_principal
             and _no_authority(journal),
-            "operation identity or authority mismatch",
+            "operation identity, reviewer separation or authority mismatch",
         )
         status = journal.get("status")
         _check(status in ("EXECUTED", "UNKNOWN", "UNAVAILABLE", "FAILED"), "invalid terminal state")
