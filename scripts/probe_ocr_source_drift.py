@@ -97,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ.get("POSTER_SMOKE_EXPORTER_TOKEN", ""),
                 args.drift,
             )
-        with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
+        with os.fdopen(
+            os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w"
+        ) as stream:
             json.dump(result, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.write("\n")
     except (SmokeError, OSError):
