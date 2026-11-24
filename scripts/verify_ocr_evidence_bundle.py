@@ -20,6 +20,7 @@ from PIL import Image
 
 from app.designs.errors import DesignError
 from app.designs.models import MAX_ASSET_PIXELS, PAGE_MAX_SIZE
+from app.designs.ocr_layout_hints import _intersection_fraction
 from app.designs.ocr_observations import OCRObservationRequest, assess_unattested
 from app.designs.ocr_runs import _decode_observations, _decode_runtime
 from app.designs.ocr_spatial_evidence import assess_spatial_evidence
@@ -132,6 +133,63 @@ def _check_png(encoded: object, canvas: dict, journal: dict) -> None:
         image.load()
 
 
+def _check_layout_claims(layout: dict, spatial: dict, canvas: dict) -> None:
+    """Recompute consistency of supplied rectangles, not their design provenance."""
+    findings = layout["design_node_overlap_checks"]
+    spatial_checks = spatial["spatial_field_checks"]
+    width, height = canvas["width"], canvas["height"]
+    for finding, observed in zip(findings, spatial_checks, strict=True):
+        _require(
+            isinstance(finding, dict)
+            and set(finding)
+            == {"field", "status", "node_id", "node_rect", "ocr_bbox", "overlap_fraction"}
+            and finding["field"] == observed["field"]
+            and _canonical(finding["ocr_bbox"]) == _canonical(observed["bbox"]),
+            "layout finding does not match spatial evidence",
+        )
+        node_id, rect = finding["node_id"], finding["node_rect"]
+        status, fraction = finding["status"], finding["overlap_fraction"]
+        if node_id is None:
+            _require(
+                rect is None and status == "NO_VISIBLE_TEXT_NODE" and fraction is None,
+                "invalid missing node claim",
+            )
+            continue
+        _require(isinstance(node_id, str) and 0 < len(node_id) <= 128, "invalid node identity")
+        if rect is None:
+            _require(
+                status == "UNSUPPORTED_NODE_GEOMETRY" and fraction is None,
+                "invalid unsupported geometry claim",
+            )
+            continue
+        _require(
+            isinstance(rect, list)
+            and len(rect) == 4
+            and all(type(value) in (int, float) for value in rect)
+            and 0 <= rect[0] < rect[2] <= width
+            and 0 <= rect[1] < rect[3] <= height,
+            "invalid node rectangle",
+        )
+        box = observed["bbox"]
+        if box is None:
+            _require(status == "NO_VALID_OCR_BOX" and fraction is None, "invalid missing box claim")
+            continue
+        expected_fraction = _intersection_fraction(box, rect)
+        expected_status = (
+            "OVERLAP_UNCALIBRATED" if expected_fraction > 0 else "OUTSIDE_DESIGN_NODE"
+        )
+        _require(
+            status == expected_status and _canonical(fraction) == _canonical(expected_fraction),
+            "layout overlap mismatch",
+        )
+    expected_state = (
+        "OVERLAP_ONLY_UNCALIBRATED"
+        if all(item["status"] == "OVERLAP_UNCALIBRATED" for item in findings)
+        else "BLOCKED"
+    )
+    _require(layout["design_node_overlap_status"] == expected_state, "layout status mismatch")
+
+
 def _verify(bundle: dict, expected_sha256: str) -> dict:
     _require(isinstance(bundle, dict) and set(bundle) == _BUNDLE_KEYS, "invalid bundle fields")
     _require(
@@ -235,7 +293,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         lines, compared["field_checks"], width=width, height=height, source_binding=source_binding
     )
     # The design document itself is not exported. Verify the layout claim's
-    # content fingerprint, not its underlying node geometry.
+    # content fingerprint and internal rectangle math, not design provenance.
     layout = {
         key: report[key]
         for key in (
@@ -253,6 +311,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
         and len(layout["design_node_overlap_checks"]) == 3,
         "invalid layout claim",
     )
+    _check_layout_claims(layout, spatial, canvas)
     _require(
         layout["design_node_overlap_fingerprint_sha256"]
         == _digest(
