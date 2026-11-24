@@ -14,6 +14,7 @@ def _saved_request():
     source = {
         "document_id": "design-1",
         "revision": 1,
+        "expected_revision": 1,
         "approval_id": "approval-1",
         "spec_digest": "d" * 64,
         "asset_manifest_digest": "e" * 64,
@@ -91,13 +92,19 @@ def test_reconcile_refuses_untrusted_or_missing_journal(failure):
     assert seen == ["GET"]
 
 
-@pytest.mark.parametrize("invalid", ["operation", "revision", "outcome"])
+@pytest.mark.parametrize(
+    "invalid", ["operation", "revision", "outcome", "missing_approval_revision", "approval_revision"]
+)
 def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
     source, request, outcome, _ = _saved_request()
     if invalid == "operation":
         request["operation_id"] = "../other"
     elif invalid == "revision":
         source["revision"] = True
+    elif invalid == "missing_approval_revision":
+        del source["expected_revision"]
+    elif invalid == "approval_revision":
+        source["expected_revision"] = 2
     else:
         outcome["operation_id"] = "ocr_" + "f" * 32
 
