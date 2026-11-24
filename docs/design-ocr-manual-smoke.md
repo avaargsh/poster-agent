@@ -40,6 +40,12 @@ payload), and enforces the server's 24 MiB, 4096px dimension and
 8-million-pixel limits. A matching server-supplied digest or PNG signature
 alone is insufficient: truncated, animated, corrupt or appended raster bytes
 fail at the raster stage with NOT_SUBMITTED, and no OCR operation is sent.
+The approval response is retained as a whitelisted `approval.json`
+record containing the exact revision/digests, server-attributed approver,
+policy digest and replay state. The OCR journal must identify a different
+export principal. Raw bearer tokens and authorization headers are never
+written to the evidence directory.
+
 Only a successful, identity-bound EXECUTED response with observations,
 boxes and timing permits one exact-ID replay, followed by bundle export
 and local verifier replay. After successful verification, the client changes
