@@ -72,8 +72,49 @@ Use only disposable state and independently controlled copies of the
 sources for drift testing. Run the default stale-revision smoke separately
 if needed; never repeat an ambiguous operation.
 
+## Bind the environment manifest to the executed journal
+
+Run the manifest collector from the same locked Python environment and clean
+checkout that will start the isolated server. Set
+`POSTER_DESIGN_OCR_MODEL_CONFIG_JSON` to the exact pinned local model profile.
+Use one to eight absolute paths to the installed font files; the collector
+records their byte digests but does not prove which font CairoSVG selected.
+Write the manifest outside the checkout:
+
+```sh
+uv run --no-sync python -m scripts.collect_ocr_runtime_manifest \
+  --repo "$PWD" \
+  --font /absolute/path/to/selected-cjk-font.ttc \
+  --output /private/ocr-runtime-manifest.json
+```
+
+After a successful smoke, bind that manifest to the verified evidence bundle.
+Supply the checkout SHA observed by the operator before server startup and the
+bundle digest retained through the separate channel:
+
+```sh
+uv run --no-sync python -m scripts.verify_design_ocr_smoke_manifest \
+  --manifest /private/ocr-runtime-manifest.json \
+  --bundle /private/smoke-directory/evidence.json \
+  --expected-bundle-sha256 "$(cat /private/separate-digest-parent/bundle.sha256)" \
+  --expected-git-commit "$(git rev-parse HEAD)" \
+  --output /private/ocr-manifest-binding.json
+```
+
+The verifier requires exact agreement for the checkout assertion, model
+profile digest, Python version, machine, PaddleOCR/PaddlePaddle package
+versions, CairoSVG package presence and recorded font identities. A mismatch
+fails closed. Its report is still only local consistency: the operator-supplied
+commit is not proof of the server process image, package telemetry is not
+independent runtime attestation, font file hashes do not prove font selection,
+and neither this command nor the manifest proves OS-level egress denial.
+The report deliberately keeps `server_process_verified`,
+`font_selection_verified`, `egress_denied_verified`, `runtime_attested`,
+`quality_verified` and `release_ready` false.
+
 ## Remaining #57 work
 
-Record exact server commit/environment/font/model identity separately;
-prove isolated server startup and egress policy; execute the existing model/asset source-drift negative probes; execute the real pinned smoke. A 20-authorized-SKU
-human evaluation remains #14, and is not replaced by this client.
+Prove isolated server startup and OS-level egress policy; execute the existing
+model/asset source-drift negative probes; execute the real pinned smoke. A
+20-authorized-SKU human evaluation remains #14, and is not replaced by this
+client or the manifest binding report.
