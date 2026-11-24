@@ -1,5 +1,3 @@
-import copy
-
 import pytest
 
 from scripts.verify_design_ocr_smoke_manifest import (
