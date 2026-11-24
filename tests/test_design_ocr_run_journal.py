@@ -1538,6 +1538,9 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
 
     from scripts.run_design_ocr_smoke import SmokeError, run_smoke
 
+    # The rejection must happen before any provider call; never run a model
+    # even if the pre-fix path incorrectly reaches OCR submission.
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
     output = tmp_path / "invalid-raster-smoke"
     anchor = tmp_path / "invalid-raster-digest.txt"
     submitted = []
