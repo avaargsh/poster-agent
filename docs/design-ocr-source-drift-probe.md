@@ -7,9 +7,10 @@ It does not change model weights, assets, approval, or journal state.
 Before changing a source, capture an EXECUTED operation's evidence bundle
 and retain its canonical digest separately using the documented journal
 and evidence bundle endpoints. Keep the design at its approved revision.
-The manual smoke client currently advances the revision during its final
-stale-revision test, so capture a baseline using the explicit API steps
-before that transition, not an already stale design.
+Use the [manual smoke client](design-ocr-manual-smoke.md) with
+`--keep-approved` to retain the approved revision, evidence.json and separate
+digest from one OCR operation. The default smoke advances the revision;
+its already stale design cannot be used for this probe.
 
 An operator must create and document the intended drift independently in
 the disposable environment, without running another OCR request. Do not
