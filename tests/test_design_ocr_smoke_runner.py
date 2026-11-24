@@ -245,3 +245,30 @@ def test_smoke_ack_loss_preserves_unknown_and_never_reposts_operation(
     assert not (output / "journal.json").exists()
     assert not (output / "evidence.json").exists()
     assert not anchor.exists()
+
+
+def test_smoke_refuses_anonymous_approval_before_ocr_submission(smoke_environment, monkeypatch):
+    monkeypatch.delenv("POSTER_DESIGN_REVIEWERS_JSON")
+    calls = []
+
+    def recognize(path, **kwargs):
+        calls.append(path.read_bytes())
+        return _observations()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    output = smoke_environment / "private-evidence"
+    anchor = smoke_environment / "separate-anchor" / "bundle.sha256"
+    anchor.parent.mkdir()
+
+    with TestClient(app) as client, pytest.raises(smoke.SmokeError):
+        smoke.run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    assert outcome["status"] == "INCOMPLETE"
+    assert outcome["stage"] == "approve"
+    assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert not (output / "approval.json").exists()
+    assert not (output / "operation-request.json").exists()
+    assert not (output / "journal.json").exists()
+    assert calls == []
+    assert not anchor.exists()
