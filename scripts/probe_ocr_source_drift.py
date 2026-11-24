@@ -10,13 +10,15 @@ from pathlib import Path
 
 import httpx
 
-from scripts.run_design_ocr_smoke import _FLAGS, SmokeError, _check, _object, _request
+from scripts.run_design_ocr_smoke import SmokeError, _check, _object, _request
 from scripts.verify_ocr_evidence_bundle import _MAX_FILE_BYTES, _canonical, _verify
 
 _EXPECTED = {
     "model": (503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"),
     "asset": (409, "ASSET_INVALID"),
 }
+
+_FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 
 
 def probe_drift(client, baseline: bytes, expected_sha256: str, exporter: str, drift: str) -> dict:
