@@ -226,7 +226,9 @@ def run_smoke(
                     "command_id": "smoke-stale-" + uuid4().hex,
                     "expected_revision": revision,
                     "actor": "user",
-                    "operations": [{"op": "set_text", "node_id": "title", "text": "已变更的合成标题"}],
+                    "operations": [
+                        {"op": "set_text", "node_id": "title", "text": "已变更的合成标题"}
+                    ],
                 },
             )
             raw, _ = _request(
