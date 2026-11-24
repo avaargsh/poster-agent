@@ -265,6 +265,7 @@ def run_smoke(
             and journal.get("approval_id") == approval_id
             and journal.get("spec_digest") == approval["spec_digest"]
             and journal.get("asset_manifest_digest") == approval["asset_manifest_digest"]
+            and journal.get("renderer_version") == approval_evidence["renderer_version"]
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False

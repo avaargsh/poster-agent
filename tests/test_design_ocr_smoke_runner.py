@@ -272,3 +272,45 @@ def test_smoke_refuses_anonymous_approval_before_ocr_submission(smoke_environmen
     assert not (output / "journal.json").exists()
     assert calls == []
     assert not anchor.exists()
+
+
+def test_smoke_refuses_journal_renderer_version_mismatch_before_replay(
+    smoke_environment, monkeypatch
+):
+    calls = []
+    real_request = smoke._request
+
+    def recognize(path, **kwargs):
+        return _observations()
+
+    def mismatch_renderer(client, method, path, expected, **kwargs):
+        raw, headers = real_request(client, method, path, expected, **kwargs)
+        if method == "POST" and path.endswith("/ocr-runs"):
+            calls.append(path)
+            journal = json.loads(raw)
+            journal["renderer_version"] = "unexpected-rasterizer/999"
+            raw = json.dumps(journal).encode("utf-8")
+        return raw, headers
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    monkeypatch.setattr(smoke, "_request", mismatch_renderer)
+    output = smoke_environment / "private-evidence"
+    anchor = smoke_environment / "separate-anchor" / "bundle.sha256"
+    anchor.parent.mkdir()
+
+    with TestClient(app) as client, pytest.raises(smoke.SmokeError):
+        smoke.run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
+    journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
+    assert journal["renderer_version"] != approval["renderer_version"]
+    assert outcome["status"] == "INCOMPLETE"
+    assert outcome["stage"] == "submit"
+    assert outcome["execution_state"] == "UNKNOWN"
+    assert outcome["runtime_attested"] is False
+    assert outcome["quality_verified"] is False
+    assert outcome["release_ready"] is False
+    assert len(calls) == 1
+    assert not (output / "evidence.json").exists()
+    assert not anchor.exists()
