@@ -433,3 +433,52 @@ def test_calibration_rejects_state_inconsistent_journal_metadata(tmp_path, mutat
 
     with pytest.raises(CalibrationError):
         _eval(db, labels)
+
+
+def test_zero_findings_is_explicitly_not_a_pass(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE design_vlm_runs SET findings_json='[]'")
+
+    report = evaluate_shadow_cohort(db, labels)
+
+    assert report["model_findings_count"] == 0
+    assert report["signal_status"] == "NO_FINDINGS_NOT_A_PASS"
+    assert report["zero_findings_not_a_pass"] is True
+    assert report["quality_verified"] is False
+    assert report["release_ready"] is False
+
+
+def test_calibration_reports_unmetered_local_compute_cost_explicitly(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+
+    report = evaluate_shadow_cohort(db, labels)
+
+    assert report["cost"]["status"] == "LOCAL_COMPUTE_COST_NOT_METERED"
+    assert report["cost"]["resource_hourly_rate_usd"] is None
+    assert report["cost"]["estimated_total_usd"] is None
+    assert report["cost"]["estimated_per_executed_operation_usd"] is None
+    assert report["cost"]["executed_operation_count"] == 20
+    assert report["cost"]["scope"] == "EXECUTED_JOURNAL_WALL_TIME_ONLY"
+
+
+def test_calibration_estimates_cost_from_operator_supplied_resource_rate(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+
+    report = evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd="36")
+
+    assert report["cost"]["status"] == "OPERATOR_RATE_ESTIMATE"
+    assert report["cost"]["resource_hourly_rate_usd"] == "36"
+    assert report["cost"]["estimated_total_usd"] == "0.101900"
+    assert report["cost"]["estimated_per_executed_operation_usd"] == "0.005095"
+    assert report["cost"]["executed_operation_count"] == 20
+    assert report["cost"]["unresolved_operation_count"] == 0
+    assert "not provider billing" in report["cost"]["limitations"]
+
+
+@pytest.mark.parametrize("rate", ["-0.01", "NaN", "Infinity", "1000001"])
+def test_calibration_rejects_invalid_operator_resource_rate(tmp_path, rate):
+    db, labels, _ = _fixture(tmp_path)
+
+    with pytest.raises(CalibrationError):
+        evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
