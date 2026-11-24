@@ -81,6 +81,16 @@ def _fraction(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
 
 
+def _coverage_status(positive: int, negative: int) -> str:
+    if not positive and not negative:
+        return "NO_EVALUABLE_CASES"
+    if not positive:
+        return "NO_POSITIVE_EXAMPLES"
+    if not negative:
+        return "NO_NEGATIVE_EXAMPLES"
+    return "BOTH_CLASSES_OBSERVED"
+
+
 def _resource_hourly_rate(value: Decimal | str | None) -> Decimal | None:
     if value is None:
         return None
@@ -424,9 +434,13 @@ def evaluate_shadow_cohort(
                 )
             },
             "evaluable_denominator": tp + fp + fn + tn,
+            "positive_support": tp + fn,
+            "negative_support": fp + tn,
+            "coverage_status": _coverage_status(tp + fn, fp + tn),
             "precision": _fraction(tp, tp + fp),
             "recall": _fraction(tp, tp + fn),
             "false_positive_rate": _fraction(fp, fp + tn),
+            "false_negative_rate": _fraction(fn, tp + fn),
         }
 
     total = {
@@ -472,6 +486,7 @@ def evaluate_shadow_cohort(
             "precision": _fraction(total["tp"], total["tp"] + total["fp"]),
             "recall": _fraction(total["tp"], total["tp"] + total["fn"]),
             "false_positive_rate": _fraction(total["fp"], total["fp"] + total["tn"]),
+            "false_negative_rate": _fraction(total["fn"], total["tp"] + total["fn"]),
         },
         "wall_elapsed_ms": {
             "count": len(durations),
