@@ -80,7 +80,9 @@ def test_manifest_binds_checkout_model_and_runtime_to_executed_journal():
             "a" * 40,
         ),
         (
-            lambda manifest, journal: journal["runtime"].update(paddlepaddle_package_version="3.1.0"),
+            lambda manifest, journal: journal["runtime"].update(
+                paddlepaddle_package_version="3.1.0"
+            ),
             "a" * 40,
         ),
         (lambda manifest, journal: manifest.update(egress_denied_verified=True), "a" * 40),
