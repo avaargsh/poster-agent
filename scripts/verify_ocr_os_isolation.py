@@ -188,10 +188,7 @@ def _unescape_mount(value: str) -> str:
 def _canonical_model_path(value: str) -> str:
     path = PurePosixPath(value)
     _require(
-        path.is_absolute()
-        and value == path.as_posix()
-        and value != "/"
-        and ".." not in path.parts,
+        path.is_absolute() and value == path.as_posix() and value != "/" and ".." not in path.parts,
         "model directory must be an absolute canonical path",
     )
     return value
