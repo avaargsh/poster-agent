@@ -41,7 +41,7 @@ def _saved_request():
     return source, request, outcome, journal
 
 
-@pytest.mark.parametrize("status", ["EXECUTED", "UNKNOWN", "EXECUTING", "UNAVAILABLE"])
+@pytest.mark.parametrize("status", ["EXECUTED", "UNKNOWN", "EXECUTING", "UNAVAILABLE", "FAILED"])
 def test_reconcile_reads_only_original_operation(status):
     source, request, outcome, journal = _saved_request()
     journal["status"] = status
