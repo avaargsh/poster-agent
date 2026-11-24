@@ -414,3 +414,87 @@ def test_postflight_raster_drift_quarantines_local_shadow_result(
         assert replay.status_code == 200, replay.text
         assert replay.json()["status"] == "UNKNOWN"
         assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "executed_empty_started_at",
+        "executed_naive_started_at",
+        "executed_missing_finished_at",
+        "executed_non_monotonic_timestamps",
+        "executed_with_failure_reason",
+        "unknown_missing_reason",
+        "unknown_missing_finished_at",
+        "executing_with_stale_reason",
+        "executing_with_stale_finished_at",
+    ],
+)
+def test_vlm_journal_state_requires_consistent_terminal_metadata(
+    local_vlm, product_bytes, monkeypatch, mutation
+):
+    """Persisted state labels cannot outlive their required journal metadata."""
+    calls = []
+    monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
+    monkeypatch.setattr(
+        visual_runs, "inspect_approved_png", lambda png, profile: calls.append(1) or _findings()
+    )
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert created.json()["status"] == "EXECUTED"
+        assert len(calls) == 1
+
+        changes = {
+            "executed_empty_started_at": {"started_at": ""},
+            "executed_naive_started_at": {"started_at": "2026-11-24T12:00:00"},
+            "executed_missing_finished_at": {"finished_at": None},
+            "executed_non_monotonic_timestamps": {
+                "started_at": "2026-11-24T12:00:00+00:00",
+                "finished_at": "2026-11-24T11:59:59+00:00",
+            },
+            "executed_with_failure_reason": {"reason": "VLM_EXECUTION_AMBIGUOUS"},
+            "unknown_missing_reason": {
+                "status": "UNKNOWN",
+                "findings_json": None,
+                "runtime_json": None,
+                "reason": None,
+            },
+            "unknown_missing_finished_at": {
+                "status": "UNKNOWN",
+                "findings_json": None,
+                "runtime_json": None,
+                "reason": "VLM_EXECUTION_AMBIGUOUS",
+                "finished_at": None,
+            },
+            "executing_with_stale_reason": {
+                "status": "EXECUTING",
+                "findings_json": None,
+                "runtime_json": None,
+                "reason": "VLM_EXECUTION_AMBIGUOUS",
+                "finished_at": None,
+            },
+            "executing_with_stale_finished_at": {
+                "status": "EXECUTING",
+                "findings_json": None,
+                "runtime_json": None,
+                "reason": None,
+                "finished_at": created.json()["finished_at"],
+            },
+        }[mutation]
+        with sqlite3.connect(local_vlm) as db:
+            assignments = ", ".join(f"{column} = ?" for column in changes)
+            db.execute(
+                f"UPDATE design_vlm_runs SET {assignments} WHERE operation_id = ?",
+                (*changes.values(), payload["operation_id"]),
+            )
+
+        lookup = client.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert lookup.status_code == 409, lookup.text
+        assert lookup.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 409, replay.text
+        assert replay.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
+        assert len(calls) == 1

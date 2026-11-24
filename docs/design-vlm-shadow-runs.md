@@ -47,9 +47,13 @@ bounded, schema-valid QualityFinding array; runtime telemetry must retain the
 exact local, explicitly **unattested** schema. Duplicate/invalid JSON keys,
 malformed or oversized findings, fabricated approval fields, claimed runtime
 attestation and findings attached to `UNKNOWN`/`EXECUTING` all fail closed
-with `409 VLM_JOURNAL_CORRUPT`. A corrupt record must not become an empty
-`EXECUTED` result or trigger another model call. This validation cannot detect
-a self-consistent local database rewrite and is **not** cryptographic attestation.
+with `409 VLM_JOURNAL_CORRUPT`. Journal state metadata is checked as well:
+timestamps must be bounded, timezone-aware ISO values with finish not before
+start; `EXECUTING` has no terminal reason/time, `EXECUTED` has no failure
+reason, and `UNKNOWN` requires a bounded non-empty reason and finish time.
+A corrupt record must not become an empty `EXECUTED` result or trigger another
+model call. This validation cannot detect a self-consistent local database
+rewrite and is **not** cryptographic attestation.
 
 The SQLite journal, hashes, Ollama tags and adapter runtime fields are **local operator assertions**, not immutable third-party evidence, signed model execution or independently verified human judgment. This does not close OCR provenance Issue #14.
 
