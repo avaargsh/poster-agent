@@ -19,9 +19,7 @@ _EXPECTED = {
 }
 
 
-def probe_drift(
-    client, baseline: bytes, expected_sha256: str, exporter: str, drift: str
-) -> dict:
+def probe_drift(client, baseline: bytes, expected_sha256: str, exporter: str, drift: str) -> dict:
     """Read an existing journal and require explicit rejection of both artifacts."""
     try:
         _check(drift in _EXPECTED, "unsupported drift type")
@@ -99,9 +97,7 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ.get("POSTER_SMOKE_EXPORTER_TOKEN", ""),
                 args.drift,
             )
-        with os.fdopen(
-            os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w"
-        ) as stream:
+        with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
             json.dump(result, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.write("\n")
     except (SmokeError, OSError):
