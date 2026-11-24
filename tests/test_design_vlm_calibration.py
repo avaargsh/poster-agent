@@ -505,3 +505,57 @@ def test_no_executed_runs_are_not_reported_as_zero_model_findings(tmp_path):
     assert report["zero_findings_not_a_pass"] is False
     assert report["quality_verified"] is False
     assert report["release_ready"] is False
+
+
+def test_category_coverage_reports_missing_defects_and_missing_clean_examples(tmp_path):
+    db, labels, rows = _fixture(tmp_path)
+    rows[0]["contrast"] = "UNVERIFIED"
+    for row in rows:
+        row["spacing"] = "PRESENT"
+        row["visual_hierarchy"] = "UNVERIFIED"
+    _write_labels(labels, rows)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE design_vlm_runs SET findings_json='[]' WHERE operation_id=?",
+            (rows[2]["operation_id"],),
+        )
+
+    report = _eval(db, labels)
+    contrast = report["by_category"]["contrast"]
+    assert contrast["positive_support"] == 9
+    assert contrast["negative_support"] == 10
+    assert contrast["false_negative_rate"] == pytest.approx(1 / 9, abs=1e-6)
+    assert contrast["coverage_status"] == "BOTH_CLASSES_OBSERVED"
+    spacing = report["by_category"]["spacing"]
+    assert spacing["coverage_status"] == "NO_NEGATIVE_EXAMPLES"
+    assert spacing["false_negative_rate"] == 1.0
+    assert spacing["false_positive_rate"] is None
+    visibility = report["by_category"]["product_visibility"]
+    assert visibility["coverage_status"] == "NO_POSITIVE_EXAMPLES"
+    assert visibility["false_negative_rate"] is None
+    hierarchy = report["by_category"]["visual_hierarchy"]
+    assert hierarchy["coverage_status"] == "NO_EVALUABLE_CASES"
+    assert hierarchy["positive_support"] == hierarchy["negative_support"] == 0
+    assert hierarchy["false_negative_rate"] is None
+    assert report["micro"]["false_negative_rate"] == pytest.approx(21 / 29, abs=1e-6)
+    assert report["quality_verified"] is False
+    assert report["release_ready"] is False
+
+
+def test_unresolved_operations_do_not_supply_category_coverage(tmp_path):
+    db, labels, rows = _fixture(tmp_path, count=1)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE design_vlm_runs SET status='UNKNOWN', findings_json=NULL,"
+            " runtime_json=NULL, reason='RECOVERED_AFTER_RESTART',"
+            " finished_at='2026-11-15T00:00:01+00:00' WHERE operation_id=?",
+            (rows[0]["operation_id"],),
+        )
+
+    report = _eval(db, labels)
+    contrast = report["by_category"]["contrast"]
+    assert contrast["positive_support"] == 0
+    assert contrast["negative_support"] == 0
+    assert contrast["coverage_status"] == "NO_EVALUABLE_CASES"
+    assert contrast["false_negative_rate"] is None
+    assert report["micro"]["false_negative_rate"] is None
