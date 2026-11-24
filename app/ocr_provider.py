@@ -81,6 +81,11 @@ def _local_engine(detector_dir: str, recognizer_dir: str, profile_fingerprint: s
         raise OCRUnavailable("configured local PaddleOCR models could not initialize") from exc
 
 
+def invalidate_local_engine_cache() -> None:
+    """Discard pinned engines after drift; caller holds the design OCR execution lock."""
+    _local_engine.cache_clear()
+
+
 def _json_dict(result):
     data = getattr(result, "json", None)
     if callable(data):
