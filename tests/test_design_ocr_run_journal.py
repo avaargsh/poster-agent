@@ -1093,3 +1093,57 @@ def test_duplicate_model_profile_keys_are_rejected_before_operation_admission(
                 (payload["operation_id"],),
             ).fetchone()[0]
         assert count == 0
+
+
+@pytest.mark.parametrize(
+    "mutation", ["none", "png", "journal", "trust_flag", "report", "duplicate", "anchor"]
+)
+def test_offline_evidence_verifier_rechecks_bundle(
+    ocr_paths, product_bytes, monkeypatch, tmp_path, capsys, mutation
+):
+    from scripts.verify_ocr_evidence_bundle import main
+
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/evidence-bundle"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 200, response.text
+        bundle = response.json()
+
+    # A recomputed outer digest cannot conceal inconsistent internal fields.
+    if mutation == "png":
+        bundle["png_base64"] = "YWJj"
+    elif mutation == "journal":
+        bundle["journal"]["observations"][0]["text"] = "篡改标题"
+    elif mutation == "trust_flag":
+        bundle["comparison"]["quality_verified"] = True
+    elif mutation == "report":
+        bundle["comparison"]["field_checks"][0]["matched_line_index"] = 1
+
+    bundle.pop("bundle_sha256")
+    canonical = json.dumps(
+        bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    bundle["bundle_sha256"] = digest
+    raw = json.dumps(bundle, ensure_ascii=False)
+    if mutation == "duplicate":
+        raw = '{"schema_version":1,' + raw[1:]
+    path = tmp_path / "bundle.json"
+    path.write_text(raw, encoding="utf-8")
+    expected = "0" * 64 if mutation == "anchor" else digest
+    code = main(["--bundle", str(path), "--expected-sha256", expected])
+    captured = capsys.readouterr()
+    if mutation == "none":
+        assert code == 0
+        result = json.loads(captured.out)
+        assert result["status"] == "CONSISTENT_LOCAL_EVIDENCE_ONLY"
+        assert result["bundle_sha256"] == digest
+        assert result["runtime_attested"] is False
+        assert result["quality_verified"] is False
+        assert result["release_ready"] is False
+    else:
+        assert code == 2
+        assert captured.out == ""
