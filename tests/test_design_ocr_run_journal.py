@@ -1267,6 +1267,7 @@ def test_model_drift_invalidates_cached_engine_before_next_operation(
         "approval_identity",
         "approval_principal",
         "approval_policy",
+        "approval_policy_mismatch",
     ],
 )
 def test_offline_evidence_verifier_rechecks_bundle(
@@ -1303,6 +1304,10 @@ def test_offline_evidence_verifier_rechecks_bundle(
         bundle["approval"]["principal_id"] = bundle["journal"]["principal_id"]
     elif mutation == "approval_policy":
         bundle["approval"]["policy_digest"] = "invalid"
+    elif mutation == "approval_policy_mismatch":
+        bundle["approval"]["policy_digest"] = (
+            "0" * 64 if bundle["policy_digest"] != "0" * 64 else "1" * 64
+        )
     elif mutation.startswith("layout_"):
         report = bundle["comparison"]
         finding = report["design_node_overlap_checks"][0]
