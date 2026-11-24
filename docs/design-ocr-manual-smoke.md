@@ -42,8 +42,8 @@ alone is insufficient: truncated, animated, corrupt or appended raster bytes
 fail at the raster stage with NOT_SUBMITTED, and no OCR operation is sent.
 The approval response is retained as a whitelisted `approval.json`
 record containing the exact revision/digests, server-attributed approver,
-policy digest and replay state. The OCR journal must identify a different
-export principal. Raw bearer tokens and authorization headers are never
+policy digest and replay state. The OCR journal must retain the same revision
+and renderer version, and identify a different export principal. Raw bearer tokens and authorization headers are never
 written to the evidence directory.
 
 Only a successful, identity-bound EXECUTED response with observations,
