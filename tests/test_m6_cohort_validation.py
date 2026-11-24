@@ -1160,3 +1160,49 @@ def test_m6_operator_quality_cli_refuses_to_overwrite_existing_report_or_source(
                 str(reviews),
             ]
         )
+
+
+def _rebind_journal_after_raw_edit(bundle: dict) -> None:
+    """Keep fixture identities consistent so parser tests reach the JSON gate."""
+    cohort_id = "m6-" + _sha(bundle["journal"])[:12]
+    for row in bundle["registry_rows"]:
+        row["cohort_id"] = cohort_id
+    for row in bundle["review_rows"]:
+        row["cohort_id"] = cohort_id
+    _write_csv(bundle["registry"], REGISTRY_FIELDS, bundle["registry_rows"])
+    _write_csv(bundle["reviews"], REVIEW_FIELDS, bundle["review_rows"])
+    bundle["readiness_data"]["source_batch_journal_sha256"] = _sha(bundle["journal"])
+    bundle["readiness"].write_text(json.dumps(bundle["readiness_data"]), encoding="utf-8")
+
+
+@pytest.mark.parametrize("mutation", ["duplicate_key", "non_finite"])
+def test_m6_batch_journal_rejects_non_strict_json(tmp_path, monkeypatch, mutation):
+    bundle = _bundle(tmp_path, monkeypatch)
+    raw = bundle["journal"].read_text(encoding="utf-8")
+    if mutation == "duplicate_key":
+        marker = '"completed": true'
+        assert marker in raw
+        raw = raw.replace(marker, '"completed": false, "completed": true', 1)
+    else:
+        assert raw.rstrip().endswith("}")
+        raw = raw.rstrip()[:-1] + ', "operator_extension": {"score": NaN}}'
+    bundle["journal"].write_text(raw, encoding="utf-8")
+    _rebind_journal_after_raw_edit(bundle)
+
+    with pytest.raises(M6ValidationError, match="duplicate JSON key|non-finite JSON constant"):
+        _validate(bundle)
+
+
+@pytest.mark.parametrize("mutation", ["duplicate_nested_key", "non_finite"])
+def test_m6_readiness_rejects_non_strict_json(tmp_path, monkeypatch, mutation):
+    bundle = _bundle(tmp_path, monkeypatch)
+    raw = bundle["readiness"].read_text(encoding="utf-8").rstrip()
+    assert raw.endswith("}")
+    if mutation == "duplicate_nested_key":
+        raw = raw[:-1] + ',"operator_extension":{"mode":"deny","mode":"allow"}}'
+    else:
+        raw = raw[:-1] + ',"operator_extension":{"score":NaN}}'
+    bundle["readiness"].write_text(raw, encoding="utf-8")
+
+    with pytest.raises(M6ValidationError, match="duplicate JSON key|non-finite JSON constant"):
+        _validate(bundle)
