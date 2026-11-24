@@ -1351,7 +1351,7 @@ def test_offline_evidence_verifier_rechecks_bundle(
         result = json.loads(captured.out)
         assert result["status"] == "CONSISTENT_LOCAL_EVIDENCE_ONLY"
         assert result["bundle_sha256"] == digest
-        assert result["approval_attribution_verified"] is (mutation == "none")
+        assert result["approval_attribution_consistent"] is (mutation == "none")
         assert result["runtime_attested"] is False
         assert result["quality_verified"] is False
         assert result["release_ready"] is False
