@@ -308,7 +308,6 @@ def test_rejects_nested_detection_and_recognition_model_directories(tmp_path):
         )
 
 
-
 def test_rejects_uvicorn_name_embedded_in_unrelated_command(tmp_path):
     tokens = (
         b"python",
@@ -323,15 +322,15 @@ def test_rejects_uvicorn_name_embedded_in_unrelated_command(tmp_path):
         b"--workers",
         b"1",
     )
-    proc_root = _proc_fixture(tmp_path, cmdline=b"\\0".join(tokens) + b"\\0")
+    proc_root = _proc_fixture(tmp_path, cmdline=b"\0".join(tokens) + b"\0")
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
 
 
 def test_rejects_uvicorn_reload_mode(tmp_path):
-    tokens = _CMDLINE.rstrip(b"\\0").split(b"\\0") + [b"--reload"]
-    proc_root = _proc_fixture(tmp_path, cmdline=b"\\0".join(tokens) + b"\\0")
+    tokens = _CMDLINE.rstrip(b"\0").split(b"\0") + [b"--reload"]
+    proc_root = _proc_fixture(tmp_path, cmdline=b"\0".join(tokens) + b"\0")
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
