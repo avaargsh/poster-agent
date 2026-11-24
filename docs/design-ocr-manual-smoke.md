@@ -17,7 +17,13 @@ model mounts and outbound network denial outside the application.
 Use two distinct named approve/export reviewers. Supply their raw tokens
 through the private environment variables POSTER_SMOKE_APPROVER_TOKEN and
 POSTER_SMOKE_EXPORTER_TOKEN; do not put them in shell history, command-line
-arguments, GitHub or logs.
+arguments, GitHub or logs. The runner retains the server-returned approval
+identity and policy digest in the private `approval.json`, requires explicit
+attribution, and verifies that the OCR journal's exporter principal differs
+from the approver principal. An anonymous approval, missing policy digest,
+replayed approval or same-principal approval/export path fails before the
+runner reports a successful smoke. Raw bearer tokens are never written to
+the evidence directory.
 
 From the locked project environment, after #54–#56 are available:
 
