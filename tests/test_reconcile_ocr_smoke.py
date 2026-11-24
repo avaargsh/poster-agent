@@ -93,7 +93,8 @@ def test_reconcile_refuses_untrusted_or_missing_journal(failure):
 
 
 @pytest.mark.parametrize(
-    "invalid", ["operation", "revision", "outcome", "missing_approval_revision", "approval_revision"]
+    "invalid",
+    ["operation", "revision", "outcome", "missing_approval_revision", "approval_revision"],
 )
 def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
     source, request, outcome, _ = _saved_request()
