@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -259,3 +260,34 @@ else:
         text=True,
         timeout=10,
     )
+
+
+@pytest.mark.parametrize("selected", ("manifest", "bundle"))
+def test_manifest_binding_rejects_symlinked_manifest_and_bundle(tmp_path, monkeypatch, selected):
+    manifest, journal = _manifest_and_journal()
+    manifest_path = tmp_path / "manifest.json"
+    bundle_path = tmp_path / "bundle.json"
+    manifest_source = tmp_path / "manifest-source.json"
+    bundle_source = tmp_path / "bundle-source.json"
+    manifest_source.write_text(json.dumps(manifest), encoding="utf-8")
+    bundle_source.write_text(json.dumps({"journal": journal}), encoding="utf-8")
+    monkeypatch.setattr(
+        manifest_verifier,
+        "_verify",
+        lambda bundle, digest: {
+            "bundle_sha256": digest,
+            "status": "CONSISTENT_LOCAL_EVIDENCE_ONLY",
+        },
+    )
+
+    if selected == "manifest":
+        manifest_path.symlink_to(manifest_source)
+        bundle_path.write_bytes(bundle_source.read_bytes())
+    else:
+        manifest_path.write_bytes(manifest_source.read_bytes())
+        bundle_path.symlink_to(bundle_source)
+
+    with pytest.raises(ManifestBindingError, match="symlink"):
+        manifest_verifier.verify_smoke_files(
+            manifest_path, bundle_path, "f" * 64, "a" * 40
+        )
