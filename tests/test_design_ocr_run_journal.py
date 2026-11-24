@@ -1425,6 +1425,22 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
         assert request["operation_id"].startswith("ocr_")
         assert APPROVER not in (output / "outcome.json").read_text()
         assert EXPORTER not in (output / "outcome.json").read_text()
+        if outcome == "ack_loss":
+            from scripts.reconcile_ocr_smoke import reconcile
+
+            source = json.loads((output / "source.json").read_text())
+            original = (output / "outcome.json").read_bytes()
+            recovered = reconcile(client, source, request, report, EXPORTER)
+            assert recovered["observed_journal_status"] == "EXECUTED"
+            assert recovered["operation_id"] == request["operation_id"]
+            assert recovered["original_execution_state"] == "UNKNOWN"
+            assert recovered["retry_authorized"] is False
+            assert recovered["runtime_attested"] is False
+            assert recovered["quality_verified"] is False
+            assert recovered["release_ready"] is False
+            assert (output / "outcome.json").read_bytes() == original
+            assert not anchor.exists()
+            assert calls == [1]
 
 
 @pytest.mark.parametrize("drift", ["model", "asset", "none"])
