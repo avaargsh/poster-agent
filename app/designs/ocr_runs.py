@@ -26,7 +26,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.ocr_provider import OCRUnavailable, recognize
+from app.ocr_provider import OCRUnavailable, invalidate_local_engine_cache, recognize
 
 from .errors import (
     DesignError,
@@ -559,16 +559,34 @@ class OCRRunJournal:
 
 
 def _recognize_serialized(
-    image: Path, *, profile: LocalOCRModelProfile | None = None
+    image: Path,
+    *,
+    profile: LocalOCRModelProfile | None = None,
+    model_config_raw: str | None = None,
 ) -> list[dict]:
-    """Keep cached PaddleOCR single-flight; design runs use pinned dirs only."""
+    """Check the pinned model within the serialized inference boundary."""
     with _LOCAL_OCR_ENGINE_LOCK:
         if profile is None:
             return recognize(image)  # legacy/test adapter, not the design execution path
-        return recognize(
-            image,
-            model_dirs=(profile.detector_dir, profile.recognizer_dir, profile.fingerprint),
-        )
+        # Waiting for the engine lock can outlast a preflight model hash check.
+        # Verify after acquisition and before releasing the lock so another
+        # request cannot hide ordinary drift between the check and inference.
+        try:
+            if load_model_profile(model_config_raw) != profile:
+                raise OCRModelProfileError("local OCR model profile changed before inference")
+            try:
+                return recognize(
+                    image,
+                    model_dirs=(profile.detector_dir, profile.recognizer_dir, profile.fingerprint),
+                )
+            finally:
+                if load_model_profile(model_config_raw) != profile:
+                    raise OCRModelProfileError("local OCR model profile changed during inference")
+        except OCRModelProfileError:
+            # Restoring the pinned files does not restore already-loaded weights.
+            # Evict before unlocking so the next operation cannot reuse this engine.
+            invalidate_local_engine_cache()
+            raise
 
 
 def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[list[dict], dict]:
@@ -669,14 +687,10 @@ def submit_ocr_run(
         with TemporaryDirectory(prefix="poster-design-ocr-") as folder:
             image = Path(folder) / "approved.png"
             image.write_bytes(raster.png)
-            if load_model_profile(model_config_raw) != profile:
-                raise OCRModelProfileError("local OCR model profile changed before inference")
-            rows = _recognize_serialized(image, profile=profile)
+            rows = _recognize_serialized(image, profile=profile, model_config_raw=model_config_raw)
             observations, runtime = _capture_model_output(
                 rows, width=raster.width, height=raster.height
             )
-            if load_model_profile(model_config_raw) != profile:
-                raise OCRModelProfileError("local OCR model profile changed during inference")
     except OCRModelProfileError:
         result = journal.finish(
             payload.operation_id, status="UNKNOWN", reason="MODEL_PROFILE_CHANGED"
