@@ -7,9 +7,10 @@ image origin. Never broaden the cohort if a row is invalid or missing.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
+
+from app.strict_json import loads_strict_json
 
 SCHEMA = "m5g-1"
 ID = re.compile(r"^[0-9a-f]{32}$")
@@ -25,9 +26,9 @@ def load_batch_scope(journal: Path) -> dict:
     if not 0 < len(raw) <= MAX_JOURNAL_BYTES:
         raise ValueError("M5g 导入结果文件为空或超过 200 KB")
     try:
-        data = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("M5g 导入结果不是合法 UTF-8 JSON") from exc
+        data = loads_strict_json(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(f"M5g 导入结果不是严格合法 UTF-8 JSON：{exc}") from exc
     if (
         not isinstance(data, dict)
         or data.get("schema_version") != SCHEMA

@@ -23,6 +23,7 @@ from PIL import Image
 
 from app import storage
 from app.batch_artifact_integrity import BatchArtifactIntegrityError, verify_batch_artifact
+from app.strict_json import loads_strict_json
 from evals.native_batch_scope import load_batch_scope
 from scripts.real_sku_batch import BatchError, preflight
 from scripts.verify_m6_ocr_capture import OCRCaptureEvidenceError, verify_ocr_capture
@@ -149,9 +150,9 @@ def _read_json(path: Path, label: str) -> tuple[Path, dict, str]:
     if not raw or len(raw) > 2_000_000:
         raise M6ValidationError(f"{label} JSON 为空或超过 2 MB")
     try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise M6ValidationError(f"{label} 不是合法 UTF-8 JSON") from exc
+        value = loads_strict_json(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise M6ValidationError(f"{label} 不是严格合法 UTF-8 JSON：{exc}") from exc
     if not isinstance(value, dict):
         raise M6ValidationError(f"{label} 顶层必须是 JSON object")
     return path, value, _sha(raw)
