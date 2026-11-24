@@ -127,7 +127,13 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
 
     outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
     approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
+    evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
     journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
+    assert evidence["schema_version"] == 2
+    assert evidence["approval"]["principal_id"] == approval["principal_id"]
+    assert evidence["approval"]["policy_digest"] == approval["policy_digest"]
+    assert evidence["approval"]["approval_id"] == approval["approval_id"]
+    assert outcome["approval_attribution_verified"] is True
     assert approval == {
         "document_id": journal["document_id"],
         "revision": journal["revision"],
