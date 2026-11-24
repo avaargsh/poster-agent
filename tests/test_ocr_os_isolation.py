@@ -259,3 +259,50 @@ def test_rejects_malformed_ipv4_route_rows(tmp_path):
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
+
+def test_rejects_malformed_ipv4_route_address(tmp_path):
+    routes = _IPV4_ROUTES + "lo not-hex 00000000 0003 0 0 0 000000FF 0 0 0\n"
+    proc_root = _proc_fixture(tmp_path, ipv4_routes=routes)
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_malformed_ipv6_route_address(tmp_path):
+    routes = _IPV6_ROUTES + (
+        "not-hex 80 00000000000000000000000000000000 00 "
+        "00000000000000000000000000000000 00000000 00000000 00000000 00000001 lo\n"
+    )
+    proc_root = _proc_fixture(tmp_path, ipv6_routes=routes)
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_symlinked_model_directory(tmp_path):
+    proc_root = _proc_fixture(tmp_path)
+    process = proc_root / str(_PID)
+    model_dir = process / "root" / "models" / "det"
+    model_dir.rmdir()
+    (process / "root" / "models" / "alternate-det").mkdir()
+    model_dir.symlink_to(
+        process / "root" / "models" / "alternate-det",
+        target_is_directory=True,
+    )
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_nested_detection_and_recognition_model_directories(tmp_path):
+    proc_root = _proc_fixture(tmp_path)
+
+    with pytest.raises(IsolationError):
+        inspect_isolation(
+            proc_root,
+            _PID,
+            detection_model_dir="/models",
+            recognition_model_dir="/models/rec",
+        )
+
+
