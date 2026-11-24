@@ -1253,6 +1253,7 @@ def test_model_drift_invalidates_cached_engine_before_next_operation(
     "mutation",
     [
         "none",
+        "legacy_v1",
         "png",
         "journal",
         "trust_flag",
@@ -1283,7 +1284,10 @@ def test_offline_evidence_verifier_rechecks_bundle(
         bundle = response.json()
 
     # A recomputed outer digest cannot conceal inconsistent internal fields.
-    if mutation == "png":
+    if mutation == "legacy_v1":
+        bundle.pop("approval")
+        bundle["schema_version"] = 1
+    elif mutation == "png":
         bundle["png_base64"] = "YWJj"
     elif mutation == "journal":
         bundle["journal"]["observations"][0]["text"] = "篡改标题"
@@ -1336,18 +1340,18 @@ def test_offline_evidence_verifier_rechecks_bundle(
     bundle["bundle_sha256"] = digest
     raw = json.dumps(bundle, ensure_ascii=False)
     if mutation == "duplicate":
-        raw = '{"schema_version":2,' + raw[1:]
+        raw = '{"schema_version":' + str(bundle["schema_version"]) + "," + raw[1:]
     path = tmp_path / "bundle.json"
     path.write_text(raw, encoding="utf-8")
     expected = "0" * 64 if mutation == "anchor" else digest
     code = main(["--bundle", str(path), "--expected-sha256", expected])
     captured = capsys.readouterr()
-    if mutation == "none":
+    if mutation in ("none", "legacy_v1"):
         assert code == 0
         result = json.loads(captured.out)
         assert result["status"] == "CONSISTENT_LOCAL_EVIDENCE_ONLY"
         assert result["bundle_sha256"] == digest
-        assert result["approval_attribution_verified"] is True
+        assert result["approval_attribution_verified"] is (mutation == "none")
         assert result["runtime_attested"] is False
         assert result["quality_verified"] is False
         assert result["release_ready"] is False
