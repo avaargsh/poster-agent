@@ -681,9 +681,7 @@ def submit_ocr_run(
         with TemporaryDirectory(prefix="poster-design-ocr-") as folder:
             image = Path(folder) / "approved.png"
             image.write_bytes(raster.png)
-            rows = _recognize_serialized(
-                image, profile=profile, model_config_raw=model_config_raw
-            )
+            rows = _recognize_serialized(image, profile=profile, model_config_raw=model_config_raw)
             observations, runtime = _capture_model_output(
                 rows, width=raster.width, height=raster.height
             )
