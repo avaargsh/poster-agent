@@ -35,6 +35,12 @@ def _manifest_and_journal():
     }
     journal = {
         "operation_id": "ocr_" + "f" * 32,
+        "status": "EXECUTED",
+        "reason": None,
+        "replayed": False,
+        "runtime_attested": False,
+        "quality_verified": False,
+        "release_ready": False,
         "model_profile_sha256": "c" * 64,
         "runtime": {
             "source": "local_paddleocr_adapter",
@@ -58,7 +64,7 @@ def test_manifest_binds_checkout_model_and_runtime_to_executed_journal():
     assert report["operation_id"] == journal["operation_id"]
     assert report["model_profile_sha256"] == journal["model_profile_sha256"]
     assert report["runtime_package_versions_match"] is True
-    assert report["runtime_platform_match"] is True
+    assert report["runtime_python_and_machine_match"] is True
     assert report["font_identity_count"] == 1
     assert report["server_process_verified"] is False
     assert report["egress_denied_verified"] is False
@@ -138,3 +144,28 @@ def test_manifest_does_not_promote_operator_assertions_to_attestation():
             "release_ready",
         )
     )
+
+
+def test_manifest_accepts_gpu_paddle_distribution_when_runtime_matches():
+    manifest, journal = _manifest_and_journal()
+    manifest["packages"]["paddlepaddle-gpu"] = manifest["packages"].pop("paddlepaddle")
+
+    report = verify_manifest_binding(manifest, journal, "a" * 40)
+
+    assert report["runtime_package_versions_match"] is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("status", "UNKNOWN"),
+        ("replayed", True),
+        ("release_ready", True),
+    ],
+)
+def test_manifest_requires_initial_unattested_executed_journal(field, value):
+    manifest, journal = _manifest_and_journal()
+    journal[field] = value
+
+    with pytest.raises(ManifestBindingError):
+        verify_manifest_binding(manifest, journal, "a" * 40)
