@@ -33,6 +33,8 @@ def reconcile(client, source: dict, request: dict, outcome: dict, exporter: str)
             and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", doc) is not None
             and type(revision) is int
             and revision >= 1
+            and type(source["expected_revision"]) is int
+            and source["expected_revision"] == revision
             and isinstance(operation, str)
             and re.fullmatch(r"ocr_[0-9a-f]{32}", operation) is not None,
             "invalid saved identity",
