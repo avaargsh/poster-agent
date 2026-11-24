@@ -126,7 +126,21 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
         output, anchor = _run(client, smoke_environment)
 
     outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
     journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
+    assert approval == {
+        "document_id": journal["document_id"],
+        "revision": journal["revision"],
+        "approval_id": journal["approval_id"],
+        "spec_digest": journal["spec_digest"],
+        "asset_manifest_digest": journal["asset_manifest_digest"],
+        "renderer_version": journal["renderer_version"],
+        "principal_id": "smoke-approver",
+        "policy_digest": approval["policy_digest"],
+        "replayed": False,
+    }
+    assert len(approval["policy_digest"]) == 64
+    assert approval["principal_id"] != journal["principal_id"]
     assert outcome["status"] == "LOCAL_SMOKE_CONSISTENT_UNATTESTED"
     assert outcome["execution_state"] == "EXECUTED"
     assert outcome["stale_revision_rejected"] is True
@@ -141,6 +155,9 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
     assert anchor.read_text(encoding="utf-8").strip() == outcome["bundle_sha256"]
     assert len(calls) == 1
     assert Path(output).stat().st_mode & 0o777 == 0o700
+    retained = b"".join(path.read_bytes() for path in output.iterdir() if path.is_file())
+    assert APPROVER.encode() not in retained
+    assert EXPORTER.encode() not in retained
 
 
 def test_smoke_maps_unavailable_engine_without_replay_or_success_digest(
@@ -227,4 +244,31 @@ def test_smoke_ack_loss_preserves_unknown_and_never_reposts_operation(
     assert len(calls) == 1
     assert not (output / "journal.json").exists()
     assert not (output / "evidence.json").exists()
+    assert not anchor.exists()
+
+
+def test_smoke_refuses_anonymous_approval_before_ocr_submission(smoke_environment, monkeypatch):
+    monkeypatch.delenv("POSTER_DESIGN_REVIEWERS_JSON")
+    calls = []
+
+    def recognize(path, **kwargs):
+        calls.append(path.read_bytes())
+        return _observations()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    output = smoke_environment / "private-evidence"
+    anchor = smoke_environment / "separate-anchor" / "bundle.sha256"
+    anchor.parent.mkdir()
+
+    with TestClient(app) as client, pytest.raises(smoke.SmokeError):
+        smoke.run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    assert outcome["status"] == "INCOMPLETE"
+    assert outcome["stage"] == "approve"
+    assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert not (output / "approval.json").exists()
+    assert not (output / "operation-request.json").exists()
+    assert not (output / "journal.json").exists()
+    assert calls == []
     assert not anchor.exists()

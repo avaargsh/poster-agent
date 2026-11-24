@@ -173,7 +173,54 @@ def run_smoke(
             "spec_digest": target["spec_digest"],
             "asset_manifest_digest": target["asset_manifest_digest"],
         }
-        _request(client, "POST", root + "/approvals", 201, json=approval, headers=approve)
+        raw, _ = _request(client, "POST", root + "/approvals", 201, json=approval, headers=approve)
+        approval_response = _object(raw)
+        approval_keys = {
+            "document_id",
+            "revision",
+            "approval_id",
+            "spec_digest",
+            "asset_manifest_digest",
+            "renderer_version",
+            "principal_id",
+            "policy_digest",
+            "replayed",
+        }
+        _check(
+            set(approval_response) == approval_keys,
+            "approval response shape mismatch",
+        )
+        approval_evidence = {
+            key: approval_response[key]
+            for key in (
+                "document_id",
+                "revision",
+                "approval_id",
+                "spec_digest",
+                "asset_manifest_digest",
+                "renderer_version",
+                "principal_id",
+                "policy_digest",
+                "replayed",
+            )
+        }
+        _check(
+            approval_evidence["document_id"] == doc
+            and type(approval_evidence["revision"]) is int
+            and approval_evidence["revision"] == revision
+            and approval_evidence["approval_id"] == approval_id
+            and approval_evidence["spec_digest"] == approval["spec_digest"]
+            and approval_evidence["asset_manifest_digest"] == approval["asset_manifest_digest"]
+            and isinstance(target.get("renderer_version"), str)
+            and approval_evidence["renderer_version"] == target["renderer_version"]
+            and isinstance(approval_evidence["principal_id"], str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approval_evidence["principal_id"])
+            is not None
+            and _sha(approval_evidence["policy_digest"])
+            and approval_evidence["replayed"] is False,
+            "approval identity or policy mismatch",
+        )
+        _json_file(output / "approval.json", approval_evidence)
         stage = "raster"
         revision_root = f"{root}/revisions/{revision}"
         png, headers = _request(client, "GET", revision_root + "/approved.png", 200, headers=export)
@@ -221,8 +268,11 @@ def run_smoke(
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False
+            and isinstance(journal.get("principal_id"), str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", journal["principal_id"]) is not None
+            and journal["principal_id"] != approval_evidence["principal_id"]
             and _no_authority(journal),
-            "operation identity or authority mismatch",
+            "operation identity, reviewer separation or authority mismatch",
         )
         status = journal.get("status")
         _check(status in ("EXECUTED", "UNKNOWN", "UNAVAILABLE", "FAILED"), "invalid terminal state")
