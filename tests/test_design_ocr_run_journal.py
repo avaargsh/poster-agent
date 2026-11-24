@@ -1536,6 +1536,9 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
         "truncated_png",
         "corrupt_png_crc",
         "oversized_png",
+        "oversized_pixels",
+        "animated_png",
+        "trailing_png_data",
     ],
 )
 def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
@@ -1550,7 +1553,13 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
 
     # The rejection must happen before any provider call; never run a model
     # even if the pre-fix path incorrectly reaches OCR submission.
-    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    inference_calls = []
+
+    def recognize(image, **kwargs):
+        inference_calls.append(1)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
     output = tmp_path / "invalid-raster-smoke"
     anchor = tmp_path / "invalid-raster-digest.txt"
     submitted = []
@@ -1577,6 +1586,23 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
                     image_bytes = BytesIO()
                     Image.new("RGB", (4097, 64), "white").save(image_bytes, format="PNG")
                     body = image_bytes.getvalue()
+                elif mutation == "oversized_pixels":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (3000, 3000), "white").save(image_bytes, format="PNG")
+                    body = image_bytes.getvalue()
+                elif mutation == "animated_png":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (1024, 1024), "white").save(
+                        image_bytes,
+                        format="PNG",
+                        save_all=True,
+                        append_images=[Image.new("RGB", (1024, 1024), "black")],
+                        duration=100,
+                        loop=0,
+                    )
+                    body = image_bytes.getvalue()
+                elif mutation == "trailing_png_data":
+                    body += b"not-part-of-the-approved-png"
                 else:
                     headers["content-type"] = "application/octet-stream"
                 if mutation != "wrong_media_type":
@@ -1594,6 +1620,8 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
     assert outcome["status"] == "INCOMPLETE"
     assert outcome["stage"] == "raster"
     assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert not (output / "approved.png").exists()
     assert not (output / "operation-request.json").exists()
     assert not anchor.exists()
     assert submitted == []
+    assert inference_calls == []
