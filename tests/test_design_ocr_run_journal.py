@@ -1297,3 +1297,73 @@ def test_offline_evidence_verifier_rechecks_bundle(
     else:
         assert code == 2
         assert captured.out == ""
+
+
+@pytest.mark.parametrize("outcome", ["success", "unavailable", "ack_loss", "stale_accepted"])
+def test_manual_design_ocr_smoke_preserves_single_operation(
+    ocr_paths, tmp_path, monkeypatch, outcome
+):
+    import httpx
+
+    from scripts.run_design_ocr_smoke import SmokeError, run_smoke
+
+    calls = []
+
+    def recognize(image, **kwargs):
+        calls.append(1)
+        if outcome == "unavailable":
+            raise OCRUnavailable("synthetic unavailable")
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    output = tmp_path / "smoke"
+    anchor = tmp_path / "separate-digest.txt"
+    with TestClient(app) as client:
+        from contextlib import nullcontext
+
+        original_stream = client.stream
+        exported = []
+
+        def stream(method, url, **kwargs):
+            if method == "GET" and url.endswith("/evidence-bundle"):
+                exported.append(url)
+                if outcome == "stale_accepted" and len(exported) == 2:
+                    return nullcontext(httpx.Response(200, json={}))
+            if outcome == "ack_loss" and method == "POST" and url.endswith("/ocr-runs"):
+                # Commit the model operation, then simulate the response being lost.
+                client.post(url, **kwargs)
+                raise httpx.ReadTimeout("synthetic lost response")
+            return original_stream(method, url, **kwargs)
+
+        monkeypatch.setattr(client, "stream", stream)
+        if outcome == "success":
+            report = run_smoke(client, output, anchor, APPROVER, EXPORTER)
+            assert report["status"] == "LOCAL_SMOKE_CONSISTENT_UNATTESTED"
+            assert report["release_ready"] is False
+            assert report["stale_revision_rejected"] is True
+            assert len(exported) == 2
+            assert (output / "evidence.json").exists()
+            stale = json.loads((output / "stale-rejection.json").read_text())
+            assert stale == {"http_status": 409, "code": "REVISION_CONFLICT"}
+            assert anchor.read_text().strip() == report["bundle_sha256"]
+        else:
+            with pytest.raises(SmokeError):
+                run_smoke(client, output, anchor, APPROVER, EXPORTER)
+            report = json.loads((output / "outcome.json").read_text())
+            assert report["status"] == "INCOMPLETE"
+            assert (
+                report["execution_state"]
+                == {
+                    "ack_loss": "UNKNOWN",
+                    "unavailable": "UNAVAILABLE",
+                    "stale_accepted": "EXECUTED",
+                }[outcome]
+            )
+            if outcome == "stale_accepted":
+                assert report["stage"] == "stale_revision_probe"
+            assert not anchor.exists()
+        assert calls == [1]
+        request = json.loads((output / "operation-request.json").read_text())
+        assert request["operation_id"].startswith("ocr_")
+        assert APPROVER not in (output / "outcome.json").read_text()
+        assert EXPORTER not in (output / "outcome.json").read_text()
