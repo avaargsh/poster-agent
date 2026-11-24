@@ -16,8 +16,10 @@ from uuid import uuid4
 
 import httpx
 
+from app.designs.errors import DesignError
+from app.designs.ocr_runs import _decode_observations, _decode_runtime, _validate_runtime_timing
 from scripts.design_demo import _programmatic_product_png
-from scripts.verify_ocr_evidence_bundle import verify_bundle
+from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, verify_bundle
 
 _FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 _MAX_RESPONSE = 36 * 1024 * 1024
@@ -54,8 +56,10 @@ def _request(client, method: str, path: str, expected: int, **kwargs):
 
 
 def _object(raw: bytes) -> dict:
-    result = json.loads(raw)
+    result = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite)
     _check(isinstance(result, dict), "expected JSON object")
+    # Also reject overflowed exponent values and other non-canonical JSON values.
+    _canonical(result)
     return result
 
 
@@ -143,8 +147,11 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         _check(
             journal.get("operation_id") == operation_id
             and journal.get("document_id") == doc
+            and type(journal.get("revision")) is int
             and journal.get("revision") == revision
             and journal.get("approval_id") == approval_id
+            and journal.get("spec_digest") == approval["spec_digest"]
+            and journal.get("asset_manifest_digest") == approval["asset_manifest_digest"]
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False
@@ -153,28 +160,39 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         )
         status = journal.get("status")
         _check(status in ("EXECUTED", "UNKNOWN", "UNAVAILABLE", "FAILED"), "invalid terminal state")
-        execution = status
-        _check(execution == "EXECUTED", "OCR did not complete")
-        observations, runtime = journal["observations"], journal["runtime"]
+        if status != "EXECUTED":
+            execution = status
+            raise SmokeError("OCR did not complete")
         _check(
-            isinstance(observations, list)
-            and bool(observations)
-            and any(line.get("bbox") is not None for line in observations)
-            and isinstance(runtime, dict)
-            and runtime.get("attested") is False
-            and all(
-                runtime.get(key) is not None
-                for key in ("inference_started_at", "inference_finished_at", "inference_elapsed_ms")
-            ),
-            "missing smoke observations or timing",
+            _sha(journal.get("model_profile_sha256")) and journal.get("reason") is None,
+            "invalid executed journal identity",
         )
+        observations = _decode_observations(_canonical(journal["observations"]))
+        runtime = _decode_runtime(
+            _canonical(journal["runtime"]),
+            model_profile_sha256=journal["model_profile_sha256"],
+            observation_count=len(observations),
+        )
+        _check(
+            _canonical(observations) == _canonical(journal["observations"])
+            and _canonical(runtime) == _canonical(journal["runtime"])
+            and bool(observations)
+            and any(line["bbox"] is not None for line in observations)
+            and isinstance(runtime, dict),
+            "invalid smoke observations or runtime",
+        )
+        _validate_runtime_timing(runtime, required=True)
+        execution = "EXECUTED"
 
         # A successful run may be replayed once with the exact same key.
         # No replay is attempted after a lost or non-successful response.
         stage = "replay"
         raw, _ = _request(client, "POST", endpoint, 200, json=request, headers=export)
         replay = _object(raw)
-        _check(replay == {**journal, "replayed": True}, "idempotent replay mismatch")
+        _check(
+            _canonical(replay) == _canonical({**journal, "replayed": True}),
+            "idempotent replay mismatch",
+        )
         stage = "export"
         raw, _ = _request(
             client, "GET", f"{endpoint}/{operation_id}/evidence-bundle", 200, headers=export
@@ -182,7 +200,10 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         evidence = _object(raw)
         digest = evidence["bundle_sha256"]
         _check(_sha(digest), "invalid bundle digest")
-        _check(evidence["journal"] == journal, "exported journal differs from executed operation")
+        _check(
+            _canonical(evidence["journal"]) == _canonical(journal),
+            "exported journal differs from executed operation",
+        )
         evidence_path = output / "evidence.json"
         evidence_path.write_bytes(raw)
         stage = "verify"
@@ -228,7 +249,7 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         }
         _json_file(output / "outcome.json", report)
         return report
-    except (ValueError, OSError, KeyError, TypeError, httpx.HTTPError):
+    except (ValueError, OSError, KeyError, TypeError, RecursionError, DesignError, httpx.HTTPError):
         _json_file(
             output / "outcome.json",
             {
