@@ -1096,7 +1096,19 @@ def test_duplicate_model_profile_keys_are_rejected_before_operation_admission(
 
 
 @pytest.mark.parametrize(
-    "mutation", ["none", "png", "journal", "trust_flag", "report", "duplicate", "anchor"]
+    "mutation",
+    [
+        "none",
+        "png",
+        "journal",
+        "trust_flag",
+        "report",
+        "duplicate",
+        "anchor",
+        "layout_bbox",
+        "layout_fraction",
+        "layout_status",
+    ],
 )
 def test_offline_evidence_verifier_rechecks_bundle(
     ocr_paths, product_bytes, monkeypatch, tmp_path, capsys, mutation
@@ -1121,6 +1133,34 @@ def test_offline_evidence_verifier_rechecks_bundle(
         bundle["comparison"]["quality_verified"] = True
     elif mutation == "report":
         bundle["comparison"]["field_checks"][0]["matched_line_index"] = 1
+    elif mutation.startswith("layout_"):
+        report = bundle["comparison"]
+        finding = report["design_node_overlap_checks"][0]
+        if mutation == "layout_bbox":
+            finding["ocr_bbox"] = [1, 1, 2, 2]
+        elif mutation == "layout_fraction":
+            finding["overlap_fraction"] = 2.0
+        else:
+            report["design_node_overlap_status"] = (
+                "BLOCKED"
+                if report["design_node_overlap_status"] == "OVERLAP_ONLY_UNCALIBRATED"
+                else "OVERLAP_ONLY_UNCALIBRATED"
+            )
+        # Even an internally rehashed layout claim must obey geometry and
+        # agree with the recomputed spatial result.
+        layout_input = {
+            "schema_version": 1,
+            "spatial_source_sha256": report["spatial_source_sha256"],
+            "canvas": bundle["canvas"],
+            "design_node_overlap_status": report["design_node_overlap_status"],
+            "design_node_overlap_checks": report["design_node_overlap_checks"],
+        }
+        layout_json = json.dumps(
+            layout_input, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        report["design_node_overlap_fingerprint_sha256"] = hashlib.sha256(
+            layout_json.encode("utf-8")
+        ).hexdigest()
 
     bundle.pop("bundle_sha256")
     canonical = json.dumps(
