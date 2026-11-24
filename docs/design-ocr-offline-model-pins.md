@@ -63,6 +63,10 @@ regular files under the model directory. The scanner rejects symlinks,
 special files, empty trees, unreadable entries, more than 256 files, deep
 nesting, individual files larger than 2 GiB and bundles larger than 4 GiB.
 Those limits are a v1 local policy and must be reviewed for larger models.
+The scanner also compares device, inode, mode, size, mtime and ctime across
+file enumeration, descriptor open, read completion and final path lookup.
+Same-size replacement or observed in-place mutation is refused. This does not
+make the whole directory scan atomic or replace read-only model storage.
 
 The `model_profile_sha256` journal field hashes canonical JSON of the
 configured pinned profile (including both absolute paths and their
