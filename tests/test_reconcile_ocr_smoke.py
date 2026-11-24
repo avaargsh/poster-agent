@@ -41,8 +41,11 @@ def _saved_request():
 
 
 @pytest.mark.parametrize("status", ["EXECUTED", "UNKNOWN", "EXECUTING", "UNAVAILABLE", "FAILED"])
-def test_reconcile_reads_only_original_operation(status):
+@pytest.mark.parametrize("include_expected_revision", [False, True])
+def test_reconcile_reads_only_original_operation(status, include_expected_revision):
     source, request, outcome, journal = _saved_request()
+    if include_expected_revision:
+        source["expected_revision"] = source["revision"]
     journal["status"] = status
     seen = []
 
@@ -93,7 +96,7 @@ def test_reconcile_refuses_untrusted_or_missing_journal(failure):
 
 @pytest.mark.parametrize(
     "invalid",
-    ["operation", "revision", "outcome", "approval_revision"],
+    ["operation", "revision", "outcome", "approval_revision", "bool_approval_revision"],
 )
 def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
     source, request, outcome, _ = _saved_request()
@@ -103,6 +106,8 @@ def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
         source["revision"] = True
     elif invalid == "approval_revision":
         source["expected_revision"] = 2
+    elif invalid == "bool_approval_revision":
+        source["expected_revision"] = True
     else:
         outcome["operation_id"] = "ocr_" + "f" * 32
 
