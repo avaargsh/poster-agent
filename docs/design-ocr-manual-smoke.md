@@ -40,7 +40,13 @@ only the title of its newly created synthetic design and requires the old
 revision's export to return HTTP 409 REVISION_CONFLICT. It saves the rejection
 and retains the historic evidence digest only after that probe succeeds. No
 additional OCR invocation is made. Non-success or a lost submission response
-halts without retrying. Inspect outcome.json and the saved source/operation
+halts without retrying. Duplicate JSON keys, non-finite values and malformed
+observation entries are refused. Before replay, the client reuses bounded
+journal observation and runtime validators, requires exact typed revision
+identity and checks the approval spec and asset digests. Scores outside 0–1
+and invalid inference timings are refused. A malformed submission response retains
+UNKNOWN rather than recording successful execution; replay and bundle journal
+comparisons use canonical JSON to distinguish booleans from numbers. Inspect outcome.json and the saved source/operation
 request; reconcile the same operation through the journal status GET
 before deciding whether a new operation is warranted.
 

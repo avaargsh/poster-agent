@@ -1299,7 +1299,20 @@ def test_offline_evidence_verifier_rechecks_bundle(
         assert captured.out == ""
 
 
-@pytest.mark.parametrize("outcome", ["success", "unavailable", "ack_loss", "stale_accepted"])
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "success",
+        "unavailable",
+        "ack_loss",
+        "stale_accepted",
+        "malformed_line",
+        "duplicate_status",
+        "invalid_score",
+        "invalid_timing",
+        "bool_revision",
+    ],
+)
 def test_manual_design_ocr_smoke_preserves_single_operation(
     ocr_paths, tmp_path, monkeypatch, outcome
 ):
@@ -1307,6 +1320,13 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
 
     from scripts.run_design_ocr_smoke import SmokeError, run_smoke
 
+    malformed_outcomes = (
+        "malformed_line",
+        "duplicate_status",
+        "invalid_score",
+        "invalid_timing",
+        "bool_revision",
+    )
     calls = []
 
     def recognize(image, **kwargs):
@@ -1333,6 +1353,22 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                 # Commit the model operation, then simulate the response being lost.
                 client.post(url, **kwargs)
                 raise httpx.ReadTimeout("synthetic lost response")
+            if outcome in malformed_outcomes and method == "POST" and url.endswith("/ocr-runs"):
+                response = client.post(url, **kwargs)
+                assert response.status_code == 201
+                journal = response.json()
+                if outcome == "duplicate_status":
+                    raw = '{"status":"UNKNOWN",' + response.text[1:]
+                    return nullcontext(httpx.Response(201, content=raw))
+                if outcome == "malformed_line":
+                    journal["observations"] = [None]
+                elif outcome == "invalid_score":
+                    journal["observations"][0]["score"] = 2.0
+                elif outcome == "invalid_timing":
+                    journal["runtime"]["inference_elapsed_ms"] = -1
+                else:
+                    journal["revision"] = True
+                return nullcontext(httpx.Response(201, json=journal))
             return original_stream(method, url, **kwargs)
 
         monkeypatch.setattr(client, "stream", stream)
@@ -1357,10 +1393,18 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                     "ack_loss": "UNKNOWN",
                     "unavailable": "UNAVAILABLE",
                     "stale_accepted": "EXECUTED",
+                    "malformed_line": "UNKNOWN",
+                    "duplicate_status": "UNKNOWN",
+                    "invalid_score": "UNKNOWN",
+                    "invalid_timing": "UNKNOWN",
+                    "bool_revision": "UNKNOWN",
                 }[outcome]
             )
             if outcome == "stale_accepted":
                 assert report["stage"] == "stale_revision_probe"
+            if outcome in malformed_outcomes:
+                assert report["stage"] == "submit"
+                assert exported == []
             assert not anchor.exists()
         assert calls == [1]
         request = json.loads((output / "operation-request.json").read_text())
