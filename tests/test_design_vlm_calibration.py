@@ -17,8 +17,6 @@ from scripts.evaluate_design_vlm_shadow import (
 )
 
 MODEL_SHA = "d" * 64
-SVG_SHA = "a" * 64
-PNG_SHA = "b" * 64
 
 
 def _finding(category="contrast"):
@@ -55,8 +53,8 @@ def _fixture(tmp_path, count=20):
                 "document_id": f"doc-{i:02d}",
                 "revision": "1",
                 "approval_id": f"approval-{i}",
-                "svg_sha256": SVG_SHA,
-                "png_sha256": PNG_SHA,
+                "svg_sha256": hashlib.sha256(f"synthetic-svg-{i}".encode()).hexdigest(),
+                "png_sha256": hashlib.sha256(f"synthetic-png-{i}".encode()).hexdigest(),
                 "model_profile_sha256": MODEL_SHA,
                 "reviewer_alias": "reviewer-local",
                 "source_authorization": "DECLARED_AUTHORIZED",
@@ -82,8 +80,8 @@ def _fixture(tmp_path, count=20):
                     row["operation_id"],
                     row["document_id"],
                     row["approval_id"],
-                    SVG_SHA,
-                    PNG_SHA,
+                    row["svg_sha256"],
+                    row["png_sha256"],
                     MODEL_SHA,
                     "llava:latest",
                     json.dumps(findings),
@@ -559,3 +557,44 @@ def test_unresolved_operations_do_not_supply_category_coverage(tmp_path):
     assert contrast["coverage_status"] == "NO_EVALUABLE_CASES"
     assert contrast["false_negative_rate"] is None
     assert report["micro"]["false_negative_rate"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "error"),
+    [
+        ("png_sha256", "duplicate approved PNG"),
+        ("svg_sha256", "duplicate approved SVG"),
+        ("document_id", "duplicate document revision"),
+    ],
+)
+def test_distinct_sku_ids_cannot_reuse_approved_evidence(tmp_path, field, error):
+    db, labels, rows = _fixture(tmp_path)
+    # Keep the CSV and journal consistent: this is a cohort collision,
+    # not a mismatched journal join or duplicate SKU/operation identifier.
+    rows[1][field] = rows[0][field]
+    _write_labels(labels, rows)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            f"UPDATE design_vlm_runs SET {field}=? WHERE operation_id=?",
+            (rows[1][field], rows[1]["operation_id"]),
+        )
+
+    with pytest.raises(CalibrationError, match=error):
+        _eval(db, labels)
+
+
+def test_distinct_revisions_of_one_document_are_not_exact_duplicates(tmp_path):
+    db, labels, rows = _fixture(tmp_path, count=2)
+    rows[1]["document_id"] = rows[0]["document_id"]
+    rows[1]["revision"] = "2"
+    _write_labels(labels, rows)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE design_vlm_runs SET document_id=?, revision=2 WHERE operation_id=?",
+            (rows[1]["document_id"], rows[1]["operation_id"]),
+        )
+
+    report = _eval(db, labels)
+    assert report["sku_count"] == 2
+    assert report["status"] == "INSUFFICIENT_OPERATOR_CALIBRATION"
+    assert report["cohort_selection_independently_verified"] is False
