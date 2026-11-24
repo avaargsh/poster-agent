@@ -1,5 +1,11 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
+import scripts.verify_design_ocr_smoke_manifest as manifest_verifier
 from scripts.verify_design_ocr_smoke_manifest import (
     ManifestBindingError,
     verify_manifest_binding,
@@ -204,12 +210,6 @@ def test_manifest_rejects_missing_renderer_identity_on_both_sides():
 
 
 # File-path hardening: manifest and bundle inputs must be regular files.
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-import scripts.verify_design_ocr_smoke_manifest as manifest_verifier
 
 
 def test_manifest_json_reader_accepts_a_bounded_regular_file(tmp_path):
