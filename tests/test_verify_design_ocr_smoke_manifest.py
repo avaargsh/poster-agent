@@ -11,6 +11,7 @@ def _manifest_and_journal():
         "schema_version": 1,
         "evidence_kind": "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
         "git_commit": "a" * 40,
+        "renderer_version": "design-svg@1",
         "platform": {
             "system": "Linux",
             "release": "6.8.0",
@@ -35,6 +36,8 @@ def _manifest_and_journal():
     }
     journal = {
         "operation_id": "ocr_" + "f" * 32,
+        "renderer_version": "design-svg@1",
+        "rasterizer": "cairosvg/2.7.1",
         "status": "EXECUTED",
         "reason": None,
         "replayed": False,
@@ -63,6 +66,8 @@ def test_manifest_binds_checkout_model_and_runtime_to_executed_journal():
     assert report["git_commit"] == "a" * 40
     assert report["operation_id"] == journal["operation_id"]
     assert report["model_profile_sha256"] == journal["model_profile_sha256"]
+    assert report["renderer_version_match"] is True
+    assert report["rasterizer_match"] is True
     assert report["runtime_package_versions_match"] is True
     assert report["runtime_python_and_machine_match"] is True
     assert report["font_identity_count"] == 1
@@ -166,6 +171,24 @@ def test_manifest_accepts_gpu_paddle_distribution_when_runtime_matches():
 def test_manifest_requires_initial_unattested_executed_journal(field, value):
     manifest, journal = _manifest_and_journal()
     journal[field] = value
+
+    with pytest.raises(ManifestBindingError):
+        verify_manifest_binding(manifest, journal, "a" * 40)
+
+
+
+@pytest.mark.parametrize(
+    ("location", "field", "value"),
+    [
+        ("manifest", "renderer_version", "design-svg@2"),
+        ("journal", "renderer_version", "design-svg@2"),
+        ("journal", "rasterizer", "cairosvg/2.7.2"),
+    ],
+)
+def test_manifest_refuses_renderer_or_rasterizer_mismatch(location, field, value):
+    manifest, journal = _manifest_and_journal()
+    target = manifest if location == "manifest" else journal
+    target[field] = value
 
     with pytest.raises(ManifestBindingError):
         verify_manifest_binding(manifest, journal, "a" * 40)
