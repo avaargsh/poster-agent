@@ -13,6 +13,7 @@ import subprocess
 from importlib import metadata
 from pathlib import Path
 
+from app.designs.models import RENDERER_VERSION
 from app.designs.ocr_model_policy import OCRModelProfileError, load_model_profile
 
 _MAX_FONT_BYTES = 128 * 1024 * 1024
@@ -102,9 +103,10 @@ def collect_manifest(repo: Path, fonts: list[Path], raw_profile: str | None) -> 
         profile = load_model_profile(raw_profile)
         config = json.loads(raw_profile)
         result = {
-            "schema_version": 1,
+            "schema_version": 2,
             "evidence_kind": "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
             "git_commit": commit,
+            "renderer_version": RENDERER_VERSION,
             "platform": {
                 "system": platform.system(),
                 "release": platform.release(),
