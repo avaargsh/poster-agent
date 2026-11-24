@@ -88,16 +88,23 @@ uv run --no-sync python -m scripts.collect_ocr_runtime_manifest \
   --output /private/ocr-runtime-manifest.json
 ```
 
+Before starting the server, retain the exact checkout SHA outside the
+repository (the manifest collector independently requires a clean checkout):
+
+```sh
+git rev-parse HEAD > /private/server-checkout.sha
+```
+
 After a successful smoke, bind that manifest to the verified evidence bundle.
-Supply the checkout SHA observed by the operator before server startup and the
-bundle digest retained through the separate channel:
+Supply the previously retained checkout SHA and the bundle digest retained
+through the separate channel:
 
 ```sh
 uv run --no-sync python -m scripts.verify_design_ocr_smoke_manifest \
   --manifest /private/ocr-runtime-manifest.json \
   --bundle /private/smoke-directory/evidence.json \
   --expected-bundle-sha256 "$(cat /private/separate-digest-parent/bundle.sha256)" \
-  --expected-git-commit "$(git rev-parse HEAD)" \
+  --expected-git-commit "$(cat /private/server-checkout.sha)" \
   --output /private/ocr-manifest-binding.json
 ```
 
