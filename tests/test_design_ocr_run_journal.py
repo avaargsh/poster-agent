@@ -1527,7 +1527,9 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
         assert calls == [1]
 
 
-@pytest.mark.parametrize("mutation", ["invalid_png", "wrong_media_type"])
+@pytest.mark.parametrize(
+    "mutation", ["invalid_png", "wrong_media_type", "png_signature_only", "truncated_png"]
+)
 def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
     ocr_paths, tmp_path, monkeypatch, mutation
 ):
@@ -1555,9 +1557,14 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
                 body = raster.content
                 if mutation == "invalid_png":
                     body = b"not-a-png"
-                    headers["x-raster-png-sha256"] = hashlib.sha256(body).hexdigest()
+                elif mutation == "png_signature_only":
+                    body = b"\x89PNG\r\n\x1a\n" + b"forged"
+                elif mutation == "truncated_png":
+                    body = body[:24]
                 else:
                     headers["content-type"] = "application/octet-stream"
+                if mutation != "wrong_media_type":
+                    headers["x-raster-png-sha256"] = hashlib.sha256(body).hexdigest()
                 return nullcontext(httpx.Response(200, content=body, headers=headers))
             if method == "POST" and url.endswith("/ocr-runs"):
                 submitted.append(url)
