@@ -133,7 +133,7 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
     assert evidence["approval"]["principal_id"] == approval["principal_id"]
     assert evidence["approval"]["policy_digest"] == approval["policy_digest"]
     assert evidence["approval"]["approval_id"] == approval["approval_id"]
-    assert outcome["approval_attribution_verified"] is True
+    assert outcome["approval_attribution_consistent"] is True
     assert approval == {
         "document_id": journal["document_id"],
         "revision": journal["revision"],
