@@ -419,7 +419,7 @@ def test_postflight_raster_drift_quarantines_local_shadow_result(
 @pytest.mark.parametrize(
     "mutation",
     [
-        "executed_missing_started_at",
+        "executed_empty_started_at",
         "executed_naive_started_at",
         "executed_missing_finished_at",
         "executed_non_monotonic_timestamps",
@@ -447,7 +447,7 @@ def test_vlm_journal_state_requires_consistent_terminal_metadata(
         assert len(calls) == 1
 
         changes = {
-            "executed_missing_started_at": {"started_at": None},
+            "executed_empty_started_at": {"started_at": ""},
             "executed_naive_started_at": {"started_at": "2026-11-24T12:00:00"},
             "executed_missing_finished_at": {"finished_at": None},
             "executed_non_monotonic_timestamps": {
