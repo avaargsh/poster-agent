@@ -597,8 +597,6 @@ def test_ocr_evidence_bundle_exports_exact_pixels_and_unattested_receipt(
         assert len(calls) == 1
 
 
-
-
 def test_ocr_evidence_bundle_refuses_missing_approval_attribution(
     ocr_paths, product_bytes, monkeypatch
 ):
