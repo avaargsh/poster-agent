@@ -34,11 +34,12 @@ only numeric IPv4 loopback, disables proxies/redirects and transport retries,
 creates a programmatic synthetic product, approves one design, checks the
 approved raster's PNG media type, byte digest and complete decoded PNG content
 against its response headers, and persists the operation request only after
-these checks. The client verifies PNG structure and pixel decoding and enforces
-the server's 24 MiB, 4096px dimension and 8-million-pixel limits. A matching
-server-supplied digest or PNG signature alone is insufficient: truncated or
-undecodable raster bytes fail at the raster stage with NOT_SUBMITTED, and no
-OCR operation is sent.
+these checks. The client verifies PNG structure and pixel decoding, requires
+a single non-animated frame and IEND at the end of the response (no appended
+payload), and enforces the server's 24 MiB, 4096px dimension and
+8-million-pixel limits. A matching server-supplied digest or PNG signature
+alone is insufficient: truncated, animated, corrupt or appended raster bytes
+fail at the raster stage with NOT_SUBMITTED, and no OCR operation is sent.
 Only a successful, identity-bound EXECUTED response with observations,
 boxes and timing permits one exact-ID replay, followed by bundle export
 and local verifier replay. After successful verification, the client changes
