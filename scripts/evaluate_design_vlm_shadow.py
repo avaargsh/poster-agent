@@ -311,9 +311,7 @@ def _nearest_rank(values: list[int], fraction: float) -> int | None:
     return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)]
 
 
-def _cost_report(
-    rate: Decimal | None, durations: list[int], unresolved_count: int
-) -> dict:
+def _cost_report(rate: Decimal | None, durations: list[int], unresolved_count: int) -> dict:
     executed_count = len(durations)
     elapsed_ms = sum(durations)
     total_cost = None
