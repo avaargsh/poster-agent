@@ -155,7 +155,11 @@ against the separately supplied digest, and decodes and checks the bounded
 PNG bytes, dimensions and journal hash. It validates local journal fields,
 observations and runtime metadata, recomputes text comparison and spatial
 fingerprints using the bundled expected text, and checks the content
-fingerprint of the layout hints. It does not access SQLite or run OCR.
+fingerprint and internal consistency of the layout hints. The reported OCR
+box must equal the recomputed spatial box; node envelopes must be in bounds;
+overlap fractions, field outcomes and aggregate status must agree with the
+supplied geometry. This does not authenticate the supplied node envelopes.
+It does not access SQLite or run OCR.
 
 Exit 0 means `CONSISTENT_LOCAL_EVIDENCE_ONLY`; exit 2 means evidence was
 refused. The report does not echo OCR text, image bytes, or local paths.
