@@ -11,18 +11,24 @@ import hashlib
 import json
 import os
 import re
+import warnings
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from app.designs.errors import DesignError
+from app.designs.models import MAX_ASSET_PIXELS, PAGE_MAX_SIZE
 from app.designs.ocr_runs import _decode_observations, _decode_runtime, _validate_runtime_timing
 from scripts.design_demo import _programmatic_product_png
 from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, verify_bundle
 
 _FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 _MAX_RESPONSE = 36 * 1024 * 1024
+_MAX_APPROVED_PNG_BYTES = 24 * 1024 * 1024
+_MAX_PNG_CHUNKS = 4096
 _SHA = re.compile(r"[0-9a-f]{64}")
 
 
@@ -37,6 +43,59 @@ def _check(condition: bool, message: str) -> None:
 
 def _sha(value: object) -> bool:
     return isinstance(value, str) and _SHA.fullmatch(value) is not None
+
+
+def _terminal_png_iend(raw: bytes) -> bool:
+    """The first IEND must end the file; do not accept appended PNG payloads."""
+    offset = 8
+    for _ in range(_MAX_PNG_CHUNKS):
+        if len(raw) - offset < 12:
+            return False
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        kind = raw[offset + 4 : offset + 8]
+        end = offset + 12 + length
+        if end > len(raw) or kind in (b"acTL", b"fcTL", b"fdAT"):
+            return False
+        if kind == b"IEND":
+            return length == 0 and end == len(raw)
+        offset = end
+    return False
+
+
+def _valid_approved_png(raw: bytes) -> bool:
+    """Decode and bound the server-supplied raster before an OCR side effect."""
+    if not 8 <= len(raw) <= _MAX_APPROVED_PNG_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return False
+    if not _terminal_png_iend(raw):
+        return False
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(raw)) as image:
+                width, height = image.size
+                if (
+                    image.format != "PNG"
+                    or getattr(image, "is_animated", False)
+                    or getattr(image, "n_frames", 1) != 1
+                    or not 64 <= width <= PAGE_MAX_SIZE
+                    or not 64 <= height <= PAGE_MAX_SIZE
+                    or width * height > MAX_ASSET_PIXELS
+                ):
+                    return False
+                image.verify()
+            # verify() checks container structure; load() also decodes pixels.
+            with Image.open(BytesIO(raw)) as image:
+                image.load()
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        ValueError,
+    ):
+        return False
+    return True
 
 
 def _json_file(path: Path, data: dict) -> None:
@@ -123,7 +182,7 @@ def run_smoke(
         media_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
         _check(
             media_type == "image/png"
-            and png.startswith(b"\x89PNG\r\n\x1a\n")
+            and _valid_approved_png(png)
             and _sha(svg_hash)
             and _sha(png_hash)
             and hashlib.sha256(png).hexdigest() == png_hash,

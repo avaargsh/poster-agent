@@ -1527,7 +1527,21 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
         assert calls == [1]
 
 
-@pytest.mark.parametrize("mutation", ["invalid_png", "wrong_media_type"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "invalid_png",
+        "wrong_media_type",
+        "png_signature_only",
+        "truncated_png",
+        "corrupt_png_crc",
+        "oversized_png",
+        "oversized_pixels",
+        "animated_png",
+        "trailing_png_data",
+        "duplicate_iend",
+    ],
+)
 def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
     ocr_paths, tmp_path, monkeypatch, mutation
 ):
@@ -1540,7 +1554,13 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
 
     # The rejection must happen before any provider call; never run a model
     # even if the pre-fix path incorrectly reaches OCR submission.
-    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    inference_calls = []
+
+    def recognize(image, **kwargs):
+        inference_calls.append(1)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
     output = tmp_path / "invalid-raster-smoke"
     anchor = tmp_path / "invalid-raster-digest.txt"
     submitted = []
@@ -1555,9 +1575,41 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
                 body = raster.content
                 if mutation == "invalid_png":
                     body = b"not-a-png"
-                    headers["x-raster-png-sha256"] = hashlib.sha256(body).hexdigest()
+                elif mutation == "png_signature_only":
+                    body = b"\x89PNG\r\n\x1a\n" + b"forged"
+                elif mutation == "truncated_png":
+                    body = body[:24]
+                elif mutation == "corrupt_png_crc":
+                    tampered = bytearray(body)
+                    tampered[-16] ^= 0x01
+                    body = bytes(tampered)
+                elif mutation == "oversized_png":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (4097, 64), "white").save(image_bytes, format="PNG")
+                    body = image_bytes.getvalue()
+                elif mutation == "oversized_pixels":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (3000, 3000), "white").save(image_bytes, format="PNG")
+                    body = image_bytes.getvalue()
+                elif mutation == "animated_png":
+                    image_bytes = BytesIO()
+                    Image.new("RGB", (1024, 1024), "white").save(
+                        image_bytes,
+                        format="PNG",
+                        save_all=True,
+                        append_images=[Image.new("RGB", (1024, 1024), "black")],
+                        duration=100,
+                        loop=0,
+                    )
+                    body = image_bytes.getvalue()
+                elif mutation == "trailing_png_data":
+                    body += b"not-part-of-the-approved-png"
+                elif mutation == "duplicate_iend":
+                    body += bytes.fromhex("0000000049454e44ae426082")
                 else:
                     headers["content-type"] = "application/octet-stream"
+                if mutation != "wrong_media_type":
+                    headers["x-raster-png-sha256"] = hashlib.sha256(body).hexdigest()
                 return nullcontext(httpx.Response(200, content=body, headers=headers))
             if method == "POST" and url.endswith("/ocr-runs"):
                 submitted.append(url)
@@ -1571,6 +1623,8 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
     assert outcome["status"] == "INCOMPLETE"
     assert outcome["stage"] == "raster"
     assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert not (output / "approved.png").exists()
     assert not (output / "operation-request.json").exists()
     assert not anchor.exists()
     assert submitted == []
+    assert inference_calls == []
