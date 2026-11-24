@@ -10,7 +10,7 @@ from scripts.verify_ocr_os_isolation import IsolationError, inspect_isolation
 
 
 _PID = 4242
-_CMDLINE = b"\\0".join(
+_CMDLINE = b"\0".join(
     (
         b"python",
         b"-m",
@@ -23,7 +23,7 @@ _CMDLINE = b"\\0".join(
         b"--workers",
         b"1",
     )
-) + b"\\0"
+) + b"\0"
 _NET_DEV = (
     "Inter-| Receive | Transmit\n"
     " face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n"
@@ -182,7 +182,11 @@ def test_rejects_non_loopback_or_multiworker_server_command(tmp_path, option, va
 
 
 def test_rejects_server_without_explicit_single_worker_flag(tmp_path):
-    tokens = [\n        token\n        for token in _CMDLINE.rstrip(b"\\0").split(b"\\0")\n        if token != b"--workers" and token != b"1"\n    ]
+    tokens = [
+        token
+        for token in _CMDLINE.rstrip(b"\0").split(b"\0")
+        if token != b"--workers" and token != b"1"
+    ]
     proc_root = _proc_fixture(tmp_path, cmdline=b"\0".join(tokens) + b"\0")
 
     with pytest.raises(IsolationError):
