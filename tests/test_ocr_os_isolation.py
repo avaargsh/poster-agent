@@ -224,6 +224,7 @@ def test_rejects_duplicate_or_noncanonical_model_paths(tmp_path):
             recognition_model_dir="/models/rec",
         )
 
+
 def test_rejects_writable_nested_mount_inside_model_directory(tmp_path):
     mountinfo = _MOUNTINFO + (
         "33 25 0:30 / /models/det/weights rw,nosuid,nodev - ext4 /dev/loop2 rw\n"
@@ -259,6 +260,7 @@ def test_rejects_malformed_ipv4_route_rows(tmp_path):
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
+
 
 def test_rejects_malformed_ipv4_route_address(tmp_path):
     routes = _IPV4_ROUTES + "lo not-hex 00000000 0003 0 0 0 000000FF 0 0 0\n"
@@ -304,5 +306,3 @@ def test_rejects_nested_detection_and_recognition_model_directories(tmp_path):
             detection_model_dir="/models",
             recognition_model_dir="/models/rec",
         )
-
-
