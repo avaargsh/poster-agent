@@ -274,7 +274,6 @@ def test_smoke_refuses_anonymous_approval_before_ocr_submission(smoke_environmen
     assert not anchor.exists()
 
 
-
 def test_smoke_refuses_journal_renderer_version_mismatch_before_replay(
     smoke_environment, monkeypatch
 ):
