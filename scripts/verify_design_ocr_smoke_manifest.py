@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 
 from scripts.verify_ocr_evidence_bundle import (
-    EvidenceError,
     _MAX_FILE_BYTES,
+    EvidenceError,
     _canonical,
     _read_bounded_regular_file,
     _verify,
