@@ -531,8 +531,36 @@ def test_ocr_evidence_bundle_exports_exact_pixels_and_unattested_receipt(
         assert response.status_code == 200, response.text
         assert response.headers["cache-control"] == "no-store"
         bundle = response.json()
-        assert bundle["schema_version"] == 1
+        assert bundle["schema_version"] == 2
         assert bundle["evidence_kind"] == "LOCAL_OCR_UNATTESTED"
+        approval = bundle["approval"]
+        assert set(approval) == {
+            "document_id",
+            "revision",
+            "approval_id",
+            "spec_digest",
+            "asset_manifest_digest",
+            "renderer_version",
+            "principal_id",
+            "policy_digest",
+            "created_at",
+            "attributed_at",
+            "is_current_head",
+            "matches_current_snapshot",
+        }
+        assert approval["document_id"] == doc
+        assert approval["revision"] == 1
+        assert approval["approval_id"] == bundle["journal"]["approval_id"]
+        assert approval["spec_digest"] == bundle["journal"]["spec_digest"]
+        assert approval["asset_manifest_digest"] == bundle["journal"]["asset_manifest_digest"]
+        assert approval["renderer_version"] == bundle["journal"]["renderer_version"]
+        assert approval["principal_id"] == "approver"
+        assert approval["principal_id"] != bundle["journal"]["principal_id"]
+        assert len(approval["policy_digest"]) == 64
+        assert approval["created_at"]
+        assert approval["attributed_at"]
+        assert approval["is_current_head"] is True
+        assert approval["matches_current_snapshot"] is True
         png = base64.b64decode(bundle["png_base64"], validate=True)
         assert calls == [png]
         assert hashlib.sha256(png).hexdigest() == payload["png_sha256"]
@@ -567,6 +595,22 @@ def test_ocr_evidence_bundle_exports_exact_pixels_and_unattested_receipt(
         assert changed.status_code == 200, changed.text
         assert client.get(endpoint, headers=_headers()).status_code == 409
         assert len(calls) == 1
+
+
+def test_ocr_evidence_bundle_refuses_missing_approval_attribution(
+    ocr_paths, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        with sqlite3.connect(ocr_paths) as connection:
+            connection.execute(
+                "DELETE FROM design_approval_attributions WHERE document_id = ?", (doc,)
+            )
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/evidence-bundle"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 409, response.text
 
 
 def test_ocr_evidence_bundle_refuses_unknown_operation(ocr_paths, product_bytes, monkeypatch):
@@ -1209,6 +1253,7 @@ def test_model_drift_invalidates_cached_engine_before_next_operation(
     "mutation",
     [
         "none",
+        "legacy_v1",
         "png",
         "journal",
         "trust_flag",
@@ -1218,6 +1263,11 @@ def test_model_drift_invalidates_cached_engine_before_next_operation(
         "layout_bbox",
         "layout_fraction",
         "layout_status",
+        "approval_missing",
+        "approval_identity",
+        "approval_principal",
+        "approval_policy",
+        "approval_policy_mismatch",
     ],
 )
 def test_offline_evidence_verifier_rechecks_bundle(
@@ -1235,7 +1285,10 @@ def test_offline_evidence_verifier_rechecks_bundle(
         bundle = response.json()
 
     # A recomputed outer digest cannot conceal inconsistent internal fields.
-    if mutation == "png":
+    if mutation == "legacy_v1":
+        bundle.pop("approval")
+        bundle["schema_version"] = 1
+    elif mutation == "png":
         bundle["png_base64"] = "YWJj"
     elif mutation == "journal":
         bundle["journal"]["observations"][0]["text"] = "篡改标题"
@@ -1243,6 +1296,18 @@ def test_offline_evidence_verifier_rechecks_bundle(
         bundle["comparison"]["quality_verified"] = True
     elif mutation == "report":
         bundle["comparison"]["field_checks"][0]["matched_line_index"] = 1
+    elif mutation == "approval_missing":
+        bundle.pop("approval")
+    elif mutation == "approval_identity":
+        bundle["approval"]["revision"] += 1
+    elif mutation == "approval_principal":
+        bundle["approval"]["principal_id"] = bundle["journal"]["principal_id"]
+    elif mutation == "approval_policy":
+        bundle["approval"]["policy_digest"] = "invalid"
+    elif mutation == "approval_policy_mismatch":
+        bundle["approval"]["policy_digest"] = (
+            "0" * 64 if bundle["policy_digest"] != "0" * 64 else "1" * 64
+        )
     elif mutation.startswith("layout_"):
         report = bundle["comparison"]
         finding = report["design_node_overlap_checks"][0]
@@ -1280,17 +1345,18 @@ def test_offline_evidence_verifier_rechecks_bundle(
     bundle["bundle_sha256"] = digest
     raw = json.dumps(bundle, ensure_ascii=False)
     if mutation == "duplicate":
-        raw = '{"schema_version":1,' + raw[1:]
+        raw = '{"schema_version":' + str(bundle["schema_version"]) + "," + raw[1:]
     path = tmp_path / "bundle.json"
     path.write_text(raw, encoding="utf-8")
     expected = "0" * 64 if mutation == "anchor" else digest
     code = main(["--bundle", str(path), "--expected-sha256", expected])
     captured = capsys.readouterr()
-    if mutation == "none":
+    if mutation in ("none", "legacy_v1"):
         assert code == 0
         result = json.loads(captured.out)
         assert result["status"] == "CONSISTENT_LOCAL_EVIDENCE_ONLY"
         assert result["bundle_sha256"] == digest
+        assert result["approval_attribution_consistent"] is (mutation == "none")
         assert result["runtime_attested"] is False
         assert result["quality_verified"] is False
         assert result["release_ready"] is False
