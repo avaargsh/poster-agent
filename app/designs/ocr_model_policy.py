@@ -53,13 +53,28 @@ class LocalOCRModelProfile:
     fingerprint: str
 
 
-def _hash_regular_file(path: Path, *, expected_bytes: int) -> str:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    # Ignore atime: opening/reading an otherwise stable file can change it.
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _hash_regular_file(path: Path, *, expected: os.stat_result) -> str:
+    expected_bytes = expected.st_size
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             observed = os.fstat(stream.fileno())
-            if not stat.S_ISREG(observed.st_mode) or observed.st_size != expected_bytes:
+            if not stat.S_ISREG(observed.st_mode) or _file_identity(observed) != _file_identity(
+                expected
+            ):
                 raise OCRModelProfileError("local model file changed during verification")
             digest = hashlib.sha256()
             total = 0
@@ -68,7 +83,11 @@ def _hash_regular_file(path: Path, *, expected_bytes: int) -> str:
                 if total > expected_bytes:
                     raise OCRModelProfileError("local model file changed during verification")
                 digest.update(chunk)
-            if total != expected_bytes:
+            if (
+                total != expected_bytes
+                or _file_identity(os.fstat(stream.fileno())) != _file_identity(expected)
+                or _file_identity(path.lstat()) != _file_identity(expected)
+            ):
                 raise OCRModelProfileError("local model file changed during verification")
             return digest.hexdigest()
     except (OSError, ValueError):
@@ -113,7 +132,7 @@ def model_directory_sha256(directory: Path) -> str:
                 total_bytes += metadata.st_size
                 if total_bytes > _MAX_TOTAL_BYTES or len(entries) >= _MAX_ENTRIES:
                     raise OCRModelProfileError("model directory exceeds verification limits")
-                digest = _hash_regular_file(file_path, expected_bytes=metadata.st_size)
+                digest = _hash_regular_file(file_path, expected=metadata)
                 entries.append((file_path.relative_to(path).as_posix(), metadata.st_size, digest))
         if not entries:
             raise OCRModelProfileError("model directory is empty")
