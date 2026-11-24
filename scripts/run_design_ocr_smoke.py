@@ -273,7 +273,9 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ.get("POSTER_SMOKE_EXPORTER_TOKEN", ""),
             )
     except (SmokeError, OSError):
-        parser.exit(2, "Smoke incomplete; inspect private evidence; never retry an ambiguous run.\n")
+        parser.exit(
+            2, "Smoke incomplete; inspect private evidence; never retry an ambiguous run.\n"
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
