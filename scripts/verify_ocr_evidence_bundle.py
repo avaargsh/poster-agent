@@ -144,8 +144,7 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
     _require(_sha(claimed) and _sha(expected_sha256), "invalid digest")
     computed = _digest({key: value for key, value in bundle.items() if key != "bundle_sha256"})
     _require(
-        hmac.compare_digest(claimed, computed)
-        and hmac.compare_digest(expected_sha256, computed),
+        hmac.compare_digest(claimed, computed) and hmac.compare_digest(expected_sha256, computed),
         "bundle digest mismatch",
     )
     journal, report, canvas = bundle["journal"], bundle["comparison"], bundle["canvas"]
@@ -319,7 +318,9 @@ def verify_bundle(path: Path, expected_sha256: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--expected-sha256", required=True, help="separately retained bundle digest")
+    parser.add_argument(
+        "--expected-sha256", required=True, help="separately retained bundle digest"
+    )
     args = parser.parse_args(argv)
     try:
         result = verify_bundle(args.bundle, args.expected_sha256)
