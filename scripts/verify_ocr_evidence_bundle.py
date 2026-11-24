@@ -175,9 +175,7 @@ def _check_layout_claims(layout: dict, spatial: dict, canvas: dict) -> None:
             _require(status == "NO_VALID_OCR_BOX" and fraction is None, "invalid missing box claim")
             continue
         expected_fraction = _intersection_fraction(box, rect)
-        expected_status = (
-            "OVERLAP_UNCALIBRATED" if expected_fraction > 0 else "OUTSIDE_DESIGN_NODE"
-        )
+        expected_status = "OVERLAP_UNCALIBRATED" if expected_fraction > 0 else "OUTSIDE_DESIGN_NODE"
         _require(
             status == expected_status and _canonical(fraction) == _canonical(expected_fraction),
             "layout overlap mismatch",
