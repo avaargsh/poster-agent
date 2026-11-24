@@ -27,12 +27,13 @@ Use the exact absolute model paths visible inside the server's mount namespace. 
 
 ## What is inspected
 
-The observer reads `/proc/<pid>/cmdline`, `status`, `task/<pid>/children`, namespace links, `net/dev`, IPv4/IPv6 route tables and `mountinfo` for the target process. It requires:
+The observer reads `/proc/<pid>/cmdline`, `status`, every thread's `task/<tid>/children`, namespace links, `environ`, `net/dev`, IPv4/IPv6 route tables and `mountinfo` for the target process. It parses the server's unique `POSTER_DESIGN_OCR_MODEL_CONFIG_JSON`, requires the two CLI paths to match the configured paths exactly, and records the configured model-tree SHA-256 pins and canonical model-profile fingerprint. It does not rehash model files; the application model-profile loader and the separate runtime manifest collector perform those checks. It requires:
 
 - the exact `uvicorn app.main:app` command, explicit `--host 127.0.0.1`, explicit `--workers 1`, and no child process;
 - only the loopback interface, no IPv4 or IPv6 default route, and no non-loopback route;
 - both configured model directories to exist in the target process root and resolve without symlink traversal;
-- the nearest covering mount for each model directory to have the per-mount `ro` option.
+- the CLI model paths to match the server process environment's exact pinned profile and valid tree digests;
+- the nearest covering mount and every nested mount within each model directory to have the per-mount `ro` option.
 
 A refusal is fail-closed. It does not print process arguments, model paths, mount details or other private operator input to stdout.
 
