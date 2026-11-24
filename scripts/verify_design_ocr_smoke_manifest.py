@@ -34,6 +34,7 @@ _MANIFEST_KEYS = {
     "schema_version",
     "evidence_kind",
     "git_commit",
+    "renderer_version",
     "platform",
     "packages",
     "fonts",
@@ -99,7 +100,7 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
     _require(type(manifest) is dict and set(manifest) == _MANIFEST_KEYS, "invalid manifest fields")
     _require(
         type(manifest["schema_version"]) is int
-        and manifest["schema_version"] == 1
+        and manifest["schema_version"] == 2
         and manifest["evidence_kind"] == "LOCAL_ENVIRONMENT_OBSERVED_UNATTESTED",
         "unsupported manifest schema",
     )
@@ -149,6 +150,18 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
 
     _require(type(journal) is dict, "invalid journal")
     _require(
+        _text(manifest["renderer_version"]) and _text(journal.get("renderer_version")),
+        "invalid renderer identity",
+    )
+    _require(
+        journal["renderer_version"] == manifest["renderer_version"],
+        "renderer version differs from executed journal",
+    )
+    _require(
+        journal.get("rasterizer") == f"cairosvg/{packages['CairoSVG']}",
+        "rasterizer differs from measured CairoSVG package",
+    )
+    _require(
         journal.get("status") == "EXECUTED"
         and journal.get("reason") is None
         and journal.get("replayed") is False
@@ -193,6 +206,8 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
         "git_commit": manifest["git_commit"],
         "operation_id": operation_id,
         "model_profile_sha256": manifest["model_profile_sha256"],
+        "renderer_version_match": True,
+        "rasterizer_match": True,
         "runtime_python_and_machine_match": True,
         "runtime_package_versions_match": True,
         "cairosvg_version_recorded": True,
