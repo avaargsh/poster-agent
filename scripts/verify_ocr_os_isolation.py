@@ -88,8 +88,13 @@ def _process_start_time(process: Path, pid: int) -> str:
     identity = raw[: closing_paren + 1].split(" ", 1)[0]
     fields = raw[closing_paren + 1 :].split()
     _require(
-        identity == str(pid) and len(fields) > 19 and fields[19].isdigit(),
-        "invalid process start-time identity",
+        identity == str(pid)
+        and len(fields) > 19
+        and len(fields[0]) == 1
+        and fields[0] not in {"Z", "X"}
+        and fields[19].isdigit()
+        and int(fields[19]) > 0,
+        "invalid or non-running process start-time identity",
     )
     return fields[19]
 
@@ -200,7 +205,10 @@ def _model_profile(environment: bytes, detection_path: str, recognition_path: st
     values = [
         entry.partition(b"=")[2] for entry in entries if entry.startswith(_MODEL_PROFILE_ENV + b"=")
     ]
-    _require(len(values) == 1, "model profile environment must be unique")
+    _require(
+        len(values) == 1 and len(values[0]) <= 4096,
+        "model profile environment must be unique and bounded",
+    )
     try:
         profile = json.loads(
             values[0].decode("utf-8", errors="strict"),
@@ -212,15 +220,17 @@ def _model_profile(environment: bytes, detection_path: str, recognition_path: st
     except (UnicodeError, ValueError, TypeError):
         raise IsolationError("invalid model profile environment") from None
     _require(
-        isinstance(profile, dict)
+        type(profile) is dict
         and set(profile) == _MODEL_PROFILE_KEYS
         and type(profile["schema_version"]) is int
         and profile["schema_version"] == 1,
         "unsupported model profile schema",
     )
+    configured_detection = _canonical_model_path(profile["text_detection_model_dir"])
+    configured_recognition = _canonical_model_path(profile["text_recognition_model_dir"])
     _require(
-        profile["text_detection_model_dir"] == detection_path
-        and profile["text_recognition_model_dir"] == recognition_path,
+        configured_detection == detection_path
+        and configured_recognition == recognition_path,
         "model paths do not match the server environment",
     )
     detection_sha = profile["text_detection_sha256"]
@@ -518,6 +528,7 @@ def inspect_isolation(
         "schema_version": 1,
         "status": "LOCAL_OS_ISOLATION_OBSERVED_UNATTESTED",
         "server_pid": server_pid,
+        "server_start_ticks": int(process_before["start_time"]),
         "network_namespace": network_namespace,
         "mount_namespace": mount_namespace,
         "network_interfaces": interfaces,
