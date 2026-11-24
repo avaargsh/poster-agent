@@ -124,15 +124,6 @@ def test_duplicate_json_keys_and_untrusted_claims_do_not_parse():
 
 
 @pytest.mark.parametrize(
-    "digests",
-    [
-        [DIGEST, DIGEST],
-        [DIGEST, "sha256:" + "a" * 64],
-        ["sha256:" + "a" * 64, DIGEST],
-    ],
-)
-
-@pytest.mark.parametrize(
     "field,value",
     [
         ("x", False),
@@ -158,7 +149,14 @@ def test_vlm_findings_reject_non_numeric_geometry_coercion(field, value):
         local.parse_findings(json.dumps({"findings": [finding]}))
 
 
-
+@pytest.mark.parametrize(
+    "digests",
+    [
+        [DIGEST, DIGEST],
+        [DIGEST, "sha256:" + "a" * 64],
+        ["sha256:" + "a" * 64, DIGEST],
+    ],
+)
 def test_duplicate_pinned_model_tags_are_ambiguous_and_rejected(monkeypatch, digests):
     """A valid-looking tag cannot authorize another entry for the same model."""
     listing = {"models": [{"name": "llava:latest", "digest": digest} for digest in digests]}
