@@ -57,7 +57,11 @@ def _proc_fixture(
     children: str = "",
 ) -> Path:
     process = tmp_path / "proc" / str(_PID)
+    server_root = tmp_path / "server-root"
+    (server_root / "models" / "det").mkdir(parents=True)
+    (server_root / "models" / "rec").mkdir(parents=True)
     (process / "ns").mkdir(parents=True)
+    (process / "root").symlink_to(server_root, target_is_directory=True)
     (process / "ns" / "net").symlink_to("net:[4026533001]")
     (process / "ns" / "mnt").symlink_to("mnt:[4026533002]")
     (process / "task" / str(_PID)).mkdir(parents=True)
