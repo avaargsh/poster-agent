@@ -17,7 +17,9 @@ def test_rejects_duplicate_keys_at_any_depth(payload):
         loads_strict_json(payload)
 
 
-@pytest.mark.parametrize("payload", ['{"score": NaN}', '{"score": Infinity}', '{"score": -Infinity}'])
+@pytest.mark.parametrize(
+    "payload", ['{"score": NaN}', '{"score": Infinity}', '{"score": -Infinity}']
+)
 def test_rejects_non_finite_json_constants(payload):
     with pytest.raises(ValueError, match="non-finite JSON constant"):
         loads_strict_json(payload)
