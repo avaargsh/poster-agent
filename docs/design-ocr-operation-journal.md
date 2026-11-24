@@ -74,7 +74,11 @@ retroactively. The model bundle is rechecked after acquiring the process-local e
 before inference, and again before releasing the lock (including adapter errors).
 Drift or unreadable weights after admission yields
 `UNKNOWN / MODEL_PROFILE_CHANGED`, with no retained observations. Waiting for
-the lock cannot bypass the pre-inference check. These checks do not prevent
+the lock cannot bypass the pre-inference check. Any detected model-profile drift
+also evicts all pinned local engines while the lock is still held. Restoring
+files does not restore already-loaded weights; the next newly admitted
+operation must initialize an engine again. Replaying the rejected operation
+remains read-only. These checks do not prevent
 external writers from modifying and restoring weights entirely between checks;
 provision model files on controlled read-only storage.
 
