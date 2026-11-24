@@ -279,8 +279,9 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
             isinstance(approval["principal_id"], str)
             and re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", approval["principal_id"]) is not None
             and approval["principal_id"] != journal["principal_id"]
-            and _sha(approval["policy_digest"]),
-            "invalid or non-independent approval principal",
+            and _sha(approval["policy_digest"])
+            and hmac.compare_digest(approval["policy_digest"], bundle["policy_digest"]),
+            "invalid or non-independent approval principal or policy",
         )
         _require(
             all(
