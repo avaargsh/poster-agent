@@ -53,10 +53,12 @@ class NormalizedRegion(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    x: float = Field(ge=0, le=1, allow_inf_nan=False)
-    y: float = Field(ge=0, le=1, allow_inf_nan=False)
-    width: float = Field(gt=0, le=1, allow_inf_nan=False)
-    height: float = Field(gt=0, le=1, allow_inf_nan=False)
+    # Strict numeric inputs prevent JSON booleans and numeric strings from
+    # being coerced into plausible-looking normalized geometry.
+    x: float = Field(strict=True, ge=0, le=1, allow_inf_nan=False)
+    y: float = Field(strict=True, ge=0, le=1, allow_inf_nan=False)
+    width: float = Field(strict=True, gt=0, le=1, allow_inf_nan=False)
+    height: float = Field(strict=True, gt=0, le=1, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def entirely_on_canvas(self) -> NormalizedRegion:
