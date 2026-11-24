@@ -28,7 +28,7 @@ from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, 
 _FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 _MAX_RESPONSE = 36 * 1024 * 1024
 _MAX_APPROVED_PNG_BYTES = 24 * 1024 * 1024
-_PNG_IEND = b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"
+_MAX_PNG_CHUNKS = 4096
 _SHA = re.compile(r"[0-9a-f]{64}")
 
 
@@ -45,12 +45,28 @@ def _sha(value: object) -> bool:
     return isinstance(value, str) and _SHA.fullmatch(value) is not None
 
 
+def _terminal_png_iend(raw: bytes) -> bool:
+    """The first IEND must end the file; do not accept appended PNG payloads."""
+    offset = 8
+    for _ in range(_MAX_PNG_CHUNKS):
+        if len(raw) - offset < 12:
+            return False
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        kind = raw[offset + 4 : offset + 8]
+        end = offset + 12 + length
+        if end > len(raw) or kind in (b"acTL", b"fcTL", b"fdAT"):
+            return False
+        if kind == b"IEND":
+            return length == 0 and end == len(raw)
+        offset = end
+    return False
+
+
 def _valid_approved_png(raw: bytes) -> bool:
     """Decode and bound the server-supplied raster before an OCR side effect."""
     if not 8 <= len(raw) <= _MAX_APPROVED_PNG_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return False
-    # PNG IEND must be the final twelve bytes; reject appended payloads.
-    if not raw.endswith(_PNG_IEND):
+    if not _terminal_png_iend(raw):
         return False
     try:
         with warnings.catch_warnings():
