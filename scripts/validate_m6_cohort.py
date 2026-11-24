@@ -22,8 +22,8 @@ from pathlib import Path
 from PIL import Image
 
 from app import storage
-from app.strict_json import loads_strict_json
 from app.batch_artifact_integrity import BatchArtifactIntegrityError, verify_batch_artifact
+from app.strict_json import loads_strict_json
 from evals.native_batch_scope import load_batch_scope
 from scripts.real_sku_batch import BatchError, preflight
 from scripts.verify_m6_ocr_capture import OCRCaptureEvidenceError, verify_ocr_capture
