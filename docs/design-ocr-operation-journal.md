@@ -70,9 +70,13 @@ the operator's canonical pinned model profile. Replays with a different
 profile digest do not match the original idempotency fingerprint. Existing
 local databases are migrated additively; historic records without a model
 profile retain a `null` digest and cannot acquire model provenance
-retroactively. The model bundle is rechecked immediately before and after
-inference; drift or unreadable weights after admission yields
-`UNKNOWN / MODEL_PROFILE_CHANGED`, with no retained observations.
+retroactively. The model bundle is rechecked after acquiring the process-local engine lock,
+before inference, and again before releasing the lock (including adapter errors).
+Drift or unreadable weights after admission yields
+`UNKNOWN / MODEL_PROFILE_CHANGED`, with no retained observations. Waiting for
+the lock cannot bypass the pre-inference check. These checks do not prevent
+external writers from modifying and restoring weights entirely between checks;
+provision model files on controlled read-only storage.
 
 Any **present** model-reported bounding box must also have strictly positive area and remain entirely inside the exact approved PNG dimensions. Invalid rectangles are rejected before an `EXECUTED` receipt can persist; because the model may already have run, the journal records `UNKNOWN / OCR_EXECUTION_AMBIGUOUS` and replay cannot re-invoke it. A missing box is retained as `null`, with spatial comparison `BLOCKED / MISSING_BBOX` rather than fabricated placement evidence. These synthetic checks do not prove the real OCR adapter's accuracy.
 
