@@ -195,8 +195,8 @@ def _reject_model_profile_constant(value: str) -> None:
 
 
 def _model_profile(environment: bytes, detection_path: str, recognition_path: str) -> dict:
-    _require(environment.endswith(b"\\0"), "invalid process environment")
-    entries = environment.split(b"\\0")[:-1]
+    _require(environment.endswith(b"\0"), "invalid process environment")
+    entries = environment.split(b"\0")[:-1]
     values = [
         entry.partition(b"=")[2]
         for entry in entries
