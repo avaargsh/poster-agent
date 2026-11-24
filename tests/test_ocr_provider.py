@@ -68,3 +68,24 @@ def test_real_adapter_records_wall_clock_and_monotonic_predict_timing(monkeypatc
     assert finish_time >= start_time
     assert elapsed == 5.0
     assert result.runtime["attested"] is False
+
+
+def test_real_adapter_reports_gpu_paddle_distribution_version(monkeypatch, tmp_path):
+    class FakeOCR:
+        def predict(self, path):
+            assert Path(path).exists()
+            return []
+
+    versions = {
+        "paddleocr": "3.3.0",
+        "paddlepaddle": None,
+        "paddlepaddle-gpu": "3.2.0",
+    }
+    monkeypatch.setattr(ocr_provider, "_engine", lambda: FakeOCR())
+    monkeypatch.setattr(ocr_provider, "_package_version", lambda name: versions.get(name))
+    image = tmp_path / "approved.png"
+    image.write_bytes(b"placeholder")
+
+    result = ocr_provider.recognize(image)
+
+    assert result.runtime["paddlepaddle_package_version"] == "3.2.0"
