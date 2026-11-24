@@ -1539,6 +1539,7 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
         "oversized_pixels",
         "animated_png",
         "trailing_png_data",
+        "duplicate_iend",
     ],
 )
 def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
@@ -1603,6 +1604,8 @@ def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
                     body = image_bytes.getvalue()
                 elif mutation == "trailing_png_data":
                     body += b"not-part-of-the-approved-png"
+                elif mutation == "duplicate_iend":
+                    body += bytes.fromhex("0000000049454e44ae426082")
                 else:
                     headers["content-type"] = "application/octet-stream"
                 if mutation != "wrong_media_type":
