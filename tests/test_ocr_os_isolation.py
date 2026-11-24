@@ -224,11 +224,9 @@ def test_rejects_duplicate_or_noncanonical_model_paths(tmp_path):
             recognition_model_dir="/models/rec",
         )
 
-
-
 def test_rejects_writable_nested_mount_inside_model_directory(tmp_path):
     mountinfo = _MOUNTINFO + (
-        "33 25 0:30 / /models/det/weights rw,nosuid,nodev - ext4 /dev/loop2 rw\\n"
+        "33 25 0:30 / /models/det/weights rw,nosuid,nodev - ext4 /dev/loop2 rw\n"
     )
     proc_root = _proc_fixture(tmp_path, mountinfo=mountinfo)
 
@@ -239,7 +237,7 @@ def test_rejects_writable_nested_mount_inside_model_directory(tmp_path):
 def test_rejects_process_status_with_mismatched_pid(tmp_path):
     proc_root = _proc_fixture(tmp_path)
     status = proc_root / str(_PID) / "status"
-    status.write_text("Name:\\tpython\\nPid:\\t4243\\n", encoding="ascii")
+    status.write_text("Name:\tpython\nPid:\t4243\n", encoding="ascii")
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
@@ -256,7 +254,7 @@ def test_rejects_children_spawned_by_a_non_leader_thread(tmp_path):
 
 
 def test_rejects_malformed_ipv4_route_rows(tmp_path):
-    routes = _IPV4_ROUTES + "lo not-a-destination 00000000 0003 0 0 0 00000000 0 0 0\\n"
+    routes = _IPV4_ROUTES + "lo not-a-destination 00000000 0003 0 0 0 00000000 0 0 0\n"
     proc_root = _proc_fixture(tmp_path, ipv4_routes=routes)
 
     with pytest.raises(IsolationError):
