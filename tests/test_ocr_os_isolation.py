@@ -390,3 +390,14 @@ def test_rejects_invalid_model_profile_digest(tmp_path):
 
     with pytest.raises(IsolationError):
         _inspect(proc_root)
+
+
+def test_rejects_zombie_server_process(tmp_path):
+    proc_root = _proc_fixture(tmp_path)
+    stat_path = proc_root / str(_PID) / "stat"
+    fields = stat_path.read_text(encoding="ascii").split(") ", 1)[1].split()
+    fields[0] = "Z"
+    stat_path.write_text(f"{_PID} (python) " + " ".join(fields) + "\n", encoding="ascii")
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
