@@ -167,7 +167,7 @@ def _read_journal(db_path: Path, labels: list[dict[str, str]]) -> tuple[list[dic
                     SELECT operation_id, document_id, revision, approval_id,
                            svg_sha256, png_sha256, model_profile_sha256,
                            model_name, status, findings_json, runtime_json,
-                           started_at, finished_at, principal_id
+                           started_at, finished_at, reason, principal_id
                     FROM design_vlm_runs
                     WHERE operation_id = ?
                     """,
@@ -186,19 +186,53 @@ def _read_journal(db_path: Path, labels: list[dict[str, str]]) -> tuple[list[dic
     return selected, _digest(sorted(selected, key=lambda row: row["operation_id"]))
 
 
-def _elapsed_ms(start: object, finish: object) -> int:
+def _journal_timestamp(value: object) -> datetime:
+    """Match the live journal's bounded, timezone-aware ISO timestamp contract."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        raise CalibrationError("missing or oversized journal timestamp")
     try:
-        if not isinstance(start, str) or not isinstance(finish, str):
-            raise ValueError("missing journal timestamp")
-        a, b = datetime.fromisoformat(start), datetime.fromisoformat(finish)
-        if a.tzinfo is None or b.tzinfo is None or a.utcoffset() is None or b.utcoffset() is None:
-            raise ValueError("journal timestamps must include timezone")
-        elapsed = (b - a).total_seconds() * 1000
-        if not math.isfinite(elapsed) or elapsed < 0 or elapsed > 24 * 60 * 60 * 1000:
-            raise ValueError("invalid journal duration")
-        return round(elapsed)
-    except (TypeError, ValueError, OverflowError):
-        raise CalibrationError("invalid or non-monotonic journal timestamps") from None
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, OverflowError):
+        raise CalibrationError("invalid journal timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise CalibrationError("journal timestamp must include a timezone")
+    return parsed
+
+
+def _elapsed_ms(start: object, finish: object) -> int:
+    a, b = _journal_timestamp(start), _journal_timestamp(finish)
+    elapsed = (b - a).total_seconds() * 1000
+    if not math.isfinite(elapsed) or elapsed < 0 or elapsed > 24 * 60 * 60 * 1000:
+        raise CalibrationError("invalid or non-monotonic journal timestamps")
+    return round(elapsed)
+
+
+def _validate_journal_metadata(row: dict) -> int | None:
+    """Apply the same state/timestamp invariants as online VLM journal replay."""
+    started = _journal_timestamp(row["started_at"])
+    status = row["status"]
+    reason = row["reason"]
+
+    if status == "EXECUTING":
+        if reason is not None or row["finished_at"] is not None:
+            raise CalibrationError("executing journal contains terminal metadata")
+        return None
+
+    finished = _journal_timestamp(row["finished_at"])
+    if finished < started:
+        raise CalibrationError("journal finish precedes start")
+
+    if status == "EXECUTED":
+        if reason is not None:
+            raise CalibrationError("executed journal contains a failure reason")
+        return _elapsed_ms(row["started_at"], row["finished_at"])
+
+    if status == "UNKNOWN":
+        if not isinstance(reason, str) or not reason or len(reason) > 128:
+            raise CalibrationError("unknown journal is missing a bounded reason")
+        return None
+
+    raise CalibrationError("unsupported visual journal state")
 
 
 def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | None]:
@@ -221,6 +255,7 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
         raise CalibrationError("journal model identity is missing")
     if row["status"] not in _STATUSES:
         raise CalibrationError("journal contains an unsupported execution state")
+    elapsed = _validate_journal_metadata(row)
 
     if row["status"] != "EXECUTED":
         if row["findings_json"] is not None or row["runtime_json"] is not None:
@@ -254,9 +289,7 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
             raise ValueError("unexpected runtime provenance claim")
     except (ValueError, TypeError, UnicodeError, RecursionError):
         raise CalibrationError("invalid or untrusted local VLM observations") from None
-    return {finding["category"] for finding in findings}, _elapsed_ms(
-        row["started_at"], row["finished_at"]
-    )
+    return {finding["category"] for finding in findings}, elapsed
 
 
 def _nearest_rank(values: list[int], fraction: float) -> int | None:

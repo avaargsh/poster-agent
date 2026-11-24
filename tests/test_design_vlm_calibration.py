@@ -43,7 +43,7 @@ def _fixture(tmp_path, count=20):
                 approval_id TEXT, svg_sha256 TEXT, png_sha256 TEXT,
                 model_profile_sha256 TEXT, model_name TEXT, status TEXT,
                 findings_json TEXT, runtime_json TEXT, started_at TEXT,
-                finished_at TEXT, principal_id TEXT
+                finished_at TEXT, reason TEXT, principal_id TEXT
             )
             """
         )
@@ -164,7 +164,8 @@ def test_unknown_run_is_not_misclassified_as_no_finding_or_false_negative(tmp_pa
             """
             UPDATE design_vlm_runs
             SET status='UNKNOWN', findings_json=NULL, runtime_json=NULL,
-                finished_at=NULL
+                reason='RECOVERED_AFTER_RESTART',
+                finished_at='2026-11-15T00:00:01+00:00'
             WHERE operation_id=?
             """,
             (rows[0]["operation_id"],),
@@ -309,7 +310,8 @@ def test_calibration_rejects_unresolved_record_with_stale_runtime(tmp_path):
     db, labels, rows = _fixture(tmp_path)
     with sqlite3.connect(db) as connection:
         connection.execute(
-            "UPDATE design_vlm_runs SET status='UNKNOWN', findings_json=NULL, finished_at=NULL"
+            "UPDATE design_vlm_runs SET status='UNKNOWN', findings_json=NULL,"
+            " reason='RECOVERED_AFTER_RESTART', finished_at='2026-11-15T00:00:01+00:00'"
             " WHERE operation_id=?",
             (rows[0]["operation_id"],),
         )
@@ -349,3 +351,85 @@ def test_shadow_calibration_checks_actual_read_limit_not_stale_stat(tmp_path, mo
     monkeypatch.setattr(Path, "stat", stale_stat)
     with pytest.raises(CalibrationError, match="size|exceed|limit"):
         evaluate_shadow_cohort(db, labels)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "executed_with_failure_reason",
+        "unknown_missing_reason",
+        "unknown_missing_finished_at",
+        "unknown_non_monotonic_timestamps",
+        "unknown_naive_started_at",
+        "executing_with_stale_reason",
+        "executing_with_stale_finished_at",
+        "executing_missing_started_at",
+    ],
+)
+def test_calibration_rejects_state_inconsistent_journal_metadata(tmp_path, mutation):
+    db, labels, rows = _fixture(tmp_path)
+    changes = {
+        "executed_with_failure_reason": {
+            "reason": "VLM_EXECUTION_AMBIGUOUS",
+        },
+        "unknown_missing_reason": {
+            "status": "UNKNOWN",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": None,
+            "finished_at": "2026-11-15T00:00:01+00:00",
+        },
+        "unknown_missing_finished_at": {
+            "status": "UNKNOWN",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": "VLM_EXECUTION_AMBIGUOUS",
+            "finished_at": None,
+        },
+        "unknown_non_monotonic_timestamps": {
+            "status": "UNKNOWN",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": "VLM_EXECUTION_AMBIGUOUS",
+            "finished_at": "2026-11-14T23:59:59+00:00",
+        },
+        "unknown_naive_started_at": {
+            "status": "UNKNOWN",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": "VLM_EXECUTION_AMBIGUOUS",
+            "started_at": "2026-11-15T00:00:00",
+            "finished_at": "2026-11-15T00:00:01+00:00",
+        },
+        "executing_with_stale_reason": {
+            "status": "EXECUTING",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": "VLM_EXECUTION_AMBIGUOUS",
+            "finished_at": None,
+        },
+        "executing_with_stale_finished_at": {
+            "status": "EXECUTING",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": None,
+            "finished_at": "2026-11-15T00:00:01+00:00",
+        },
+        "executing_missing_started_at": {
+            "status": "EXECUTING",
+            "findings_json": None,
+            "runtime_json": None,
+            "reason": None,
+            "started_at": None,
+            "finished_at": None,
+        },
+    }[mutation]
+    with sqlite3.connect(db) as connection:
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        connection.execute(
+            f"UPDATE design_vlm_runs SET {assignments} WHERE operation_id = ?",
+            (*changes.values(), rows[0]["operation_id"]),
+        )
+
+    with pytest.raises(CalibrationError):
+        _eval(db, labels)
