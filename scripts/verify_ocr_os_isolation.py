@@ -256,7 +256,21 @@ def _ipv6_routes(raw: str) -> list[str]:
             "invalid IPv6 route prefix length",
         )
         is_default = destination.lower() == "0" * 32 and int(prefix, 16) == 0
-        _require(interface == "lo" and not is_default, "non-loopback or default IPv6 route")
+        # Linux exposes an unreachable null route in /proc/net/ipv6_route.
+        # Accept only the exact reject/non-nexthop sentinel, not a usable default.
+        is_kernel_reject = (
+            is_default
+            and interface == "lo"
+            and fields[2].lower() == "0" * 32
+            and int(fields[3], 16) == 0
+            and fields[4].lower() == "0" * 32
+            and int(fields[5], 16) == 0xFFFFFFFF
+            and int(fields[8], 16) == 0x00200200
+        )
+        _require(
+            interface == "lo" and (not is_default or is_kernel_reject),
+            "non-loopback or default IPv6 route",
+        )
         interfaces.append(interface)
     return sorted(set(interfaces))
 
