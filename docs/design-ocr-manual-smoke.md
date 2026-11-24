@@ -35,7 +35,11 @@ creates a programmatic synthetic product, approves one design, checks the
 approved PNG hash and persists the operation request before invoking OCR.
 Only a successful, identity-bound EXECUTED response with observations,
 boxes and timing permits one exact-ID replay, followed by bundle export
-and local verifier replay. Non-success or a lost submission response
+and local verifier replay. After successful verification, the client changes
+only the title of its newly created synthetic design and requires the old
+revision's export to return HTTP 409 REVISION_CONFLICT. It saves the rejection
+and retains the historic evidence digest only after that probe succeeds. No
+additional OCR invocation is made. Non-success or a lost submission response
 halts without retrying. Inspect outcome.json and the saved source/operation
 request; reconcile the same operation through the journal status GET
 before deciding whether a new operation is warranted.
@@ -51,6 +55,5 @@ the adapter and rasterizer; an actual operator run is separate evidence.
 ## Remaining #57 work
 
 Record exact server commit/environment/font/model identity separately;
-prove isolated server startup and egress policy; implement the stale/source
-drift negative probe; execute the real pinned smoke. A 20-authorized-SKU
+prove isolated server startup and egress policy; implement the model/asset source-drift negative probe; execute the real pinned smoke. A 20-authorized-SKU
 human evaluation remains #14, and is not replaced by this client.
