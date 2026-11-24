@@ -12,6 +12,7 @@ import hmac
 import json
 import re
 import sqlite3
+from datetime import datetime
 from threading import Lock
 from typing import Annotated
 
@@ -86,6 +87,46 @@ def _fingerprint(
     return hashlib.sha256(_json(canonical).encode("utf-8")).hexdigest()
 
 
+def _journal_timestamp(value: object) -> datetime:
+    """Require a bounded, timezone-aware ISO timestamp from the local journal."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        raise ValueError("missing or oversized journal timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, OverflowError):
+        raise ValueError("invalid journal timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("journal timestamp must include a timezone")
+    return parsed
+
+
+def _validate_journal_metadata(row: sqlite3.Row, status: object) -> None:
+    """Enforce the state machine's required timestamps and terminal metadata."""
+    started = _journal_timestamp(row["started_at"])
+    reason = row["reason"]
+
+    if status == "EXECUTING":
+        if reason is not None or row["finished_at"] is not None:
+            raise ValueError("executing journal contains terminal metadata")
+        return
+
+    finished = _journal_timestamp(row["finished_at"])
+    if finished < started:
+        raise ValueError("journal finish precedes start")
+
+    if status == "EXECUTED":
+        if reason is not None:
+            raise ValueError("executed journal contains a failure reason")
+        return
+
+    if status == "UNKNOWN":
+        if not isinstance(reason, str) or not reason or len(reason) > 128:
+            raise ValueError("unknown journal is missing a bounded reason")
+        return
+
+    raise ValueError("unknown visual journal state")
+
+
 def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
     """Never turn malformed local data into empty positive shadow findings.
 
@@ -95,6 +136,7 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
     """
     try:
         status = row["status"]
+        _validate_journal_metadata(row, status)
         if status == "EXECUTED":
             raw_findings = row["findings_json"]
             raw_runtime = row["runtime_json"]
