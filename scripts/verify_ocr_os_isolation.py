@@ -198,9 +198,7 @@ def _model_profile(environment: bytes, detection_path: str, recognition_path: st
     _require(environment.endswith(b"\0"), "invalid process environment")
     entries = environment.split(b"\0")[:-1]
     values = [
-        entry.partition(b"=")[2]
-        for entry in entries
-        if entry.startswith(_MODEL_PROFILE_ENV + b"=")
+        entry.partition(b"=")[2] for entry in entries if entry.startswith(_MODEL_PROFILE_ENV + b"=")
     ]
     _require(len(values) == 1, "model profile environment must be unique")
     try:
@@ -402,9 +400,7 @@ def _mount_for(model_path: str, mountinfo: str) -> dict:
     _require(bool(covering), "model directory has no covering mount")
     depth = max(len(mountpoint.parts) for mountpoint, _ in covering)
     nearest = [
-        (mountpoint, options)
-        for mountpoint, options in covering
-        if len(mountpoint.parts) == depth
+        (mountpoint, options) for mountpoint, options in covering if len(mountpoint.parts) == depth
     ]
     _require(len(nearest) == 1, "ambiguous covering model mount")
     mountpoint, options = nearest[0]
@@ -503,9 +499,16 @@ def inspect_isolation(
             interfaces == _interfaces(_text(process / "net" / "dev")),
             "network interfaces changed during observation",
         )
-        _require(ipv4_table == _text(process / "net" / "route"), "IPv4 routes changed during observation")
-        _require(ipv6_table == _text(process / "net" / "ipv6_route"), "IPv6 routes changed during observation")
-        _require(mountinfo == _text(process / "mountinfo"), "mount table changed during observation")
+        _require(
+            ipv4_table == _text(process / "net" / "route"), "IPv4 routes changed during observation"
+        )
+        _require(
+            ipv6_table == _text(process / "net" / "ipv6_route"),
+            "IPv6 routes changed during observation",
+        )
+        _require(
+            mountinfo == _text(process / "mountinfo"), "mount table changed during observation"
+        )
     except IsolationError:
         raise
     except (OSError, ValueError, TypeError, RecursionError):
