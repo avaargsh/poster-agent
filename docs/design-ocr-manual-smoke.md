@@ -158,3 +158,14 @@ manifest/isolation reports.
 ## Approval attribution verification boundary
 
 For schema v2, the offline verifier's `approval_attribution_consistent` field means only that the bundled approval record is structurally valid and internally matches the OCR journal's document, revision, approval ID, spec digest, asset digest and renderer identity, with distinct approver/exporter principals. The approver and exporter policy digests must match because both actions are evaluated against the same configured reviewer-policy snapshot. It does **not** independently query the live approval database, authenticate a human reviewer, validate a signed timestamp, or establish tamper-evident audit history. The `is_current_head` and `matches_current_snapshot` values are server-derived local database assertions captured at export time; the offline verifier can only check their included values. See [design approval history](design-approval-history.md) for the SQLite evidence limitations. Legacy schema v1 bundles report `approval_attribution_consistent=false`.
+
+
+## Offline evidence file handling
+
+The offline evidence-bundle verifier reads the selected bundle through one
+bounded file descriptor. It rejects symlinks, FIFOs, devices, sockets and
+directories before parsing, and it refuses oversized files. This prevents a
+substituted FIFO from blocking verification and avoids following a final-path
+symlink into an unrelated file. Keep the evidence bundle and separately
+retained digest in operator-controlled storage; these checks establish safe
+local input handling, not independent authenticity.

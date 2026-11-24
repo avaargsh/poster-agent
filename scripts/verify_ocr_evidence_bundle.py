@@ -11,7 +11,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
+import stat
 import sys
 from io import BytesIO
 from pathlib import Path
@@ -403,12 +405,36 @@ def _verify(bundle: dict, expected_sha256: str) -> dict:
     }
 
 
-def verify_bundle(path: Path, expected_sha256: str) -> dict:
-    """Check a bounded file using a separately obtained expected content digest."""
+def _read_bounded_bundle(path: Path) -> bytes:
+    """Read one bounded snapshot from a regular file without following links.
+
+    O_NONBLOCK prevents a substituted FIFO from hanging the offline verifier;
+    fstat then rejects FIFOs, devices, sockets and directories before reading.
+    O_NOFOLLOW closes the final-component symlink race between the path check
+    and opening the file.
+    """
     try:
-        with path.open("rb") as stream:
+        if path.is_symlink():
+            raise EvidenceError("bundle must not be a symlink")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            _require(stat.S_ISREG(info.st_mode), "bundle must be a regular file")
+            _require(info.st_size <= _MAX_FILE_BYTES, "bundle exceeds size limit")
             raw = stream.read(_MAX_FILE_BYTES + 1)
-        _require(len(raw) <= _MAX_FILE_BYTES, "bundle exceeds size limit")
+    except EvidenceError:
+        raise
+    except OSError:
+        raise EvidenceError("bundle is missing or unreadable") from None
+    _require(len(raw) <= _MAX_FILE_BYTES, "bundle exceeds size limit")
+    return raw
+
+
+def verify_bundle(path: Path, expected_sha256: str) -> dict:
+    """Check a bounded regular file using a separately obtained content digest."""
+    try:
+        raw = _read_bounded_bundle(path)
         bundle = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite
         )
