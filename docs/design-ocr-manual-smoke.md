@@ -121,10 +121,10 @@ uv run --no-sync python -m scripts.verify_design_ocr_smoke_manifest \
   --output /private/ocr-manifest-binding.json
 ```
 
-The verifier requires exact agreement for the checkout assertion, model
-profile digest, Python version, machine, PaddleOCR/PaddlePaddle package
-versions, CairoSVG package presence and recorded font identities. A mismatch
-fails closed. Its report is still only local consistency: the operator-supplied
+The verifier requires exact agreement for the checkout assertion, renderer
+version, model profile digest, Python version, machine, PaddleOCR/PaddlePaddle
+package versions, CairoSVG rasterizer identity and recorded font identities.
+A mismatch fails closed. Its report is still only local consistency: the operator-supplied
 commit is not proof of the server process image, package telemetry is not
 independent runtime attestation, font file hashes do not prove font selection,
 and neither this command nor the manifest proves OS-level egress denial.

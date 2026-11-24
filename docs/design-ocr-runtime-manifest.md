@@ -17,7 +17,7 @@ uv run --no-sync python -m scripts.collect_ocr_runtime_manifest \
 The repository must have no reported tracked or untracked changes (ignored
 files are not measured); the destination must be new and outside the
 repository. The collector checks Git HEAD before and after measurement,
-OS/Python identity, installed PaddleOCR/CairoSVG and exactly one Paddle
+OS/Python identity, the repository DesignDocument renderer version, installed PaddleOCR/CairoSVG and exactly one Paddle
 distribution, hashes of one to eight explicitly supplied font files, and
 the same bounded model tree/profile pins used by the OCR journal. It
 does not include absolute model/font paths, credentials or environment
