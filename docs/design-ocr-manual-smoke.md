@@ -17,13 +17,7 @@ model mounts and outbound network denial outside the application.
 Use two distinct named approve/export reviewers. Supply their raw tokens
 through the private environment variables POSTER_SMOKE_APPROVER_TOKEN and
 POSTER_SMOKE_EXPORTER_TOKEN; do not put them in shell history, command-line
-arguments, GitHub or logs. The runner retains the server-returned approval
-identity and policy digest in the private `approval.json`, requires explicit
-attribution, and verifies that the OCR journal's exporter principal differs
-from the approver principal. An anonymous approval, missing policy digest,
-replayed approval or same-principal approval/export path fails before the
-runner reports a successful smoke. Raw bearer tokens are never written to
-the evidence directory.
+arguments, GitHub or logs.
 
 From the locked project environment, after #54–#56 are available:
 
@@ -46,6 +40,12 @@ payload), and enforces the server's 24 MiB, 4096px dimension and
 8-million-pixel limits. A matching server-supplied digest or PNG signature
 alone is insufficient: truncated, animated, corrupt or appended raster bytes
 fail at the raster stage with NOT_SUBMITTED, and no OCR operation is sent.
+The approval response is retained as a whitelisted `approval.json`
+record containing the exact revision/digests, server-attributed approver,
+policy digest and replay state. The OCR journal must identify a different
+export principal. Raw bearer tokens and authorization headers are never
+written to the evidence directory.
+
 Only a successful, identity-bound EXECUTED response with observations,
 boxes and timing permits one exact-ID replay, followed by bundle export
 and local verifier replay. After successful verification, the client changes
