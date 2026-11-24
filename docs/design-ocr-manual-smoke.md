@@ -32,7 +32,11 @@ uv run --no-sync python -m scripts.run_design_ocr_smoke \
 The output directory and digest file must not exist. The client accepts
 only numeric IPv4 loopback, disables proxies/redirects and transport retries,
 creates a programmatic synthetic product, approves one design, checks the
-approved PNG hash and persists the operation request before invoking OCR.
+approved raster's PNG media type, PNG signature and byte digest against its
+response headers, and persists the operation request before invoking OCR.
+A self-consistent server-supplied digest alone is insufficient to establish
+that the response contains PNG bytes. A malformed raster fails at the raster
+stage with NOT_SUBMITTED; no OCR operation is sent.
 Only a successful, identity-bound EXECUTED response with observations,
 boxes and timing permits one exact-ID replay, followed by bundle export
 and local verifier replay. After successful verification, the client changes
