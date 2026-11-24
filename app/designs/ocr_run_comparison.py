@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 
 from pydantic import ValidationError
 
@@ -30,6 +31,63 @@ class OCRRunNotExecuted(DesignError):
     @property
     def default_message(self) -> str:
         return "OCR run has no completed observations to compare"
+
+
+def _approval_evidence(
+    repository: DesignRepository, target: dict, *, exporter_principal: str
+) -> dict:
+    """Return the exact current, attributed approval for a portable evidence bundle."""
+    history = repository.approval_history(target["document_id"])
+    if (
+        history.get("document_id") != target["document_id"]
+        or history.get("current_revision") != target["revision"]
+        or history.get("current_renderer_version") != target["renderer_version"]
+    ):
+        raise OCRSourceMismatch()
+
+    matches = [
+        item
+        for item in history.get("approvals", [])
+        if isinstance(item, dict) and item.get("approval_id") == target["approval_id"]
+    ]
+    if len(matches) != 1:
+        raise OCRSourceMismatch()
+    record = matches[0]
+    evidence = {
+        "document_id": history["document_id"],
+        "revision": record.get("revision"),
+        "approval_id": record.get("approval_id"),
+        "spec_digest": record.get("spec_digest"),
+        "asset_manifest_digest": record.get("asset_manifest_digest"),
+        "renderer_version": record.get("renderer_version"),
+        "principal_id": record.get("principal_id"),
+        "policy_digest": record.get("policy_digest"),
+        "created_at": record.get("created_at"),
+        "attributed_at": record.get("attributed_at"),
+        "is_current_head": record.get("is_current_head"),
+        "matches_current_snapshot": record.get("matches_current_snapshot"),
+    }
+    if (
+        type(evidence["revision"]) is not int
+        or evidence["revision"] != target["revision"]
+        or evidence["approval_id"] != target["approval_id"]
+        or evidence["spec_digest"] != target["spec_digest"]
+        or evidence["asset_manifest_digest"] != target["asset_manifest_digest"]
+        or evidence["renderer_version"] != target["renderer_version"]
+        or not isinstance(evidence["principal_id"], str)
+        or re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", evidence["principal_id"]) is None
+        or evidence["principal_id"] == exporter_principal
+        or not isinstance(evidence["policy_digest"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", evidence["policy_digest"]) is None
+        or any(
+            not isinstance(evidence[key], str) or not 0 < len(evidence[key]) <= 256
+            for key in ("created_at", "attributed_at")
+        )
+        or evidence["is_current_head"] is not True
+        or evidence["matches_current_snapshot"] is not True
+    ):
+        raise OCRSourceMismatch()
+    return evidence
 
 
 def compare_journaled_ocr_run(
@@ -70,6 +128,11 @@ def compare_journaled_ocr_run(
         raise OCRSourceMismatch()
 
     target = repository.ocr_target(document_id, revision, required_policy_digest=policy)
+    approval_evidence = (
+        _approval_evidence(repository, target, exporter_principal=principal)
+        if include_evidence_bundle
+        else None
+    )
     for key in (
         "document_id",
         "revision",
@@ -167,6 +230,10 @@ def compare_journaled_ocr_run(
         raise OCRSourceMismatch()
     if repository.ocr_target(document_id, revision, required_policy_digest=policy) != target:
         raise OCRSourceMismatch()
+    if include_evidence_bundle and (
+        _approval_evidence(repository, target, exporter_principal=principal) != approval_evidence
+    ):
+        raise OCRSourceMismatch()
 
     report = {
         **compared,
@@ -189,8 +256,9 @@ def compare_journaled_ocr_run(
     # Do not fetch either again or include credentials, model paths or SVG
     # source bytes. The rasterizer already enforces PNG size/pixel bounds.
     bundle = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_kind": "LOCAL_OCR_UNATTESTED",
+        "approval": approval_evidence,
         "policy_digest": policy,
         "canvas": {"width": raster.width, "height": raster.height},
         "png_base64": base64.b64encode(raster.png).decode("ascii"),
