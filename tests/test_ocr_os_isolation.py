@@ -81,6 +81,10 @@ def _proc_fixture(
         b"POSTER_DESIGN_OCR_MODEL_CONFIG_JSON=" + raw_profile + b"\0"
     )
     (process / "status").write_text(f"Name:\tpython\nPid:\t{_PID}\n", encoding="ascii")
+    stat_fields = ["S", *("0" for _ in range(18)), "123456"]
+    (process / "stat").write_text(
+        f"{_PID} (python) " + " ".join(stat_fields) + "\n", encoding="ascii"
+    )
     (process / "mountinfo").write_text(mountinfo, encoding="utf-8")
     (process / "net").mkdir()
     (process / "net" / "dev").write_text(net_dev, encoding="utf-8")
