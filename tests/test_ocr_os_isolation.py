@@ -306,3 +306,32 @@ def test_rejects_nested_detection_and_recognition_model_directories(tmp_path):
             detection_model_dir="/models",
             recognition_model_dir="/models/rec",
         )
+
+
+
+def test_rejects_uvicorn_name_embedded_in_unrelated_command(tmp_path):
+    tokens = (
+        b"python",
+        b"-c",
+        b"print('uvicorn')",
+        b"uvicorn",
+        b"app.main:app",
+        b"--host",
+        b"127.0.0.1",
+        b"--port",
+        b"8000",
+        b"--workers",
+        b"1",
+    )
+    proc_root = _proc_fixture(tmp_path, cmdline=b"\\0".join(tokens) + b"\\0")
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
+
+
+def test_rejects_uvicorn_reload_mode(tmp_path):
+    tokens = _CMDLINE.rstrip(b"\\0").split(b"\\0") + [b"--reload"]
+    proc_root = _proc_fixture(tmp_path, cmdline=b"\\0".join(tokens) + b"\\0")
+
+    with pytest.raises(IsolationError):
+        _inspect(proc_root)
