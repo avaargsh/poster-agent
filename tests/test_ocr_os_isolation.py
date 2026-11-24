@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from scripts.verify_ocr_os_isolation import IsolationError, inspect_isolation
 
-
 _PID = 4242
 _CMDLINE = (
     b"\0".join(
