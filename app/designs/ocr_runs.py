@@ -26,7 +26,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.ocr_provider import OCRUnavailable, recognize
+from app.ocr_provider import OCRUnavailable, invalidate_local_engine_cache, recognize
 
 from .errors import (
     DesignError,
@@ -571,16 +571,22 @@ def _recognize_serialized(
         # Waiting for the engine lock can outlast a preflight model hash check.
         # Verify after acquisition and before releasing the lock so another
         # request cannot hide ordinary drift between the check and inference.
-        if load_model_profile(model_config_raw) != profile:
-            raise OCRModelProfileError("local OCR model profile changed before inference")
         try:
-            return recognize(
-                image,
-                model_dirs=(profile.detector_dir, profile.recognizer_dir, profile.fingerprint),
-            )
-        finally:
             if load_model_profile(model_config_raw) != profile:
-                raise OCRModelProfileError("local OCR model profile changed during inference")
+                raise OCRModelProfileError("local OCR model profile changed before inference")
+            try:
+                return recognize(
+                    image,
+                    model_dirs=(profile.detector_dir, profile.recognizer_dir, profile.fingerprint),
+                )
+            finally:
+                if load_model_profile(model_config_raw) != profile:
+                    raise OCRModelProfileError("local OCR model profile changed during inference")
+        except OCRModelProfileError:
+            # Restoring the pinned files does not restore already-loaded weights.
+            # Evict before unlocking so the next operation cannot reuse this engine.
+            invalidate_local_engine_cache()
+            raise
 
 
 def _capture_model_output(rows: object, *, width: int, height: int) -> tuple[list[dict], dict]:
