@@ -1299,7 +1299,10 @@ def test_offline_evidence_verifier_rechecks_bundle(
         assert captured.out == ""
 
 
-@pytest.mark.parametrize("outcome", ["success", "unavailable", "ack_loss", "stale_accepted"])
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "unavailable", "ack_loss", "stale_accepted", "malformed_line", "duplicate_status"],
+)
 def test_manual_design_ocr_smoke_preserves_single_operation(
     ocr_paths, tmp_path, monkeypatch, outcome
 ):
@@ -1333,6 +1336,17 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                 # Commit the model operation, then simulate the response being lost.
                 client.post(url, **kwargs)
                 raise httpx.ReadTimeout("synthetic lost response")
+            if outcome in ("malformed_line", "duplicate_status") and (
+                method == "POST" and url.endswith("/ocr-runs")
+            ):
+                response = client.post(url, **kwargs)
+                assert response.status_code == 201
+                journal = response.json()
+                if outcome == "malformed_line":
+                    journal["observations"] = [None]
+                    return nullcontext(httpx.Response(201, json=journal))
+                raw = '{"status":"UNKNOWN",' + response.text[1:]
+                return nullcontext(httpx.Response(201, content=raw))
             return original_stream(method, url, **kwargs)
 
         monkeypatch.setattr(client, "stream", stream)
@@ -1357,10 +1371,15 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                     "ack_loss": "UNKNOWN",
                     "unavailable": "UNAVAILABLE",
                     "stale_accepted": "EXECUTED",
+                    "malformed_line": "UNKNOWN",
+                    "duplicate_status": "UNKNOWN",
                 }[outcome]
             )
             if outcome == "stale_accepted":
                 assert report["stage"] == "stale_revision_probe"
+            if outcome in ("malformed_line", "duplicate_status"):
+                assert report["stage"] == "submit"
+                assert exported == []
             assert not anchor.exists()
         assert calls == [1]
         request = json.loads((output / "operation-request.json").read_text())
