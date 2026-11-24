@@ -1457,3 +1457,41 @@ def test_read_only_ocr_drift_probe(ocr_paths, product_bytes, monkeypatch, tmp_pa
                 }[drift]
             )
         assert calls == [1]
+
+
+@pytest.mark.parametrize("drift", ["model", "asset"])
+def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypatch, drift):
+    from scripts.probe_ocr_source_drift import probe_drift
+    from scripts.run_design_ocr_smoke import run_smoke
+
+    calls = []
+
+    def recognize(image, **kwargs):
+        calls.append(1)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    output = tmp_path / "smoke"
+    anchor = tmp_path / "separate-digest.txt"
+    with TestClient(app) as client:
+        report = run_smoke(client, output, anchor, APPROVER, EXPORTER, keep_approved=True)
+        assert report["status"] == "LOCAL_BASELINE_CONSISTENT_UNATTESTED"
+        assert report["execution_state"] == "EXECUTED"
+        assert report["stale_revision_rejected"] is False
+        assert report["release_ready"] is False
+        assert not (output / "stale-rejection.json").exists()
+        baseline = (output / "evidence.json").read_bytes()
+        digest = anchor.read_text().strip()
+        assert digest == report["bundle_sha256"]
+        if drift == "model":
+            (ocr_paths.parent / "local-detector" / "weights.bin").write_bytes(b"changed")
+        else:
+            assets = list((ocr_paths.parent / "design-assets").iterdir())
+            assert len(assets) == 1
+            assets[0].write_bytes(b"changed")
+        observed = probe_drift(client, baseline, digest, EXPORTER, drift)
+        assert observed["status"] == "SOURCE_DRIFT_REJECTED_UNATTESTED"
+        assert observed["operation_id"] == report["operation_id"]
+        assert observed["journal_unchanged"] is True
+        assert observed["release_ready"] is False
+        assert calls == [1]
