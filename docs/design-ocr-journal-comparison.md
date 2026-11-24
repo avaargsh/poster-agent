@@ -94,6 +94,12 @@ Even when all fields match, the result explicitly has
 `release_ready=false`. No authority treats it as an externally signed
 runtime receipt, immutable audit log, human approval, or release permit.
 
+Before returning, the comparison rehashes the pinned model profile and rereads
+the authorized journal record, then rechecks the current approved design.
+Changes during rasterization or layout assessment fail closed; the operation
+is never re-executed. These sequential local checks do not establish an atomic
+snapshot across the filesystem and SQLite or independent attestation.
+
 The read-time check cannot prevent a *future* design revision immediately
 after the response, and a database administrator can rewrite local records.
 Production acceptance still requires a separate trusted evidence authority,

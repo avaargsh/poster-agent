@@ -508,6 +508,56 @@ def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
         assert changed_raster.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
 
 
+@pytest.mark.parametrize("drift", ["model", "journal"])
+def test_ocr_comparison_rechecks_sources_after_rasterization(
+    ocr_paths, product_bytes, monkeypatch, drift
+):
+    calls = []
+
+    def infer(image, **kwargs):
+        calls.append(1)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", infer)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/comparison-preview"
+        original_converter = rasterization._convert_svg_to_png
+
+        def drift_after_preflight(svg, width, height):
+            if drift == "model":
+                weights = ocr_paths.parent / "local-detector" / "weights.bin"
+                weights.write_bytes(b"changed after comparison preflight")
+            else:
+                with sqlite3.connect(ocr_paths) as connection:
+                    connection.execute(
+                        "UPDATE design_ocr_runs SET observations_json = ? WHERE operation_id = ?",
+                        (json.dumps([]), payload["operation_id"]),
+                    )
+                    runtime = connection.execute(
+                        "SELECT runtime_json FROM design_ocr_runs WHERE operation_id = ?",
+                        (payload["operation_id"],),
+                    ).fetchone()[0]
+                    updated_runtime = json.loads(runtime)
+                    updated_runtime["line_count"] = 0
+                    connection.execute(
+                        "UPDATE design_ocr_runs SET runtime_json = ? WHERE operation_id = ?",
+                        (json.dumps(updated_runtime), payload["operation_id"]),
+                    )
+            return original_converter(svg, width, height)
+
+        monkeypatch.setattr(rasterization, "_convert_svg_to_png", drift_after_preflight)
+        result = client.get(endpoint, headers=_headers())
+        if drift == "model":
+            assert result.status_code == 503, result.text
+            assert result.json()["error"]["code"] == "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"
+        else:
+            assert result.status_code == 409, result.text
+            assert result.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
+        assert calls == [1]
+
+
 @pytest.mark.parametrize(
     ("price_bbox", "spatial_state", "price_box_state"),
     [
