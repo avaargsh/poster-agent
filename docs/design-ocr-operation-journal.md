@@ -148,6 +148,9 @@ Use the same isolated server and the original named export principal
 (POSTER_SMOKE_EXPORTER_TOKEN). The command reads bounded local JSON,
 checks saved operation, revision, approval, spec, asset and raster
 identities against one journal GET, and writes a new private report.
+The saved revision is required; the redundant expected_revision field may
+be absent, but when present it must be an integer equal to revision.
+The returned journal must always match the saved revision.
 It does not edit outcome.json, retry inference or verify model execution.
 A missing, unauthorized, malformed or conflicting response is incomplete;
 retain UNKNOWN. A reported EXECUTED is an observed journal state, not a
