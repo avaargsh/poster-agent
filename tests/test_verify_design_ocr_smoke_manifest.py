@@ -176,7 +176,6 @@ def test_manifest_requires_initial_unattested_executed_journal(field, value):
         verify_manifest_binding(manifest, journal, "a" * 40)
 
 
-
 @pytest.mark.parametrize(
     ("location", "field", "value"),
     [
