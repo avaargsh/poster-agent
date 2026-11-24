@@ -67,7 +67,9 @@ def _no_authority(data: dict) -> bool:
     return all(data.get(key) is False for key in _FLAGS)
 
 
-def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) -> dict:
+def run_smoke(
+    client, output: Path, anchor: Path, approver: str, exporter: str, *, keep_approved: bool = False
+) -> dict:
     """Perform one explicit operation, preserving UNKNOWN on ambiguous submission."""
     output, anchor = output.resolve(), anchor.resolve()
     _check(not anchor.is_relative_to(output), "digest path must be outside evidence directory")
@@ -210,41 +212,48 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         # This is a separately retained *local* digest, not an independent signer.
         verified = verify_bundle(evidence_path, digest)
         _check(verified["png_sha256"] == png_hash, "verified raster differs from submitted input")
-        # Invalidate only the synthetic design created by this smoke. An old
-        # evidence bundle remains offline-verifiable but must not be exportable
-        # again as current. This negative probe never invokes the OCR POST.
-        stage = "stale_revision_probe"
-        _request(
-            client,
-            "POST",
-            root + "/commands",
-            200,
-            json={
-                "command_id": "smoke-stale-" + uuid4().hex,
-                "expected_revision": revision,
-                "actor": "user",
-                "operations": [{"op": "set_text", "node_id": "title", "text": "已变更的合成标题"}],
-            },
-        )
-        raw, _ = _request(
-            client, "GET", f"{endpoint}/{operation_id}/evidence-bundle", 409, headers=export
-        )
-        _check(
-            _object(raw)["error"]["code"] == "REVISION_CONFLICT",
-            "stale revision was not explicitly rejected",
-        )
-        _json_file(
-            output / "stale-rejection.json", {"http_status": 409, "code": "REVISION_CONFLICT"}
-        )
+        if not keep_approved:
+            # Invalidate only the synthetic design created by this smoke. An old
+            # evidence bundle remains offline-verifiable but must not be exportable
+            # again as current. This negative probe never invokes the OCR POST.
+            stage = "stale_revision_probe"
+            _request(
+                client,
+                "POST",
+                root + "/commands",
+                200,
+                json={
+                    "command_id": "smoke-stale-" + uuid4().hex,
+                    "expected_revision": revision,
+                    "actor": "user",
+                    "operations": [
+                        {"op": "set_text", "node_id": "title", "text": "已变更的合成标题"}
+                    ],
+                },
+            )
+            raw, _ = _request(
+                client, "GET", f"{endpoint}/{operation_id}/evidence-bundle", 409, headers=export
+            )
+            _check(
+                _object(raw)["error"]["code"] == "REVISION_CONFLICT",
+                "stale revision was not explicitly rejected",
+            )
+            _json_file(
+                output / "stale-rejection.json", {"http_status": 409, "code": "REVISION_CONFLICT"}
+            )
         stage = "retain_digest"
         with os.fdopen(os.open(anchor, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
             stream.write(digest + "\n")
         report = {
             **verified,
-            "status": "LOCAL_SMOKE_CONSISTENT_UNATTESTED",
+            "status": (
+                "LOCAL_BASELINE_CONSISTENT_UNATTESTED"
+                if keep_approved
+                else "LOCAL_SMOKE_CONSISTENT_UNATTESTED"
+            ),
             "execution_state": execution,
             "synthetic_asset": True,
-            "stale_revision_rejected": True,
+            "stale_revision_rejected": not keep_approved,
             "independent_anchor_verified": False,
         }
         _json_file(output / "outcome.json", report)
@@ -268,6 +277,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-model", action="store_true")
     parser.add_argument("--confirm-isolated-server", action="store_true")
+    parser.add_argument(
+        "--keep-approved",
+        action="store_true",
+        help="Retain approved revision for source drift probes; defer stale revision test.",
+    )
     parser.add_argument("--origin", default="http://127.0.0.1:8000")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--digest-file", type=Path, required=True)
@@ -292,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.digest_file,
                 os.environ.get("POSTER_SMOKE_APPROVER_TOKEN", ""),
                 os.environ.get("POSTER_SMOKE_EXPORTER_TOKEN", ""),
+                keep_approved=args.keep_approved,
             )
     except (SmokeError, OSError):
         parser.exit(
