@@ -508,6 +508,83 @@ def test_journaled_ocr_comparison_blocks_model_and_raster_drift(
         assert changed_raster.json()["error"]["code"] == "OCR_SOURCE_MISMATCH"
 
 
+def test_ocr_evidence_bundle_exports_exact_pixels_and_unattested_receipt(
+    ocr_paths, product_bytes, monkeypatch
+):
+    import base64
+
+    calls = []
+
+    def infer(image, **kwargs):
+        calls.append(image.read_bytes())
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", infer)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        assert client.post(_url(doc), json=payload, headers=_headers()).status_code == 201
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/evidence-bundle"
+        assert client.get(endpoint).status_code == 401
+        assert client.get(endpoint, headers=_headers(APPROVER)).status_code == 403
+
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 200, response.text
+        assert response.headers["cache-control"] == "no-store"
+        bundle = response.json()
+        assert bundle["schema_version"] == 1
+        assert bundle["evidence_kind"] == "LOCAL_OCR_UNATTESTED"
+        png = base64.b64decode(bundle["png_base64"], validate=True)
+        assert calls == [png]
+        assert hashlib.sha256(png).hexdigest() == payload["png_sha256"]
+        assert bundle["journal"]["png_sha256"] == payload["png_sha256"]
+        assert bundle["comparison"]["svg_sha256"] == payload["svg_sha256"]
+        assert bundle["journal"]["operation_id"] == payload["operation_id"]
+        assert bundle["journal"]["observations"] == list(_ocr_lines())
+        assert bundle["runtime_attested"] is False
+        assert bundle["quality_verified"] is False
+        assert bundle["release_ready"] is False
+        digest = bundle.pop("bundle_sha256")
+        canonical = json.dumps(
+            bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == digest
+        assert EXPORTER not in canonical
+        assert str(ocr_paths.parent) not in canonical
+        repeated = client.get(endpoint, headers=_headers())
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["bundle_sha256"] == digest
+        assert len(calls) == 1
+
+        changed = client.post(
+            f"/api/designs/{doc}/commands",
+            json={
+                "command_id": "cmd-ocr-evidence-bundle-stale",
+                "expected_revision": 1,
+                "actor": "user",
+                "operations": [{"op": "set_text", "node_id": "title", "text": "新版标题"}],
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        assert client.get(endpoint, headers=_headers()).status_code == 409
+        assert len(calls) == 1
+
+
+def test_ocr_evidence_bundle_refuses_unknown_operation(ocr_paths, product_bytes, monkeypatch):
+    def unavailable(image, **kwargs):
+        raise OCRUnavailable("synthetic unavailable")
+
+    monkeypatch.setattr(ocr_runs, "recognize", unavailable)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        first = client.post(_url(doc), json=payload, headers=_headers())
+        assert first.status_code == 201, first.text
+        assert first.json()["status"] == "UNAVAILABLE"
+        endpoint = _url(doc) + "/" + payload["operation_id"] + "/evidence-bundle"
+        response = client.get(endpoint, headers=_headers())
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "OCR_RUN_NOT_EXECUTED"
+
+
 @pytest.mark.parametrize("drift", ["model", "journal"])
 def test_ocr_comparison_rechecks_sources_after_rasterization(
     ocr_paths, product_bytes, monkeypatch, drift
