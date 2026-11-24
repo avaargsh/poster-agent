@@ -191,3 +191,12 @@ def test_manifest_refuses_renderer_or_rasterizer_mismatch(location, field, value
 
     with pytest.raises(ManifestBindingError):
         verify_manifest_binding(manifest, journal, "a" * 40)
+
+
+def test_manifest_rejects_missing_renderer_identity_on_both_sides():
+    manifest, journal = _manifest_and_journal()
+    manifest["renderer_version"] = None
+    journal["renderer_version"] = None
+
+    with pytest.raises(ManifestBindingError):
+        verify_manifest_binding(manifest, journal, "a" * 40)
