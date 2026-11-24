@@ -321,11 +321,34 @@ def run_smoke(
             _canonical(evidence["journal"]) == _canonical(journal),
             "exported journal differs from executed operation",
         )
+        bundle_approval = evidence.get("approval")
+        _check(
+            isinstance(bundle_approval, dict)
+            and all(
+                bundle_approval.get(key) == approval_evidence[key]
+                for key in (
+                    "document_id",
+                    "revision",
+                    "approval_id",
+                    "spec_digest",
+                    "asset_manifest_digest",
+                    "renderer_version",
+                    "principal_id",
+                    "policy_digest",
+                )
+            )
+            and bundle_approval.get("principal_id") != journal["principal_id"],
+            "exported approval attribution differs from approved reviewer",
+        )
         evidence_path = output / "evidence.json"
         evidence_path.write_bytes(raw)
         stage = "verify"
         # This is a separately retained *local* digest, not an independent signer.
         verified = verify_bundle(evidence_path, digest)
+        _check(
+            verified["approval_attribution_verified"] is True,
+            "verified bundle has no approval attribution",
+        )
         _check(verified["png_sha256"] == png_hash, "verified raster differs from submitted input")
         if not keep_approved:
             # Invalidate only the synthetic design created by this smoke. An old
