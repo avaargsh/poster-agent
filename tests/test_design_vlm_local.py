@@ -124,6 +124,32 @@ def test_duplicate_json_keys_and_untrusted_claims_do_not_parse():
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("x", False),
+        ("y", False),
+        ("width", True),
+        ("height", True),
+        ("x", "0.1"),
+        ("width", "0.2"),
+    ],
+)
+def test_vlm_findings_reject_non_numeric_geometry_coercion(field, value):
+    finding = {
+        "finding_id": "geometry-1",
+        "category": "contrast",
+        "severity": "minor",
+        "confidence": 0.7,
+        "explanation": "Synthetic geometry",
+        "suggested_action": "REVIEW_STYLE",
+        "region": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+    }
+    finding["region"][field] = value
+    with pytest.raises(ValueError):
+        local.parse_findings(json.dumps({"findings": [finding]}))
+
+
+@pytest.mark.parametrize(
     "digests",
     [
         [DIGEST, DIGEST],

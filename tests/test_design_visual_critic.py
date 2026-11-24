@@ -177,6 +177,33 @@ def test_preview_rejects_forged_claims_and_invalid_regions(
                     }
                 ],
             },
+            {
+                **payload,
+                "findings": [
+                    {
+                        **payload["findings"][0],
+                        "region": {"x": False, "y": 0.1, "width": 0.2, "height": 0.2},
+                    }
+                ],
+            },
+            {
+                **payload,
+                "findings": [
+                    {
+                        **payload["findings"][0],
+                        "region": {"x": 0.1, "y": 0.1, "width": True, "height": 0.2},
+                    }
+                ],
+            },
+            {
+                **payload,
+                "findings": [
+                    {
+                        **payload["findings"][0],
+                        "region": {"x": "0.1", "y": 0.1, "width": 0.2, "height": 0.2},
+                    }
+                ],
+            },
             {**payload, "findings": payload["findings"] * 21},
         ]
         for submission in invalid:
