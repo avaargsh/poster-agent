@@ -1411,3 +1411,49 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
         assert request["operation_id"].startswith("ocr_")
         assert APPROVER not in (output / "outcome.json").read_text()
         assert EXPORTER not in (output / "outcome.json").read_text()
+
+
+@pytest.mark.parametrize("drift", ["model", "asset", "none"])
+def test_read_only_ocr_drift_probe(ocr_paths, product_bytes, monkeypatch, tmp_path, drift):
+    from scripts.probe_ocr_source_drift import probe_drift
+    from scripts.run_design_ocr_smoke import SmokeError
+
+    calls = []
+
+    def infer(image, **kwargs):
+        calls.append(1)
+        return _ocr_lines()
+
+    monkeypatch.setattr(ocr_runs, "recognize", infer)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        endpoint = _url(doc) + "/" + payload["operation_id"]
+        response = client.post(_url(doc), json=payload, headers=_headers())
+        assert response.status_code == 201
+        baseline = client.get(endpoint + "/evidence-bundle", headers=_headers())
+        assert baseline.status_code == 200
+        digest = baseline.json()["bundle_sha256"]
+        if drift == "model":
+            (ocr_paths.parent / "local-detector" / "weights.bin").write_bytes(b"changed")
+        elif drift == "asset":
+            assets = list((ocr_paths.parent / "design-assets").iterdir())
+            assert len(assets) == 1
+            assets[0].write_bytes(b"changed")
+
+        if drift == "none":
+            with pytest.raises(SmokeError):
+                probe_drift(client, baseline.content, digest, EXPORTER, "model")
+        else:
+            result = probe_drift(client, baseline.content, digest, EXPORTER, drift)
+            assert result["status"] == "SOURCE_DRIFT_REJECTED_UNATTESTED"
+            assert result["journal_unchanged"] is True
+            assert result["release_ready"] is False
+            assert result["operation_id"] == payload["operation_id"]
+            assert (
+                result["error_code"]
+                == {
+                    "model": "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE",
+                    "asset": "ASSET_INVALID",
+                }[drift]
+            )
+        assert calls == [1]
