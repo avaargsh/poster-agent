@@ -806,6 +806,32 @@ def get_design_ocr_run_comparison(
     operation_id: Annotated[str, Path(pattern=r"^ocr_[0-9a-f]{32}$")],
 ):
     """Recheck completed local journal observations; never certify OCR or release."""
+    return _read_design_ocr_artifact(document_id, request, revision, operation_id)
+
+
+@router.get(
+    "/api/designs/{document_id}/revisions/{revision}/ocr-runs/{operation_id}/evidence-bundle"
+)
+def get_design_ocr_evidence_bundle(
+    document_id: str,
+    request: Request,
+    revision: Annotated[int, Path(ge=1)],
+    operation_id: Annotated[str, Path(pattern=r"^ocr_[0-9a-f]{32}$")],
+):
+    """Export exact locally revalidated evidence, never a trusted receipt."""
+    return _read_design_ocr_artifact(
+        document_id, request, revision, operation_id, include_evidence_bundle=True
+    )
+
+
+def _read_design_ocr_artifact(
+    document_id: str,
+    request: Request,
+    revision: int,
+    operation_id: str,
+    *,
+    include_evidence_bundle: bool = False,
+):
     try:
         reviewer = reviewer_for_request(request, "export")
         if reviewer is None:
@@ -820,6 +846,7 @@ def get_design_ocr_run_comparison(
             principal=reviewer.principal_id,
             policy=reviewer.policy_digest,
             model_config_raw=getattr(request.app.state, "design_ocr_model_profile_raw", None),
+            include_evidence_bundle=include_evidence_bundle,
         )
     except ReviewerAccessError as exc:
         return _error_response(exc.status, exc.code, exc.message)
@@ -835,10 +862,10 @@ def get_design_ocr_run_comparison(
         return _error_response(503, "DESIGN_RASTER_INVALID", "approved raster unavailable")
     except Exception:
         return _unexpected_error_response()
-    return JSONResponse(
-        content=result,
-        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-    )
+    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+    if include_evidence_bundle:
+        headers["Content-Disposition"] = 'attachment; filename="ocr-evidence-v1.json"'
+    return JSONResponse(content=result, headers=headers)
 
 
 def _proposal_links(proposal: dict) -> dict:
