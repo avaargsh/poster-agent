@@ -1241,11 +1241,14 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
                 run_smoke(client, output, anchor, APPROVER, EXPORTER)
             report = json.loads((output / "outcome.json").read_text())
             assert report["status"] == "INCOMPLETE"
-            assert report["execution_state"] == {
-                "ack_loss": "UNKNOWN",
-                "unavailable": "UNAVAILABLE",
-                "stale_accepted": "EXECUTED",
-            }[outcome]
+            assert (
+                report["execution_state"]
+                == {
+                    "ack_loss": "UNKNOWN",
+                    "unavailable": "UNAVAILABLE",
+                    "stale_accepted": "EXECUTED",
+                }[outcome]
+            )
             if outcome == "stale_accepted":
                 assert report["stage"] == "stale_revision_probe"
             assert not anchor.exists()
