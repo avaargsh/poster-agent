@@ -346,7 +346,7 @@ def run_smoke(
         # This is a separately retained *local* digest, not an independent signer.
         verified = verify_bundle(evidence_path, digest)
         _check(
-            verified["approval_attribution_verified"] is True,
+            verified["approval_attribution_consistent"] is True,
             "verified bundle has no approval attribution",
         )
         _check(verified["png_sha256"] == png_hash, "verified raster differs from submitted input")
