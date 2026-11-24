@@ -150,7 +150,11 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
 
     _require(type(journal) is dict, "invalid journal")
     _require(
-        journal.get("renderer_version") == manifest["renderer_version"],
+        _text(manifest["renderer_version"]) and _text(journal.get("renderer_version")),
+        "invalid renderer identity",
+    )
+    _require(
+        journal["renderer_version"] == manifest["renderer_version"],
         "renderer version differs from executed journal",
     )
     _require(
