@@ -105,3 +105,34 @@ after the response, and a database administrator can rewrite local records.
 Production acceptance still requires a separate trusted evidence authority,
 independent model/runtime provenance, human review and a final atomic
 release-time guard. This route is local diagnostic evidence only.
+
+
+## Local evidence bundle export (v1)
+
+`GET /api/designs/{document_id}/revisions/{revision}/ocr-runs/{operation_id}/evidence-bundle`
+
+This explicit, read-only download uses the same named export principal and
+policy, completed operation, exact approved revision and postflight model /
+journal / design checks as comparison-preview. It does not invoke OCR or
+write any state. Missing, stale, non-executed or inconsistent operations
+are rejected. The response is a private JSON attachment, with no-store.
+
+The version-1 object contains `evidence_kind=LOCAL_OCR_UNATTESTED`, the
+canvas dimensions, base64 PNG bytes from the very same verified raster
+used by comparison (bounded to 24 MiB before encoding), policy digest,
+local journal record (including observations and runtime metadata), and
+comparison report. It omits raw tokens, model directory paths and SVG source
+bytes. Treat it as customer-sensitive material; do not commit it to GitHub.
+
+`bundle_sha256` is SHA-256 of UTF-8 canonical JSON of the whole object
+**excluding that field** (Python json.dumps with ensure_ascii=False,
+sort_keys=True, separators=(",", ":"), allow_nan=False). Decode PNG base64
+strictly and compare its SHA-256 with the journal and comparison PNG hashes.
+An externally retained expected bundle digest can detect later byte/content
+changes; a digest shipped inside the same bundle is not authentication.
+
+This is an export slice, not a complete independent verifier: it does not
+include SVG bytes, model files, signed runtime claims or human labels.
+Repeated export of unchanged inputs has the same digest. All trust flags
+remain false. A successful export is neither proof of genuine execution
+nor quality acceptance nor a permit to publish.

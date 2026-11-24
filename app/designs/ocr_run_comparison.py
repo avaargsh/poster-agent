@@ -6,7 +6,10 @@ attest OCR execution or authorize publishing.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
+import json
 
 from pydantic import ValidationError
 
@@ -38,6 +41,7 @@ def compare_journaled_ocr_run(
     principal: str,
     policy: str,
     model_config_raw: str | None,
+    include_evidence_bundle: bool = False,
 ) -> dict:
     """Replay stored local observations only against a newly verified source.
 
@@ -164,7 +168,7 @@ def compare_journaled_ocr_run(
     if repository.ocr_target(document_id, revision, required_policy_digest=policy) != target:
         raise OCRSourceMismatch()
 
-    return {
+    report = {
         **compared,
         **spatial,
         **layout_hints,
@@ -177,3 +181,26 @@ def compare_journaled_ocr_run(
         "quality_verified": False,
         "release_ready": False,
     }
+
+    if not include_evidence_bundle:
+        return report
+
+    # Reuse the exact raster and journal snapshot used for the comparison.
+    # Do not fetch either again or include credentials, model paths or SVG
+    # source bytes. The rasterizer already enforces PNG size/pixel bounds.
+    bundle = {
+        "schema_version": 1,
+        "evidence_kind": "LOCAL_OCR_UNATTESTED",
+        "policy_digest": policy,
+        "canvas": {"width": raster.width, "height": raster.height},
+        "png_base64": base64.b64encode(raster.png).decode("ascii"),
+        "journal": row,
+        "comparison": report,
+        "runtime_attested": False,
+        "quality_verified": False,
+        "release_ready": False,
+    }
+    canonical = json.dumps(
+        bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return {**bundle, "bundle_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest()}
