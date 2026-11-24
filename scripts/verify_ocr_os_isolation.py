@@ -130,6 +130,13 @@ def _ipv4_routes(raw: str) -> list[str]:
         fields = line.split()
         _require(len(fields) == 11, "invalid IPv4 route row")
         interface, destination = fields[0], fields[1].lower()
+        _require(
+            re.fullmatch(r"[0-9a-f]{8}", destination) is not None
+            and re.fullmatch(r"[0-9a-f]{8}", fields[2].lower()) is not None
+            and re.fullmatch(r"[0-9a-f]{4}", fields[3].lower()) is not None
+            and re.fullmatch(r"[0-9a-f]{8}", fields[7].lower()) is not None,
+            "invalid IPv4 route address fields",
+        )
         _require(interface == "lo", "IPv4 route uses a non-loopback interface")
         _require(destination != "00000000", "IPv4 default route is present")
         interfaces.append(interface)
@@ -144,6 +151,15 @@ def _ipv6_routes(raw: str) -> list[str]:
         fields = line.split()
         _require(len(fields) == 10, "invalid IPv6 route row")
         destination, prefix, interface = fields[0].lower(), fields[1].lower(), fields[-1]
+        _require(
+            re.fullmatch(r"[0-9a-f]{32}", destination) is not None
+            and re.fullmatch(r"[0-9a-f]{2}", prefix) is not None
+            and re.fullmatch(r"[0-9a-f]{32}", fields[2].lower()) is not None
+            and re.fullmatch(r"[0-9a-f]{2}", fields[3].lower()) is not None
+            and re.fullmatch(r"[0-9a-f]{32}", fields[4].lower()) is not None
+            and all(re.fullmatch(r"[0-9a-f]{8}", value.lower()) for value in fields[5:9]),
+            "invalid IPv6 route address fields",
+        )
         _require(interface == "lo", "IPv6 route uses a non-loopback interface")
         _require(
             destination == "0" * 32 and prefix == "00",
@@ -178,6 +194,11 @@ def _mount_for(model_path: str, mountinfo: str) -> dict:
         fields = before.split()
         _require(bool(separator) and len(fields) >= 6, "invalid mountinfo row")
         mountpoint = _unescape_mount(fields[4])
+        _require(
+            PurePosixPath(mountpoint).is_absolute()
+            and PurePosixPath(mountpoint).as_posix() == mountpoint,
+            "invalid mountpoint path",
+        )
         options = set(fields[5].split(","))
         if (
             mountpoint == "/"
