@@ -1303,6 +1303,7 @@ def test_offline_evidence_verifier_rechecks_bundle(
     "outcome",
     [
         "success",
+        "baseline",
         "unavailable",
         "ack_loss",
         "stale_accepted",
@@ -1382,6 +1383,19 @@ def test_manual_design_ocr_smoke_preserves_single_operation(
             stale = json.loads((output / "stale-rejection.json").read_text())
             assert stale == {"http_status": 409, "code": "REVISION_CONFLICT"}
             assert anchor.read_text().strip() == report["bundle_sha256"]
+        elif outcome == "baseline":
+            report = run_smoke(client, output, anchor, APPROVER, EXPORTER, keep_approved=True)
+            assert report["status"] == "LOCAL_BASELINE_CONSISTENT_UNATTESTED"
+            assert report["stale_revision_rejected"] is False
+            assert report["release_ready"] is False
+            assert report["quality_verified"] is False
+            assert report["runtime_attested"] is False
+            assert len(exported) == 1
+            assert not (output / "stale-rejection.json").exists()
+            assert anchor.read_text().strip() == report["bundle_sha256"]
+            current = client.get(exported[0], headers={"Authorization": "Bearer " + EXPORTER})
+            assert current.status_code == 200
+            assert current.json()["bundle_sha256"] == report["bundle_sha256"]
         else:
             with pytest.raises(SmokeError):
                 run_smoke(client, output, anchor, APPROVER, EXPORTER)
