@@ -148,6 +148,16 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
         _require(_sha(manifest[key]), "invalid model digest")
 
     _require(type(journal) is dict, "invalid journal")
+    _require(
+        journal.get("status") == "EXECUTED"
+        and journal.get("reason") is None
+        and journal.get("replayed") is False
+        and all(
+            journal.get(key) is False
+            for key in ("runtime_attested", "quality_verified", "release_ready")
+        ),
+        "journal is not an initial unattested execution",
+    )
     operation_id = journal.get("operation_id")
     _require(
         isinstance(operation_id, str)
@@ -183,7 +193,7 @@ def verify_manifest_binding(manifest: dict, journal: dict, expected_git_commit: 
         "git_commit": manifest["git_commit"],
         "operation_id": operation_id,
         "model_profile_sha256": manifest["model_profile_sha256"],
-        "runtime_platform_match": True,
+        "runtime_python_and_machine_match": True,
         "runtime_package_versions_match": True,
         "cairosvg_version_recorded": True,
         "font_identity_count": len(fonts),
