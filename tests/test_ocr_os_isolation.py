@@ -10,10 +10,20 @@ from scripts.verify_ocr_os_isolation import IsolationError, inspect_isolation
 
 
 _PID = 4242
-_CMDLINE = (
-    b"python\0-m\0uvicorn\0app.main:app\0--host\0127.0.0.1\0"
-    b"--port\08000\0--workers\01\0"
-)
+_CMDLINE = b"\\0".join(
+    (
+        b"python",
+        b"-m",
+        b"uvicorn",
+        b"app.main:app",
+        b"--host",
+        b"127.0.0.1",
+        b"--port",
+        b"8000",
+        b"--workers",
+        b"1",
+    )
+) + b"\\0"
 _NET_DEV = (
     "Inter-| Receive | Transmit\n"
     " face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n"
