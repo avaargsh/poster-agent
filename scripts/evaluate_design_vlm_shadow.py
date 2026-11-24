@@ -140,6 +140,9 @@ def _read_labels(path: Path) -> tuple[list[dict[str, str]], str]:
         raise CalibrationError("cohort must contain between 1 and 1000 samples")
     operations: set[str] = set()
     skus: set[str] = set()
+    document_revisions: set[tuple[str, int]] = set()
+    approved_pngs: set[str] = set()
+    approved_svgs: set[str] = set()
     profiles: set[str] = set()
     for row in rows:
         if None in row or any(value is None for value in row.values()):
@@ -161,6 +164,16 @@ def _read_labels(path: Path) -> tuple[list[dict[str, str]], str]:
             raise CalibrationError("invalid or absent human category label")
         if row["sku_id"] in skus or row["operation_id"] in operations:
             raise CalibrationError("duplicate SKU or operation in frozen cohort")
+        document_revision = (row["document_id"], int(row["revision"]))
+        if document_revision in document_revisions:
+            raise CalibrationError("duplicate document revision in frozen cohort")
+        if row["png_sha256"] in approved_pngs:
+            raise CalibrationError("duplicate approved PNG in frozen cohort")
+        if row["svg_sha256"] in approved_svgs:
+            raise CalibrationError("duplicate approved SVG in frozen cohort")
+        document_revisions.add(document_revision)
+        approved_pngs.add(row["png_sha256"])
+        approved_svgs.add(row["svg_sha256"])
         skus.add(row["sku_id"])
         operations.add(row["operation_id"])
         profiles.add(row["model_profile_sha256"])
