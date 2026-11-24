@@ -19,6 +19,7 @@ import sqlite3
 import stat
 import sys
 from collections import Counter
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -78,6 +79,18 @@ def _digest(value: object) -> str:
 
 def _fraction(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
+
+
+def _resource_hourly_rate(value: Decimal | str | None) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        rate = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise CalibrationError("invalid resource hourly rate") from None
+    if not rate.is_finite() or rate < 0 or rate > Decimal("1000000"):
+        raise CalibrationError("invalid resource hourly rate")
+    return rate
 
 
 def _require(value: object, pattern: re.Pattern[str]) -> None:
@@ -235,7 +248,7 @@ def _validate_journal_metadata(row: dict) -> int | None:
     raise CalibrationError("unsupported visual journal state")
 
 
-def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | None]:
+def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | None, int]:
     """Fail the entire analysis on drift instead of quietly shrinking the cohort."""
     for field in (
         "operation_id",
@@ -260,7 +273,7 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
     if row["status"] != "EXECUTED":
         if row["findings_json"] is not None or row["runtime_json"] is not None:
             raise CalibrationError("unresolved run must not supply model evidence")
-        return set(), None
+        return set(), None, 0
 
     if not isinstance(row["findings_json"], str):
         raise CalibrationError("executed run is missing its recorded findings")
@@ -289,7 +302,7 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
             raise ValueError("unexpected runtime provenance claim")
     except (ValueError, TypeError, UnicodeError, RecursionError):
         raise CalibrationError("invalid or untrusted local VLM observations") from None
-    return {finding["category"] for finding in findings}, elapsed
+    return {finding["category"] for finding in findings}, elapsed, len(findings)
 
 
 def _nearest_rank(values: list[int], fraction: float) -> int | None:
@@ -298,8 +311,53 @@ def _nearest_rank(values: list[int], fraction: float) -> int | None:
     return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)]
 
 
-def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
+def _cost_report(
+    rate: Decimal | None, durations: list[int], unresolved_count: int
+) -> dict:
+    executed_count = len(durations)
+    elapsed_ms = sum(durations)
+    total_cost = None
+    per_operation_cost = None
+    if rate is None:
+        status = "LOCAL_COMPUTE_COST_NOT_METERED"
+    elif executed_count == 0:
+        status = "NO_EXECUTED_OPERATION_COST_BASELINE"
+    else:
+        raw_total = rate * Decimal(elapsed_ms) / Decimal(3_600_000)
+        total_cost = raw_total.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        per_operation_cost = (raw_total / Decimal(executed_count)).quantize(
+            Decimal("0.000001"), rounding=ROUND_HALF_UP
+        )
+        status = "OPERATOR_RATE_ESTIMATE"
+
+    return {
+        "status": status,
+        "resource_hourly_rate_usd": format(rate.normalize(), "f") if rate is not None else None,
+        "estimated_total_usd": format(total_cost, "f") if total_cost is not None else None,
+        "estimated_per_executed_operation_usd": (
+            format(per_operation_cost, "f") if per_operation_cost is not None else None
+        ),
+        "executed_operation_count": executed_count,
+        "unresolved_operation_count": unresolved_count,
+        "total_executed_wall_elapsed_ms": elapsed_ms,
+        "scope": "EXECUTED_JOURNAL_WALL_TIME_ONLY",
+        "limitations": [
+            "not provider billing",
+            "wall time includes preflight and postflight, not model-only inference or GPU utilization",
+            "UNKNOWN and EXECUTING attempts are excluded and may have consumed compute",
+            "startup, idle capacity and shared host costs are excluded",
+        ],
+    }
+
+
+def evaluate_shadow_cohort(
+    db_path: Path,
+    labels_path: Path,
+    *,
+    resource_hourly_rate_usd: Decimal | str | None = None,
+) -> dict:
     """Metrics refer only to this explicitly selected, operator-asserted cohort."""
+    rate = _resource_hourly_rate(resource_hourly_rate_usd)
     labels, csv_sha = _read_labels(Path(labels_path))
     runs, journal_sha = _read_journal(Path(db_path), labels)
     statuses = Counter()
@@ -311,9 +369,14 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
     models: set[str] = set()
     fully_reviewed = 0
     durations: list[int] = []
+    model_findings_count = 0
+    sku_with_model_findings = 0
 
     for label, run in zip(labels, runs, strict=True):
-        predictions, elapsed = _checked_record(run, label)
+        predictions, elapsed, finding_count = _checked_record(run, label)
+        model_findings_count += finding_count
+        if finding_count:
+            sku_with_model_findings += 1
         status = run["status"]
         statuses[status] += 1
         profiles.add(run["model_profile_sha256"])
@@ -373,6 +436,12 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
         for key in ("tp", "fp", "fn", "tn")
     }
     complete = len(labels) >= MINIMUM_SKUS and fully_reviewed == len(labels)
+    signal_status = (
+        "NO_FINDINGS_NOT_A_PASS"
+        if model_findings_count == 0
+        else "FINDINGS_RECORDED_REQUIRES_HUMAN_REVIEW"
+    )
+    cost = _cost_report(rate, durations, statuses["UNKNOWN"] + statuses["EXECUTING"])
     return {
         "schema_version": SCHEMA,
         "status": (
@@ -384,6 +453,10 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
         "sku_count": len(labels),
         "operation_count": len(runs),
         "complete_case_count": fully_reviewed,
+        "signal_status": signal_status,
+        "model_findings_count": model_findings_count,
+        "sku_with_model_findings": sku_with_model_findings,
+        "zero_findings_not_a_pass": model_findings_count == 0,
         "minimum_complete_skus_required": MINIMUM_SKUS,
         "minimum_complete_skus_met": complete,
         "journal_status_counts": {state: statuses[state] for state in _STATUSES},
@@ -402,6 +475,7 @@ def evaluate_shadow_cohort(db_path: Path, labels_path: Path) -> dict:
             "p95": _nearest_rank(durations, 0.95),
             "scope": "local_adapter_journal_elapsed_not_model_only",
         },
+        "cost": cost,
         "input_sha256": {"labels_csv": csv_sha, "journal_rows": journal_sha},
         "source_authorizations_verified": False,
         "cohort_selection_independently_verified": False,
@@ -426,9 +500,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--db", type=Path, required=True, help="existing local designs.sqlite3")
     parser.add_argument("--labels", type=Path, required=True, help="manual category review CSV")
+    parser.add_argument(
+        "--resource-hourly-rate-usd",
+        default=None,
+        help="optional operator-supplied local resource rate per hour for a wall-time estimate",
+    )
     args = parser.parse_args(argv)
     try:
-        result = evaluate_shadow_cohort(args.db, args.labels)
+        result = evaluate_shadow_cohort(
+            args.db, args.labels, resource_hourly_rate_usd=args.resource_hourly_rate_usd
+        )
     except CalibrationError as exc:
         print(f"Visual Critic calibration refused: {exc}", file=sys.stderr)
         return 2
