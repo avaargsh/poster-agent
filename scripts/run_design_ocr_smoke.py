@@ -120,9 +120,14 @@ def run_smoke(
         png, headers = _request(client, "GET", revision_root + "/approved.png", 200, headers=export)
         svg_hash = headers.get("x-approved-svg-sha256")
         png_hash = headers.get("x-raster-png-sha256")
+        media_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
         _check(
-            _sha(svg_hash) and _sha(png_hash) and hashlib.sha256(png).hexdigest() == png_hash,
-            "approved raster hash mismatch",
+            media_type == "image/png"
+            and png.startswith(b"\x89PNG\r\n\x1a\n")
+            and _sha(svg_hash)
+            and _sha(png_hash)
+            and hashlib.sha256(png).hexdigest() == png_hash,
+            "approved raster content or hash mismatch",
         )
         (output / "approved.png").write_bytes(png)
         request = {

@@ -1525,3 +1525,52 @@ def test_smoke_retains_approved_baseline_for_drift(ocr_paths, tmp_path, monkeypa
         assert observed["journal_unchanged"] is True
         assert observed["release_ready"] is False
         assert calls == [1]
+
+
+@pytest.mark.parametrize("mutation", ["invalid_png", "wrong_media_type"])
+def test_manual_ocr_smoke_rejects_untrusted_raster_before_inference(
+    ocr_paths, tmp_path, monkeypatch, mutation
+):
+    """A matching server-supplied digest does not prove the body is a PNG."""
+    from contextlib import nullcontext
+
+    import httpx
+
+    from scripts.run_design_ocr_smoke import SmokeError, run_smoke
+
+    # The rejection must happen before any provider call; never run a model
+    # even if the pre-fix path incorrectly reaches OCR submission.
+    monkeypatch.setattr(ocr_runs, "recognize", lambda image, **kwargs: _ocr_lines())
+    output = tmp_path / "invalid-raster-smoke"
+    anchor = tmp_path / "invalid-raster-digest.txt"
+    submitted = []
+    with TestClient(app) as client:
+        original_stream = client.stream
+
+        def stream(method, url, **kwargs):
+            if method == "GET" and url.endswith("/approved.png"):
+                raster = client.get(url, **kwargs)
+                assert raster.status_code == 200
+                headers = dict(raster.headers)
+                body = raster.content
+                if mutation == "invalid_png":
+                    body = b"not-a-png"
+                    headers["x-raster-png-sha256"] = hashlib.sha256(body).hexdigest()
+                else:
+                    headers["content-type"] = "application/octet-stream"
+                return nullcontext(httpx.Response(200, content=body, headers=headers))
+            if method == "POST" and url.endswith("/ocr-runs"):
+                submitted.append(url)
+            return original_stream(method, url, **kwargs)
+
+        monkeypatch.setattr(client, "stream", stream)
+        with pytest.raises(SmokeError):
+            run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text())
+    assert outcome["status"] == "INCOMPLETE"
+    assert outcome["stage"] == "raster"
+    assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert not (output / "operation-request.json").exists()
+    assert not anchor.exists()
+    assert submitted == []
