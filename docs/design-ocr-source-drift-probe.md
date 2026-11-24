@@ -5,11 +5,26 @@ private copies of assets and models. This probe performs GET requests only.
 It does not change model weights, assets, approval, or journal state.
 
 Before changing a source, capture an EXECUTED operation's evidence bundle
-and retain its canonical digest separately using the documented journal
-and evidence bundle endpoints. Keep the design at its approved revision.
-The manual smoke client currently advances the revision during its final
-stale-revision test, so capture a baseline using the explicit API steps
-before that transition, not an already stale design.
+and retain its canonical digest separately. Keep the design at its approved
+revision. On an isolated server with the separate named reviewer tokens
+configured, use:
+
+```sh
+uv run --no-sync python -m scripts.run_design_ocr_smoke \
+  --run-model --confirm-isolated-server --capture-drift-baseline \
+  --output-dir /private/new-baseline \
+  --digest-file /private/new-baseline.sha256
+```
+
+The explicit baseline mode performs a single synthetic OCR operation, exact
+idempotent replay and offline verification. It retains the current approved
+revision and writes `LOCAL_DRIFT_BASELINE_UNATTESTED` with
+`stale_revision_rejected: false`; it does not claim that the stale-revision
+test passed. Use `/private/new-baseline/evidence.json` and the separately
+retained canonical digest for the GET-only drift probe below. The default
+smoke mode still tests stale-revision rejection and is not a suitable
+current baseline. Run the default test separately on a different synthetic
+design. Never retry an ambiguous operation automatically.
 
 An operator must create and document the intended drift independently in
 the disposable environment, without running another OCR request. Do not
