@@ -482,3 +482,26 @@ def test_calibration_rejects_invalid_operator_resource_rate(tmp_path, rate):
 
     with pytest.raises(CalibrationError):
         evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
+
+
+def test_no_executed_runs_are_not_reported_as_zero_model_findings(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            """
+            UPDATE design_vlm_runs
+            SET status='UNKNOWN', findings_json=NULL, runtime_json=NULL,
+                reason='RECOVERED_AFTER_RESTART',
+                finished_at='2026-11-15T00:01:00+00:00'
+            """
+        )
+
+    report = _eval(db, labels)
+
+    assert report["journal_status_counts"]["EXECUTED"] == 0
+    assert report["journal_status_counts"]["UNKNOWN"] == 20
+    assert report["model_findings_count"] == 0
+    assert report["signal_status"] == "NO_EXECUTED_MODEL_RUNS_NOT_A_PASS"
+    assert report["zero_findings_not_a_pass"] is False
+    assert report["quality_verified"] is False
+    assert report["release_ready"] is False
