@@ -17,7 +17,7 @@ from uuid import uuid4
 import httpx
 
 from scripts.design_demo import _programmatic_product_png
-from scripts.verify_ocr_evidence_bundle import verify_bundle
+from scripts.verify_ocr_evidence_bundle import _canonical, _nonfinite, _unique, verify_bundle
 
 _FLAGS = dict.fromkeys(("runtime_attested", "quality_verified", "release_ready"), False)
 _MAX_RESPONSE = 36 * 1024 * 1024
@@ -54,8 +54,10 @@ def _request(client, method: str, path: str, expected: int, **kwargs):
 
 
 def _object(raw: bytes) -> dict:
-    result = json.loads(raw)
+    result = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite)
     _check(isinstance(result, dict), "expected JSON object")
+    # Also reject overflowed exponent values and other non-canonical JSON values.
+    _canonical(result)
     return result
 
 
@@ -153,12 +155,14 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         )
         status = journal.get("status")
         _check(status in ("EXECUTED", "UNKNOWN", "UNAVAILABLE", "FAILED"), "invalid terminal state")
-        execution = status
-        _check(execution == "EXECUTED", "OCR did not complete")
+        if status != "EXECUTED":
+            execution = status
+            raise SmokeError("OCR did not complete")
         observations, runtime = journal["observations"], journal["runtime"]
         _check(
             isinstance(observations, list)
             and bool(observations)
+            and all(isinstance(line, dict) for line in observations)
             and any(line.get("bbox") is not None for line in observations)
             and isinstance(runtime, dict)
             and runtime.get("attested") is False
@@ -168,13 +172,17 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
             ),
             "missing smoke observations or timing",
         )
+        execution = "EXECUTED"
 
         # A successful run may be replayed once with the exact same key.
         # No replay is attempted after a lost or non-successful response.
         stage = "replay"
         raw, _ = _request(client, "POST", endpoint, 200, json=request, headers=export)
         replay = _object(raw)
-        _check(replay == {**journal, "replayed": True}, "idempotent replay mismatch")
+        _check(
+            _canonical(replay) == _canonical({**journal, "replayed": True}),
+            "idempotent replay mismatch",
+        )
         stage = "export"
         raw, _ = _request(
             client, "GET", f"{endpoint}/{operation_id}/evidence-bundle", 200, headers=export
@@ -182,7 +190,10 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         evidence = _object(raw)
         digest = evidence["bundle_sha256"]
         _check(_sha(digest), "invalid bundle digest")
-        _check(evidence["journal"] == journal, "exported journal differs from executed operation")
+        _check(
+            _canonical(evidence["journal"]) == _canonical(journal),
+            "exported journal differs from executed operation",
+        )
         evidence_path = output / "evidence.json"
         evidence_path.write_bytes(raw)
         stage = "verify"
@@ -228,7 +239,7 @@ def run_smoke(client, output: Path, anchor: Path, approver: str, exporter: str) 
         }
         _json_file(output / "outcome.json", report)
         return report
-    except (ValueError, OSError, KeyError, TypeError, httpx.HTTPError):
+    except (ValueError, OSError, KeyError, TypeError, RecursionError, httpx.HTTPError):
         _json_file(
             output / "outcome.json",
             {
