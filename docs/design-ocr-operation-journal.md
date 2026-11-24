@@ -131,6 +131,29 @@ On the next single-owner repository initialization after a crash, abandoned
 because actual provider execution may have already occurred. Operators
 must reconcile and issue a **new operation ID** after assessing evidence.
 
+## Operator recovery after an ambiguous smoke submission
+
+The manual smoke client writes source.json, operation-request.json and
+outcome.json before or after submission as appropriate. When outcome.json
+records INCOMPLETE at submit with execution_state UNKNOWN, inspect the
+original operation without sending another POST:
+
+```sh
+uv run --no-sync python -m scripts.reconcile_ocr_smoke \
+  --confirm-isolated-server --smoke-dir /private/smoke \
+  --output /private/new-reconciliation.json
+```
+
+Use the same isolated server and the original named export principal
+(POSTER_SMOKE_EXPORTER_TOKEN). The command reads bounded local JSON,
+checks saved operation, revision, approval, spec, asset and raster
+identities against one journal GET, and writes a new private report.
+It does not edit outcome.json, retry inference or verify model execution.
+A missing, unauthorized, malformed or conflicting response is incomplete;
+retain UNKNOWN. A reported EXECUTED is an observed journal state, not a
+quality or release decision. The report always has retry_authorized=false
+and all authority flags false. No automatic retry is permitted.
+
 ## Boundaries remaining before acceptance
 
 This journal is local SQLite, not append-only tamper-resistant storage. The
