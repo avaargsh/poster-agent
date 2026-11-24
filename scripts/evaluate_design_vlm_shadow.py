@@ -19,7 +19,7 @@ import sqlite3
 import stat
 import sys
 from collections import Counter
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
