@@ -26,6 +26,7 @@ def inputs(tmp_path, monkeypatch):
         "text_recognition_sha256": model_directory_sha256(recognizer),
     }
     monkeypatch.setattr(collector, "_git_identity", lambda repo: "a" * 40)
+
     def version(package):
         if package == "paddlepaddle-gpu":
             raise collector.metadata.PackageNotFoundError(package)
