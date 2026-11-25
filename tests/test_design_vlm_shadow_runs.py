@@ -12,6 +12,7 @@ from PIL import Image
 
 import app.designs.rasterization as rasterization
 import app.designs.visual_runs as visual_runs
+from app.designs.vlm_local import VLMExecutionMetrics, VLMInspectionResult
 from app.main import app
 
 APPROVER = "vlm-approver-" + "A" * 48
@@ -154,6 +155,75 @@ def test_shadow_run_is_journaled_exact_once_and_never_grants_release(
         result = restarted.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
         assert result.status_code == 200
         assert result.json()["status"] == "EXECUTED"
+        assert len(calls) == 1
+
+
+def test_shadow_run_persists_provider_and_client_execution_metrics(
+    local_vlm, product_bytes, monkeypatch
+):
+    monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
+    metrics = VLMExecutionMetrics(
+        client_elapsed_ms=123,
+        provider_total_duration_ns=1_000_000,
+        provider_load_duration_ns=200_000,
+        provider_prompt_eval_count=120,
+        provider_prompt_eval_duration_ns=300_000,
+        provider_eval_count=18,
+        provider_eval_duration_ns=400_000,
+    )
+    inspection = VLMInspectionResult(findings=_findings(), metrics=metrics)
+    monkeypatch.setattr(visual_runs, "inspect_approved_png", lambda png, profile: inspection)
+
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        expected = metrics.model_dump(mode="json")
+        assert created.json()["runtime"]["execution_metrics"] == expected
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["runtime"]["execution_metrics"] == expected
+
+
+def test_corrupt_persisted_execution_metrics_fail_closed_on_status_and_replay(
+    local_vlm, product_bytes, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(visual_runs, "verify_ollama_model", lambda profile: None)
+    metrics = VLMExecutionMetrics(client_elapsed_ms=12)
+    inspection = VLMInspectionResult(findings=_findings(), metrics=metrics)
+
+    def fake_inspect(png, profile):
+        calls.append(1)
+        return inspection
+
+    monkeypatch.setattr(visual_runs, "inspect_approved_png", fake_inspect)
+    with TestClient(app) as client:
+        doc, payload = _prepare(client, product_bytes)
+        created = client.post(_url(doc), json=payload, headers=_headers())
+        assert created.status_code == 201, created.text
+        assert len(calls) == 1
+
+        with sqlite3.connect(local_vlm) as db:
+            row = db.execute(
+                "SELECT runtime_json FROM design_vlm_runs WHERE operation_id = ?",
+                (payload["operation_id"],),
+            ).fetchone()
+            runtime = json.loads(row[0])
+            runtime["execution_metrics"]["client_elapsed_ms"] = True
+            db.execute(
+                "UPDATE design_vlm_runs SET runtime_json = ? WHERE operation_id = ?",
+                (json.dumps(runtime), payload["operation_id"]),
+            )
+
+        lookup = client.get(_url(doc) + "/" + payload["operation_id"], headers=_headers())
+        assert lookup.status_code == 409, lookup.text
+        assert lookup.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
+
+        replay = client.post(_url(doc), json=payload, headers=_headers())
+        assert replay.status_code == 409, replay.text
+        assert replay.json()["error"]["code"] == "VLM_JOURNAL_CORRUPT"
         assert len(calls) == 1
 
 
