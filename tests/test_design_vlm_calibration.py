@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.designs.vlm_local import load_vlm_profile
 from scripts.evaluate_design_vlm_shadow import (
     LABEL_FIELDS,
     VISUAL_CATEGORIES,
@@ -16,7 +17,10 @@ from scripts.evaluate_design_vlm_shadow import (
     main,
 )
 
-MODEL_SHA = "d" * 64
+MODEL_DIGEST = "sha256:" + "f" * 64
+MODEL_SHA = load_vlm_profile(
+    json.dumps({"schema_version": 1, "model": "llava:latest", "digest": MODEL_DIGEST})
+).fingerprint
 
 
 def _finding(category="contrast"):
@@ -90,7 +94,7 @@ def _fixture(tmp_path, count=20):
                             "source": "local_ollama",
                             "attested": False,
                             "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
-                            "local_model_digest_claim": "sha256:" + "f" * 64,
+                            "local_model_digest_claim": MODEL_DIGEST,
                         }
                     ),
                     started.isoformat(),
@@ -598,3 +602,30 @@ def test_distinct_revisions_of_one_document_are_not_exact_duplicates(tmp_path):
     assert report["sku_count"] == 2
     assert report["status"] == "INSUFFICIENT_OPERATOR_CALIBRATION"
     assert report["cohort_selection_independently_verified"] is False
+
+
+@pytest.mark.parametrize("mutation", ["single_digest", "all_digests", "profile_fingerprint"])
+def test_calibration_rejects_runtime_not_bound_to_model_profile(tmp_path, mutation):
+    db, labels, rows = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        if mutation == "profile_fingerprint":
+            for row in rows:
+                row["model_profile_sha256"] = "0" * 64
+            connection.execute("UPDATE design_vlm_runs SET model_profile_sha256=?", ("0" * 64,))
+            _write_labels(labels, rows)
+        else:
+            selected = rows[:1] if mutation == "single_digest" else rows
+            for row in selected:
+                raw = connection.execute(
+                    "SELECT runtime_json FROM design_vlm_runs WHERE operation_id=?",
+                    (row["operation_id"],),
+                ).fetchone()[0]
+                runtime = json.loads(raw)
+                runtime["local_model_digest_claim"] = "sha256:" + "a" * 64
+                connection.execute(
+                    "UPDATE design_vlm_runs SET runtime_json=? WHERE operation_id=?",
+                    (json.dumps(runtime), row["operation_id"]),
+                )
+
+    with pytest.raises(CalibrationError, match="model profile fingerprint"):
+        _eval(db, labels)
