@@ -99,11 +99,20 @@ def _coverage_status(positive: int, negative: int) -> str:
 def _resource_hourly_rate(value: Decimal | str | None) -> Decimal | None:
     if value is None:
         return None
+    text = str(value)
+    # Bound untrusted input before Decimal parsing and fixed-point report formatting.
+    if len(text) > 64:
+        raise CalibrationError("invalid resource hourly rate")
     try:
-        rate = Decimal(str(value))
+        rate = Decimal(text)
     except (InvalidOperation, TypeError, ValueError):
         raise CalibrationError("invalid resource hourly rate") from None
-    if not rate.is_finite() or rate < 0 or rate > Decimal("1000000"):
+    if (
+        not rate.is_finite()
+        or rate < 0
+        or rate > Decimal("1000000")
+        or (rate != 0 and rate.adjusted() < -12)
+    ):
         raise CalibrationError("invalid resource hourly rate")
     return rate
 
