@@ -30,6 +30,10 @@ uv run --no-sync python -m scripts.run_design_ocr_smoke \
 ```
 
 The output directory and digest file must not exist.
+A final-path symlink used as the evidence output directory is rejected before
+`resolve()`, including a dangling link, so the client does not silently create
+an unrelated target directory. Parent-directory symlink races are not sealed by
+this preflight; run only in operator-controlled storage.
 The separate digest parent must already be a directory; the client refuses a
 missing or non-directory parent before creating evidence or sending requests.
 The final digest path must not be a symlink (including a dangling one): the
