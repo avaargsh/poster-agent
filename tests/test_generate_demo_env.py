@@ -39,6 +39,7 @@ def test_generate_demo_honors_dotenv_without_overriding_shell(
         return b"synthetic test output"
 
     monkeypatch.setattr(app.compositor, "compose", record_font)
+
     class Mask(bytes):
         size = (1, 1)
 
@@ -73,9 +74,7 @@ def test_generate_demo_rejects_bad_explicit_font_without_writing_examples(
     assert not (tmp_path / "data").exists()
 
 
-def test_generate_demo_rejects_font_that_only_renders_missing_glyphs(
-    tmp_path, monkeypatch, capsys,
-):
+def test_generate_demo_rejects_font_that_only_renders_missing_glyphs(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     font = tmp_path / "latin-only.ttf"
     font.touch()
