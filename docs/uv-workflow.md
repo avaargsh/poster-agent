@@ -4,6 +4,8 @@
 
 ## 首次配置（Mac/Linux）
 
+安装 [uv 0.13.10](https://github.com/astral-sh/uv/releases/tag/0.13.10)，与 CI 的固定版本一致。项目允许 `>=0.13.10,<0.14`；这个最低版本由 uv 上游安全修复约束，不需要重写 `uv.lock`。
+
 ```bash
 # 先安装 uv，参照 https://docs.astral.sh/uv/getting-started/installation/
 uv --version
