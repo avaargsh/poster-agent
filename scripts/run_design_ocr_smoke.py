@@ -130,6 +130,9 @@ def run_smoke(
     client, output: Path, anchor: Path, approver: str, exporter: str, *, keep_approved: bool = False
 ) -> dict:
     """Perform one explicit operation, preserving UNKNOWN on ambiguous submission."""
+    # Preserve the caller-visible final path until we have rejected symlinks.
+    # resolve() alone would turn a dangling symlink into a new writable target.
+    _check(not anchor.is_symlink(), "digest path must not be a symlink")
     output, anchor = output.resolve(), anchor.resolve()
     _check(not anchor.is_relative_to(output), "digest path must be outside evidence directory")
     _check(not anchor.exists(), "digest path already exists")
