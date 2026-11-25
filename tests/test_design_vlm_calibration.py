@@ -496,6 +496,19 @@ def test_calibration_rejects_invalid_operator_resource_rate(tmp_path, rate):
         evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
 
 
+@pytest.mark.parametrize(
+    ("rate", "expected"),
+    [("0", "0"), ("36.00", "36"), ("0.000000000001", "0.000000000001")],
+)
+def test_calibration_accepts_bounded_operator_resource_rate(tmp_path, rate, expected):
+    db, labels, _ = _fixture(tmp_path)
+
+    report = evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
+
+    assert report["cost"]["resource_hourly_rate_usd"] == expected
+    assert report["cost"]["status"] == "OPERATOR_RATE_ESTIMATE"
+
+
 def test_no_executed_runs_are_not_reported_as_zero_model_findings(tmp_path):
     db, labels, _ = _fixture(tmp_path)
     with sqlite3.connect(db) as connection:
