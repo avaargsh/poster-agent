@@ -24,7 +24,12 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote
 
-from app.designs.vlm_local import VLMModelProfileError, _finite_json, load_vlm_profile, parse_findings
+from app.designs.vlm_local import (
+    VLMModelProfileError,
+    _finite_json,
+    load_vlm_profile,
+    parse_findings,
+)
 
 SCHEMA = "design-vlm-shadow-calibration-v1"
 MINIMUM_SKUS = 20
