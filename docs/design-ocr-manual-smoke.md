@@ -41,7 +41,10 @@ only numeric IPv4 loopback, disables proxies/redirects and transport retries,
 creates a programmatic synthetic product, approves one design, checks the
 approved raster's PNG media type, byte digest and complete decoded PNG content
 against its response headers, and persists the operation request only after
-these checks. The client verifies PNG structure and pixel decoding, requires
+these checks. The rasterizer response header must also contain a nonempty
+identity of at most 256 characters; missing or oversized identities are
+refused before OCR submission. The journal must match that retained identity
+before replay, and a mismatch preserves UNKNOWN without replay or export. The client verifies PNG structure and pixel decoding, requires
 a single non-animated frame and IEND at the end of the response (no appended
 payload), and enforces the server's 24 MiB, 4096px dimension and
 8-million-pixel limits. A matching server-supplied digest or PNG signature
