@@ -235,3 +235,24 @@ def test_offline_demo_refuses_to_overwrite_existing_directory(tmp_path):
     assert exc_info.value.code == 2
     assert sentinel.read_text(encoding="utf-8") == "keep"
     assert sorted(path.name for path in output_dir.iterdir()) == ["keep.txt"]
+
+
+def test_offline_demo_diagnoses_non_directory_parent(tmp_path, capsys):
+    not_directory = tmp_path / "existing-file"
+    not_directory.write_text("keep", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc_info:
+        design_demo.main(["--output-dir", str(not_directory / "demo")])
+    assert exc_info.value.code == 2
+    assert "cannot create output directory" in capsys.readouterr().err
+    assert not_directory.read_text(encoding="utf-8") == "keep"
+
+
+def test_offline_demo_leaves_destination_available_on_render_failure(tmp_path, monkeypatch):
+    def fail_render(*_args, **_kwargs):
+        raise RuntimeError("test renderer failure")
+
+    output_dir = tmp_path / "new-parent" / "demo"
+    monkeypatch.setattr(design_demo, "render_svg", fail_render)
+    with pytest.raises(RuntimeError, match="test renderer failure"):
+        design_demo.main(["--output-dir", str(output_dir)])
+    assert not output_dir.parent.exists()
