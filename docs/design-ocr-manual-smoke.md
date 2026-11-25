@@ -29,7 +29,10 @@ uv run --no-sync python -m scripts.run_design_ocr_smoke \
   --digest-file /private/separate-existing-parent/new-digest.txt
 ```
 
-The output directory and digest file must not exist. The client accepts
+The output directory and digest file must not exist.
+The separate digest parent must already be a directory; the client refuses a
+missing or non-directory parent before creating evidence or sending requests.
+This preflight does not guarantee later writes will succeed if storage changes. The client accepts
 only numeric IPv4 loopback, disables proxies/redirects and transport retries,
 creates a programmatic synthetic product, approves one design, checks the
 approved raster's PNG media type, byte digest and complete decoded PNG content
