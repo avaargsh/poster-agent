@@ -434,3 +434,28 @@ def test_smoke_refuses_journal_rasterizer_mismatch_before_replay(smoke_environme
     assert len(submissions) == 1
     assert not (output / "evidence.json").exists()
     assert not anchor.exists()
+
+
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_smoke_refuses_output_symlink_before_any_http(tmp_path, target_exists):
+    real_output = tmp_path / "external-evidence"
+    if target_exists:
+        real_output.mkdir()
+        (real_output / "keep.txt").write_text("operator-owned", encoding="utf-8")
+    output = tmp_path / "evidence-symlink"
+    output.symlink_to(real_output, target_is_directory=True)
+    anchor = tmp_path / "separate-digest.txt"
+
+    class NoHTTP:
+        def stream(self, *args, **kwargs):
+            pytest.fail("symlink evidence output reached HTTP")
+
+    with pytest.raises(smoke.SmokeError, match="output directory must not be a symlink"):
+        smoke.run_smoke(NoHTTP(), output, anchor, APPROVER, EXPORTER)
+
+    assert output.is_symlink()
+    assert not anchor.exists()
+    if target_exists:
+        assert (real_output / "keep.txt").read_text(encoding="utf-8") == "operator-owned"
+    else:
+        assert not real_output.exists()
