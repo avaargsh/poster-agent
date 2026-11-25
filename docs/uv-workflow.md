@@ -10,12 +10,14 @@ uv --version
 git pull --ff-only origin main
 uv python install 3.12
 uv sync --locked
-cp .env.example .env
+test -e .env || cp .env.example .env
 uv run --locked python -m scripts.generate_demo
 uv run --locked python -m pytest -q
 uv run --locked ruff check app scripts evals tests
-uv run --locked uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uv run --locked python -m app.run_local --port 8000
 ```
+
+已有 `.env` 会保留；不要覆盖包含本地配置或密钥的文件。普通使用无需运行 pytest 或 Ruff，也无需 `--reload`；开发时可在 `app.run_local` 后添加 `--reload`。仅支持 macOS/Linux 本地启动，详见 [本地部署边界](local-only-deployment.md)。
 
 不必自己创建 venv 或 `source .venv/bin/activate`；uv 在仓库根自动管理 .venv。开发环境在 `[dependency-groups].dev` 中含 pytest + Ruff；Ruff 现阶段只启动有限的可靠性规则（E4/E9/F63/F7/F82），不把大规模代码格式重写混入本次迁移。
 
