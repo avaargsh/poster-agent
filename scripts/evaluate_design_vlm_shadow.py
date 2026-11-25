@@ -402,8 +402,7 @@ def _execution_metrics_report(
         "records_with_metrics": records_with_metrics,
         "records_without_metrics": missing_records,
         "by_field": {
-            field: _metric_summary(samples, executed_count)
-            for field, samples in values.items()
+            field: _metric_summary(samples, executed_count) for field, samples in values.items()
         },
         "output_token_limit_counts": dict(sorted(Counter(output_token_limits).items())),
         "output_token_limit_missing_count": executed_count - len(output_token_limits),
