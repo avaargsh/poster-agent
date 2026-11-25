@@ -230,6 +230,7 @@ def run_smoke(
         png, headers = _request(client, "GET", revision_root + "/approved.png", 200, headers=export)
         svg_hash = headers.get("x-approved-svg-sha256")
         png_hash = headers.get("x-raster-png-sha256")
+        rasterizer = headers.get("x-design-rasterizer")
         media_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
         _check(
             media_type == "image/png"
@@ -238,6 +239,10 @@ def run_smoke(
             and _sha(png_hash)
             and hashlib.sha256(png).hexdigest() == png_hash,
             "approved raster content or hash mismatch",
+        )
+        _check(
+            isinstance(rasterizer, str) and 0 < len(rasterizer) <= 256,
+            "missing or invalid rasterizer provenance",
         )
         (output / "approved.png").write_bytes(png)
         request = {
@@ -252,7 +257,7 @@ def run_smoke(
                 "document_id": doc,
                 "revision": revision,
                 **approval,
-                "rasterizer": headers.get("x-design-rasterizer"),
+                "rasterizer": rasterizer,
             },
         )
         stage = "submit"
@@ -270,6 +275,7 @@ def run_smoke(
             and journal.get("spec_digest") == approval["spec_digest"]
             and journal.get("asset_manifest_digest") == approval["asset_manifest_digest"]
             and journal.get("renderer_version") == approval_evidence["renderer_version"]
+            and journal.get("rasterizer") == rasterizer
             and journal.get("png_sha256") == png_hash
             and journal.get("svg_sha256") == svg_hash
             and journal.get("replayed") is False
