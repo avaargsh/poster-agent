@@ -22,7 +22,10 @@ if font_path:
             raise OSError("not a regular font file")
         ImageFont.truetype(font_path, size=24)
     except OSError:
-        print("无法加载 POSTER_FONT_PATH 指定的字体；请检查路径或清空它以使用系统字体。", file=sys.stderr)
+        print(
+            "无法加载 POSTER_FONT_PATH 指定的字体；请检查路径或清空它以使用系统字体。",
+            file=sys.stderr,
+        )
         raise SystemExit(2) from None
 
 product = Image.new("RGBA", (500, 680), (0, 0, 0, 0))
