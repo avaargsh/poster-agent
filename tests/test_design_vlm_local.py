@@ -62,7 +62,7 @@ def test_fixed_loopback_tags_and_bounded_ollama_chat(monkeypatch):
 
     _install_httpx_transport(monkeypatch, handler)
     local.verify_ollama_model(_profile())
-    assert local.inspect_approved_png(b"synthetic-png", _profile()) == []
+    assert local.inspect_approved_png(b"synthetic-png", _profile()).findings == []
     assert len(requests) == 2
 
 
@@ -136,6 +136,32 @@ def test_chat_returns_bounded_execution_metrics(monkeypatch):
         "provider_eval_duration_ns": 400_000,
         "output_token_limit": 512,
     }
+
+
+def test_chat_missing_provider_metrics_remain_null_not_zero(monkeypatch):
+    payload = {
+        "model": "llava:latest",
+        "done": True,
+        "message": {"role": "assistant", "content": '{"findings":[]}'},
+    }
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+
+    result = local.inspect_approved_png(b"synthetic-png", _profile())
+
+    assert result.findings == []
+    metrics = result.metrics.model_dump(mode="json")
+    assert type(metrics["client_elapsed_ms"]) is int
+    assert all(
+        metrics[field] is None
+        for field in (
+            "provider_total_duration_ns",
+            "provider_load_duration_ns",
+            "provider_prompt_eval_count",
+            "provider_prompt_eval_duration_ns",
+            "provider_eval_count",
+            "provider_eval_duration_ns",
+        )
+    )
 
 
 @pytest.mark.parametrize(
