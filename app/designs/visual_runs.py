@@ -24,6 +24,7 @@ from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .repository import DesignRepository, _now
 from .visual_critic import VisualSourceMismatch
 from .vlm_local import (
+    VLMModelProfileError,
     _finite_json,
     inspect_approved_png,
     load_vlm_profile,
@@ -162,13 +163,24 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
                 or re.fullmatch(r"sha256:[0-9a-f]{64}", runtime["local_model_digest_claim"]) is None
             ):
                 raise ValueError("invalid local-only runtime provenance")
+            profile = load_vlm_profile(
+                _json(
+                    {
+                        "schema_version": 1,
+                        "model": row["model_name"],
+                        "digest": runtime["local_model_digest_claim"],
+                    }
+                )
+            )
+            if profile.fingerprint != row["model_profile_sha256"]:
+                raise ValueError("visual journal model profile fingerprint mismatch")
         elif status in {"EXECUTING", "UNKNOWN"}:
             if row["findings_json"] is not None or row["runtime_json"] is not None:
                 raise ValueError("unresolved visual operation contains evidence")
             findings, runtime = [], None
         else:
             raise ValueError("unknown visual journal state")
-    except (ValueError, TypeError, UnicodeError, RecursionError):
+    except (VLMModelProfileError, ValueError, TypeError, UnicodeError, RecursionError):
         raise VLMJournalCorrupt() from None
 
     return {
