@@ -133,6 +133,7 @@ def run_smoke(
     output, anchor = output.resolve(), anchor.resolve()
     _check(not anchor.is_relative_to(output), "digest path must be outside evidence directory")
     _check(not anchor.exists(), "digest path already exists")
+    _check(anchor.parent.is_dir(), "digest parent must be an existing directory")
     _check(
         approver != exporter and all(32 <= len(value) <= 512 for value in (approver, exporter)),
         "separate named reviewer tokens required",

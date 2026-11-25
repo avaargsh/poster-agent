@@ -320,3 +320,22 @@ def test_smoke_refuses_journal_renderer_version_mismatch_before_replay(
     assert len(calls) == 1
     assert not (output / "evidence.json").exists()
     assert not anchor.exists()
+
+
+@pytest.mark.parametrize("parent_kind", ["missing", "regular_file"])
+def test_smoke_refuses_invalid_anchor_parent_before_any_http(tmp_path, parent_kind):
+    parent = tmp_path / "anchor-parent"
+    if parent_kind == "regular_file":
+        parent.write_text("not a directory", encoding="utf-8")
+    output = tmp_path / "private-evidence"
+    anchor = parent / "bundle.sha256"
+
+    class NoHTTP:
+        def stream(self, *args, **kwargs):
+            pytest.fail("invalid digest parent must be refused before HTTP")
+
+    with pytest.raises(smoke.SmokeError, match="digest parent"):
+        smoke.run_smoke(NoHTTP(), output, anchor, APPROVER, EXPORTER)
+
+    assert not output.exists()
+    assert not anchor.exists()
