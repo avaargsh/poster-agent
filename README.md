@@ -17,12 +17,13 @@ git clone https://github.com/avaargsh/poster-agent.git
 cd poster-agent
 uv python install 3.12
 uv sync --locked
-cp .env.example .env
+# 保留已有本地配置；仅在首次使用时复制模板
+test -e .env || cp .env.example .env
 uv run --locked python -m scripts.generate_demo
-uv run --locked python -m pytest -q
-uv run --locked ruff check app scripts evals tests
-uv run --locked python -m app.run_local --reload --port 8000
+uv run --locked python -m app.run_local --port 8000
 ```
+
+以上是 macOS/Linux 本地用户的最短启动路径；默认示例为本地程序渲染，不需要 API Key 或 OCR 模型。不要把本机服务映射到公网。开发者可另行执行 `uv run --locked python -m pytest -q` 与 `uv run --locked ruff check app scripts evals tests`，使用 `--reload` 进行本地开发。排查端口、字体和进程锁问题见 [本地启动与排障](docs/local-only-deployment.md)。
 
 项目依赖以 `pyproject.toml` 为唯一声明、`uv.lock` 为可复现版本锁，开发依赖置于 `dev` 组。请用 `uv add` 更新依赖并同时提交锁文件；完整说明见 [uv 使用手册](docs/uv-workflow.md)。
 
