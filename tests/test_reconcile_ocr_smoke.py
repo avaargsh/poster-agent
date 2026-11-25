@@ -1,7 +1,9 @@
+import os
+
 import httpx
 import pytest
 
-from scripts.reconcile_ocr_smoke import reconcile
+from scripts.reconcile_ocr_smoke import _read_saved, reconcile
 from scripts.run_design_ocr_smoke import SmokeError
 
 
@@ -121,3 +123,38 @@ def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
         pytest.raises(SmokeError),
     ):
         reconcile(client, source, request, outcome, "x" * 32)
+
+
+def test_saved_record_accepts_regular_json(tmp_path):
+    path = tmp_path / "source.json"
+    path.write_text('{"revision":1}', encoding="utf-8")
+    assert _read_saved(path) == {"revision": 1}
+
+
+@pytest.mark.parametrize("kind", ["symlink", "fifo", "directory", "oversized"])
+def test_saved_record_refuses_unsafe_file(tmp_path, kind):
+    path = tmp_path / "source.json"
+    if kind == "symlink":
+        target = tmp_path / "target.json"
+        target.write_text("{}", encoding="utf-8")
+        path.symlink_to(target)
+    elif kind == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFO unsupported")
+        os.mkfifo(path)
+        # Old Path.open would block; fail immediately if that path is used.
+        with pytest.MonkeyPatch.context() as patch:
+            def refuse_blocking_open(*args, **kwargs):
+                pytest.fail("FIFO reached blocking Path.open")
+
+            patch.setattr(type(path), "open", refuse_blocking_open)
+            with pytest.raises(ValueError):
+                _read_saved(path)
+        return
+    elif kind == "directory":
+        path.mkdir()
+    else:
+        path.write_bytes(b"x" * (16 * 1024 + 1))
+
+    with pytest.raises((ValueError, OSError)):
+        _read_saved(path)
