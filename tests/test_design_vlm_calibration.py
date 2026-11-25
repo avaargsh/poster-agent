@@ -478,12 +478,35 @@ def test_calibration_estimates_cost_from_operator_supplied_resource_rate(tmp_pat
     assert "not provider billing" in report["cost"]["limitations"]
 
 
-@pytest.mark.parametrize("rate", ["-0.01", "NaN", "Infinity", "1000001"])
+@pytest.mark.parametrize(
+    "rate",
+    [
+        "-0.01",
+        "NaN",
+        "Infinity",
+        "1000001",
+        "1e-999999",  # A fixed-point report would expand this to ~1 MiB.
+        "1." + "0" * 65,  # No unbounded operator-supplied decimal text.
+    ],
+)
 def test_calibration_rejects_invalid_operator_resource_rate(tmp_path, rate):
     db, labels, _ = _fixture(tmp_path)
 
     with pytest.raises(CalibrationError):
         evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
+
+
+@pytest.mark.parametrize(
+    ("rate", "expected"),
+    [("0", "0"), ("36.00", "36"), ("0.000000000001", "0.000000000001")],
+)
+def test_calibration_accepts_bounded_operator_resource_rate(tmp_path, rate, expected):
+    db, labels, _ = _fixture(tmp_path)
+
+    report = evaluate_shadow_cohort(db, labels, resource_hourly_rate_usd=rate)
+
+    assert report["cost"]["resource_hourly_rate_usd"] == expected
+    assert report["cost"]["status"] == "OPERATOR_RATE_ESTIMATE"
 
 
 def test_no_executed_runs_are_not_reported_as_zero_model_findings(tmp_path):
