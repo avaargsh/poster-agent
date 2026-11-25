@@ -10,6 +10,18 @@ from PIL import Image, ImageDraw, ImageFont
 from app.compositor import compose, local_background
 from app.schemas import PosterSpec
 
+DEMO_TITLE = "双十一限时优惠"
+DEMO_SUBTITLE = "智能清洁 · 品质生活"
+
+
+def _is_missing_demo_glyph(font: ImageFont.FreeTypeFont, char: str) -> bool:
+    # FreeType substitutes the missing glyph for absent characters. Compare
+    # against two Unicode noncharacters rather than assuming an empty mask.
+    masks = [font.getmask(value) for value in (char, "\uffff", "\U0010ffff")]
+    signatures = [(mask.size, bytes(mask)) for mask in masks]
+    return signatures[0] == signatures[1] == signatures[2]
+
+
 # Match the documented fresh-install workflow without overriding shell values.
 load_dotenv(Path(".env"), override=False)
 
@@ -20,13 +32,17 @@ if font_path:
     try:
         if not Path(font_path).is_file():
             raise OSError("not a regular font file")
-        ImageFont.truetype(font_path, size=24)
+        font = ImageFont.truetype(font_path, size=24)
     except OSError:
         print(
             "无法加载 POSTER_FONT_PATH 指定的字体；请检查路径或清空它以使用系统字体。",
             file=sys.stderr,
         )
         raise SystemExit(2) from None
+    ideographs = {char for char in DEMO_TITLE + DEMO_SUBTITLE if "\u3400" <= char <= "\u9fff"}
+    if any(_is_missing_demo_glyph(font, char) for char in ideographs):
+        print("POSTER_FONT_PATH 指定的字体缺少示例汉字；请使用中文字体。", file=sys.stderr)
+        raise SystemExit(2)
 
 product = Image.new("RGBA", (500, 680), (0, 0, 0, 0))
 draw = ImageDraw.Draw(product)
@@ -39,8 +55,8 @@ ld = ImageDraw.Draw(logo)
 ld.rounded_rectangle((0, 8, 78, 85), radius=22, fill="#69cbf8")
 ld.ellipse((18, 28, 60, 67), fill="#163c7d")
 spec = PosterSpec(
-    title="双十一限时优惠",
-    subtitle="智能清洁 · 品质生活",
+    title=DEMO_TITLE,
+    subtitle=DEMO_SUBTITLE,
     price="199",
     original_price="399",
     style="蓝色科技风",

@@ -7,6 +7,7 @@ import runpy
 from pathlib import Path
 
 import pytest
+from PIL import ImageFont
 
 import app.compositor
 
@@ -38,7 +39,15 @@ def test_generate_demo_honors_dotenv_without_overriding_shell(
         return b"synthetic test output"
 
     monkeypatch.setattr(app.compositor, "compose", record_font)
-    monkeypatch.setattr("PIL.ImageFont.truetype", lambda _path, **_options: object())
+
+    class Mask(bytes):
+        size = (1, 1)
+
+    class CjkFont:
+        def getmask(self, char):
+            return Mask(b"a" if "\u3400" <= char <= "\u9fff" else b"b")
+
+    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: CjkFont())
     runpy.run_module("scripts.generate_demo", run_name="__main__")
 
     assert [Path(font).name for font in selected_fonts] == [Path(expected_font).name]
@@ -62,4 +71,21 @@ def test_generate_demo_rejects_bad_explicit_font_without_writing_examples(
 
     assert exc.value.code == 2
     assert "POSTER_FONT_PATH" in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()
+
+
+def test_generate_demo_rejects_font_that_only_renders_missing_glyphs(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    font = tmp_path / "latin-only.ttf"
+    font.touch()
+    monkeypatch.setenv("POSTER_FONT_PATH", str(font))
+    latin = ImageFont.load_default()
+    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: latin)
+    monkeypatch.setattr(app.compositor, "compose", lambda *_args: b"synthetic")
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("scripts.generate_demo", run_name="__main__")
+
+    assert exc.value.code == 2
+    assert "缺少" in capsys.readouterr().err
     assert not (tmp_path / "data").exists()
