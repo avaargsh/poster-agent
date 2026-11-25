@@ -121,3 +121,42 @@ def test_reconcile_rejects_invalid_saved_identity_before_network(invalid):
         pytest.raises(SmokeError),
     ):
         reconcile(client, source, request, outcome, "x" * 32)
+
+
+@pytest.mark.parametrize("filename", ["source.json", "operation-request.json", "outcome.json"])
+def test_cli_rejects_symlinked_saved_record(tmp_path, monkeypatch, capsys, filename):
+    import json
+
+    from scripts import reconcile_ocr_smoke as cli
+
+    source, request, outcome, _ = _saved_request()
+    for name, record in (
+        ("source.json", source),
+        ("operation-request.json", request),
+        ("outcome.json", outcome),
+    ):
+        path = tmp_path / name
+        path.write_text(json.dumps(record), encoding="utf-8")
+    selected = tmp_path / filename
+    backing = tmp_path / "backing.json"
+    selected.rename(backing)
+    selected.symlink_to(backing)
+    output = tmp_path / "report.json"
+
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("unsafe saved record reached HTTP client construction")
+
+    monkeypatch.setattr(cli.httpx, "Client", unexpected_client)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "--confirm-isolated-server",
+                "--smoke-dir",
+                str(tmp_path),
+                "--output",
+                str(output),
+            ]
+        )
+    assert exc.value.code == 2
+    assert "retain UNKNOWN and do not retry" in capsys.readouterr().err
+    assert not output.exists()
