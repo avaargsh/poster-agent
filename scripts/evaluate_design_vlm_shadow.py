@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from app.designs.vlm_local import (
+    VLMExecutionMetrics,
     VLMModelProfileError,
     _finite_json,
     load_vlm_profile,
@@ -285,7 +286,9 @@ def _validate_journal_metadata(row: dict) -> int | None:
     raise CalibrationError("unsupported visual journal state")
 
 
-def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | None, int]:
+def _checked_record(
+    row: dict, label: dict[str, str]
+) -> tuple[set[str], int | None, int, dict | None]:
     """Fail the entire analysis on drift instead of quietly shrinking the cohort."""
     for field in (
         "operation_id",
@@ -310,7 +313,7 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
     if row["status"] != "EXECUTED":
         if row["findings_json"] is not None or row["runtime_json"] is not None:
             raise CalibrationError("unresolved run must not supply model evidence")
-        return set(), None, 0
+        return set(), None, 0, None
 
     if not isinstance(row["findings_json"], str):
         raise CalibrationError("executed run is missing its recorded findings")
@@ -321,15 +324,15 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
         if not isinstance(row["runtime_json"], str) or len(row["runtime_json"]) > 4096:
             raise ValueError("missing runtime provenance")
         runtime = _finite_json(row["runtime_json"])
+        runtime_fields = {
+            "source",
+            "local_model_digest_claim",
+            "execution_evidence",
+            "attested",
+        }
         if (
             not isinstance(runtime, dict)
-            or set(runtime)
-            != {
-                "source",
-                "local_model_digest_claim",
-                "execution_evidence",
-                "attested",
-            }
+            or set(runtime) not in (runtime_fields, runtime_fields | {"execution_metrics"})
             or runtime["source"] != "local_ollama"
             or runtime["execution_evidence"] != "OPERATOR_LOCAL_NOT_ATTESTED"
             or runtime["attested"] is not False
@@ -337,6 +340,12 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
             or _LOCAL_MODEL_DIGEST.fullmatch(runtime["local_model_digest_claim"]) is None
         ):
             raise ValueError("unexpected runtime provenance claim")
+        execution_metrics = None
+        if "execution_metrics" in runtime:
+            metric_model = VLMExecutionMetrics.model_validate(runtime["execution_metrics"])
+            execution_metrics = metric_model.model_dump(mode="json")
+            if execution_metrics != runtime["execution_metrics"]:
+                raise ValueError("non-canonical execution metrics")
     except (ValueError, TypeError, UnicodeError, RecursionError):
         raise CalibrationError("invalid or untrusted local VLM observations") from None
     try:
@@ -353,13 +362,60 @@ def _checked_record(row: dict, label: dict[str, str]) -> tuple[set[str], int | N
         raise CalibrationError("invalid journal model profile fingerprint") from None
     if profile.fingerprint != row["model_profile_sha256"]:
         raise CalibrationError("journal model profile fingerprint mismatch")
-    return {finding["category"] for finding in findings}, elapsed, len(findings)
+    return {finding["category"] for finding in findings}, elapsed, len(findings), execution_metrics
 
 
 def _nearest_rank(values: list[int], fraction: float) -> int | None:
     if not values:
         return None
     return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)]
+
+
+def _metric_summary(values: list[int], denominator: int) -> dict:
+    return {
+        "count": len(values),
+        "missing_count": denominator - len(values),
+        "p50": _nearest_rank(values, 0.50),
+        "p95": _nearest_rank(values, 0.95),
+        "total": sum(values) if values else None,
+    }
+
+
+def _execution_metrics_report(
+    values: dict[str, list[int]],
+    *,
+    executed_count: int,
+    records_with_metrics: int,
+    output_token_limits: list[int],
+) -> dict:
+    missing_records = executed_count - records_with_metrics
+    status = (
+        "NO_EXECUTION_METRICS_RETAINED"
+        if records_with_metrics == 0
+        else "PARTIAL_EXECUTION_METRICS"
+        if missing_records
+        else "EXECUTION_METRICS_RETAINED"
+    )
+    return {
+        "status": status,
+        "executed_operation_count": executed_count,
+        "records_with_metrics": records_with_metrics,
+        "records_without_metrics": missing_records,
+        "by_field": {
+            field: _metric_summary(samples, executed_count)
+            for field, samples in values.items()
+        },
+        "output_token_limit_counts": dict(sorted(Counter(output_token_limits).items())),
+        "output_token_limit_missing_count": executed_count - len(output_token_limits),
+        "scope": "local_client_round_trip_and_provider_reported_counters",
+        "limitations": [
+            "client elapsed time is the local /api/chat request round trip",
+            "provider durations and token counts are Ollama-reported, not independently measured",
+            "null provider counters are missing measurements, not zero",
+            "metrics do not attest model weights, quality or release readiness",
+            "monetary cost remains a separate operator-rate estimate over journal wall time",
+        ],
+    }
 
 
 def _cost_report(rate: Decimal | None, durations: list[int], unresolved_count: int) -> dict:
@@ -418,11 +474,25 @@ def evaluate_shadow_cohort(
     models: set[str] = set()
     fully_reviewed = 0
     durations: list[int] = []
+    execution_metric_values = {
+        field: []
+        for field in (
+            "client_elapsed_ms",
+            "provider_total_duration_ns",
+            "provider_load_duration_ns",
+            "provider_prompt_eval_count",
+            "provider_prompt_eval_duration_ns",
+            "provider_eval_count",
+            "provider_eval_duration_ns",
+        )
+    }
+    execution_metric_records = 0
+    output_token_limits: list[int] = []
     model_findings_count = 0
     sku_with_model_findings = 0
 
     for label, run in zip(labels, runs, strict=True):
-        predictions, elapsed, finding_count = _checked_record(run, label)
+        predictions, elapsed, finding_count, execution_metrics = _checked_record(run, label)
         model_findings_count += finding_count
         if finding_count:
             sku_with_model_findings += 1
@@ -432,6 +502,13 @@ def evaluate_shadow_cohort(
         models.add(run["model_name"])
         if elapsed is not None:
             durations.append(elapsed)
+        if execution_metrics is not None:
+            execution_metric_records += 1
+            output_token_limits.append(execution_metrics["output_token_limit"])
+            for field, samples in execution_metric_values.items():
+                value = execution_metrics[field]
+                if value is not None:
+                    samples.append(value)
         if status == "EXECUTED" and all(
             label[category] != "UNVERIFIED" for category in VISUAL_CATEGORIES
         ):
@@ -535,6 +612,12 @@ def evaluate_shadow_cohort(
             "p95": _nearest_rank(durations, 0.95),
             "scope": "local_adapter_journal_elapsed_not_model_only",
         },
+        "execution_metrics": _execution_metrics_report(
+            execution_metric_values,
+            executed_count=executed_operation_count,
+            records_with_metrics=execution_metric_records,
+            output_token_limits=output_token_limits,
+        ),
         "cost": cost,
         "input_sha256": {"labels_csv": csv_sha, "journal_rows": journal_sha},
         "source_authorizations_verified": False,
