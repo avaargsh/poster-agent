@@ -132,7 +132,7 @@ def test_saved_record_accepts_regular_json(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["symlink", "fifo", "directory", "oversized"])
-def test_saved_record_refuses_unsafe_file(tmp_path, kind):
+def test_saved_record_refuses_unsafe_file(tmp_path, kind, monkeypatch):
     path = tmp_path / "source.json"
     if kind == "symlink":
         target = tmp_path / "target.json"
@@ -143,14 +143,11 @@ def test_saved_record_refuses_unsafe_file(tmp_path, kind):
             pytest.skip("FIFO unsupported")
         os.mkfifo(path)
         # Old Path.open would block; fail immediately if that path is used.
-        with pytest.MonkeyPatch.context() as patch:
-            def refuse_blocking_open(*args, **kwargs):
-                pytest.fail("FIFO reached blocking Path.open")
 
-            patch.setattr(type(path), "open", refuse_blocking_open)
-            with pytest.raises(ValueError):
-                _read_saved(path)
-        return
+        def refuse_blocking_open(*args, **kwargs):
+            pytest.fail("FIFO reached blocking Path.open")
+
+        monkeypatch.setattr(type(path), "open", refuse_blocking_open)
     elif kind == "directory":
         path.mkdir()
     else:
