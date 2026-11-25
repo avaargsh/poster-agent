@@ -370,9 +370,9 @@ def test_calibration_rejects_malformed_nested_execution_metrics(tmp_path):
             (rows[0]["operation_id"],),
         ).fetchone()[0]
         runtime = json.loads(raw)
-        runtime["execution_metrics"] = VLMExecutionMetrics(
-            client_elapsed_ms=12
-        ).model_dump(mode="json")
+        runtime["execution_metrics"] = VLMExecutionMetrics(client_elapsed_ms=12).model_dump(
+            mode="json"
+        )
         runtime["execution_metrics"]["client_elapsed_ms"] = True
         connection.execute(
             "UPDATE design_vlm_runs SET runtime_json = ? WHERE operation_id = ?",
