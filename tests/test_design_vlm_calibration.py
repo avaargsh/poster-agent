@@ -478,7 +478,17 @@ def test_calibration_estimates_cost_from_operator_supplied_resource_rate(tmp_pat
     assert "not provider billing" in report["cost"]["limitations"]
 
 
-@pytest.mark.parametrize("rate", ["-0.01", "NaN", "Infinity", "1000001"])
+@pytest.mark.parametrize(
+    "rate",
+    [
+        "-0.01",
+        "NaN",
+        "Infinity",
+        "1000001",
+        "1e-999999",  # A fixed-point report would expand this to ~1 MiB.
+        "1." + "0" * 65,  # No unbounded operator-supplied decimal text.
+    ],
+)
 def test_calibration_rejects_invalid_operator_resource_rate(tmp_path, rate):
     db, labels, _ = _fixture(tmp_path)
 
