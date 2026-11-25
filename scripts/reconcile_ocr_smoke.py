@@ -19,6 +19,7 @@ from scripts.run_design_ocr_smoke import (
     _request,
     _sha,
 )
+from scripts.verify_ocr_evidence_bundle import _read_bounded_regular_file
 
 _MAX_SAVED_BYTES = 16 * 1024
 
@@ -106,10 +107,7 @@ def reconcile(client, source: dict, request: dict, outcome: dict, exporter: str)
 
 
 def _read_saved(path: Path) -> dict:
-    with path.open("rb") as stream:
-        raw = stream.read(_MAX_SAVED_BYTES + 1)
-    _check(len(raw) <= _MAX_SAVED_BYTES, "saved record exceeds limit")
-    return _object(raw)
+    return _object(_read_bounded_regular_file(path, _MAX_SAVED_BYTES, label="saved record"))
 
 
 def main(argv: list[str] | None = None) -> int:
