@@ -11,7 +11,13 @@ from pathlib import Path
 import httpx
 
 from scripts.run_design_ocr_smoke import SmokeError, _check, _object, _request
-from scripts.verify_ocr_evidence_bundle import _MAX_FILE_BYTES, _canonical, _verify
+from scripts.verify_ocr_evidence_bundle import (
+    _MAX_FILE_BYTES,
+    EvidenceError,
+    _canonical,
+    _read_bounded_regular_file,
+    _verify,
+)
 
 _EXPECTED = {
     "model": (503, "OCR_LOCAL_MODEL_PROFILE_UNAVAILABLE"),
@@ -84,8 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.error("isolated numeric loopback origin and timeout of 10–600 seconds required")
     try:
-        with args.bundle.open("rb") as stream:
-            baseline = stream.read(_MAX_FILE_BYTES + 1)
+        baseline = _read_bounded_regular_file(args.bundle, _MAX_FILE_BYTES, label="baseline")
         with httpx.Client(
             base_url=args.origin,
             timeout=args.timeout,
@@ -105,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         ) as stream:
             json.dump(result, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.write("\n")
-    except (SmokeError, OSError):
+    except (EvidenceError, SmokeError, OSError):
         parser.exit(2, "Source drift probe refused; inspect isolated setup.\n")
     return 0
 

@@ -152,3 +152,41 @@ def test_probe_rejects_success_or_wrong_error_code_as_drift_evidence(monkeypatch
         ("GET", endpoint),
         ("GET", endpoint + "/comparison-preview"),
     ]
+
+
+@pytest.mark.parametrize("input_kind", ["symlink", "oversized"])
+def test_probe_cli_rejects_unsafe_baseline_before_creating_client(
+    tmp_path, monkeypatch, capsys, input_kind
+):
+    source = tmp_path / "source.json"
+    source.write_bytes(b'{"journal": {}}')
+    bundle = tmp_path / "bundle.json"
+    if input_kind == "symlink":
+        bundle.symlink_to(source)
+    else:
+        bundle.write_bytes(source.read_bytes())
+        monkeypatch.setattr(probe, "_MAX_FILE_BYTES", 1)
+    output = tmp_path / "report.json"
+
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("unsafe baseline reached HTTP client construction")
+
+    monkeypatch.setattr(probe.httpx, "Client", unexpected_client)
+    with pytest.raises(SystemExit) as exc:
+        probe.main(
+            [
+                "--confirm-isolated-server",
+                "--bundle",
+                str(bundle),
+                "--expected-sha256",
+                EXPECTED_DIGEST,
+                "--drift",
+                "model",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert exc.value.code == 2
+    assert "Source drift probe refused" in capsys.readouterr().err
+    assert not output.exists()
