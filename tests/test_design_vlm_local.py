@@ -105,6 +105,7 @@ def test_redirects_oversize_and_claimed_model_mismatch_fail_closed(monkeypatch):
     with pytest.raises(local.VLMProviderUnavailable):
         local.inspect_approved_png(b"x" * (4 * 1024 * 1024 + 1), _profile())
 
+
 def test_chat_returns_bounded_execution_metrics(monkeypatch):
     payload = {
         "model": "llava:latest",
@@ -163,6 +164,7 @@ def test_chat_rejects_malformed_provider_execution_metrics(monkeypatch, field, v
 
     with pytest.raises(local.VLMProviderUnavailable):
         local.inspect_approved_png(b"synthetic-png", _profile())
+
 
 def test_duplicate_json_keys_and_untrusted_claims_do_not_parse():
     for content in (
