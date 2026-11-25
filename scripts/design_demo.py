@@ -120,11 +120,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = Path(args.output_dir)
     if output_dir.exists():
         parser.error(f"output directory already exists, refusing to overwrite: {output_dir}")
-    try:
-        output_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError:
-        parser.error(f"output directory already exists, refusing to overwrite: {output_dir}")
-
     product_bytes = _programmatic_product_png()
     document = create_template(
         title=DEMO_TITLE,
@@ -146,6 +141,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
     )
     svg = render_svg(document, assets={DEMO_ASSET_ID: product_bytes})
+
+    # Don't reserve the destination until the demo can be rendered. A failure
+    # before this point should leave the user's chosen path usable for retry.
+    try:
+        output_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        parser.error(f"output directory already exists, refusing to overwrite: {output_dir}")
+    except OSError as exc:
+        parser.error(f"cannot create output directory: {exc.strerror or type(exc).__name__}")
 
     product_path = output_dir / "product.png"
     document_path = output_dir / "document.json"
