@@ -129,6 +129,8 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
     approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
     evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
     journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
+    source = json.loads((output / "source.json").read_text(encoding="utf-8"))
+    assert source["rasterizer"] == journal["rasterizer"] == "synthetic-test-raster/1"
     assert evidence["schema_version"] == 2
     assert evidence["approval"]["principal_id"] == approval["principal_id"]
     assert evidence["approval"]["policy_digest"] == approval["policy_digest"]
@@ -364,3 +366,71 @@ def test_smoke_refuses_anchor_symlink_before_any_http(tmp_path, target_exists):
         assert actual.read_text(encoding="utf-8") == "operator-owned digest\n"
     else:
         assert not actual.exists()
+
+
+@pytest.mark.parametrize("rasterizer", [None, "", "x" * 257])
+def test_smoke_refuses_missing_or_unbounded_rasterizer_before_submit(
+    smoke_environment, monkeypatch, rasterizer
+):
+    calls = []
+    real_request = smoke._request
+
+    def recognize(path, **kwargs):
+        calls.append(path.read_bytes())
+        return _observations()
+
+    def change_header(client, method, path, expected, **kwargs):
+        raw, headers = real_request(client, method, path, expected, **kwargs)
+        if method == "GET" and path.endswith("/approved.png"):
+            headers = httpx.Headers(headers)
+            if rasterizer is None:
+                del headers["x-design-rasterizer"]
+            else:
+                headers["x-design-rasterizer"] = rasterizer
+        return raw, headers
+
+    monkeypatch.setattr(ocr_runs, "recognize", recognize)
+    monkeypatch.setattr(smoke, "_request", change_header)
+    output = smoke_environment / "private-evidence"
+    anchor = smoke_environment / "separate-anchor" / "bundle.sha256"
+    anchor.parent.mkdir()
+
+    with TestClient(app) as client, pytest.raises(smoke.SmokeError):
+        smoke.run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    assert outcome["stage"] == "raster"
+    assert outcome["execution_state"] == "NOT_SUBMITTED"
+    assert calls == []
+    assert not (output / "operation-request.json").exists()
+    assert not anchor.exists()
+
+
+def test_smoke_refuses_journal_rasterizer_mismatch_before_replay(smoke_environment, monkeypatch):
+    submissions = []
+    real_request = smoke._request
+
+    def mismatch_rasterizer(client, method, path, expected, **kwargs):
+        raw, headers = real_request(client, method, path, expected, **kwargs)
+        if method == "POST" and path.endswith("/ocr-runs"):
+            submissions.append(path)
+            journal = json.loads(raw)
+            journal["rasterizer"] = "different-rasterizer/1"
+            raw = json.dumps(journal).encode("utf-8")
+        return raw, headers
+
+    monkeypatch.setattr(ocr_runs, "recognize", lambda *args, **kwargs: _observations())
+    monkeypatch.setattr(smoke, "_request", mismatch_rasterizer)
+    output = smoke_environment / "private-evidence"
+    anchor = smoke_environment / "separate-anchor" / "bundle.sha256"
+    anchor.parent.mkdir()
+
+    with TestClient(app) as client, pytest.raises(smoke.SmokeError):
+        smoke.run_smoke(client, output, anchor, APPROVER, EXPORTER)
+
+    outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
+    assert outcome["stage"] == "submit"
+    assert outcome["execution_state"] == "UNKNOWN"
+    assert len(submissions) == 1
+    assert not (output / "evidence.json").exists()
+    assert not anchor.exists()
