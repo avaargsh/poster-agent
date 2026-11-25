@@ -339,3 +339,28 @@ def test_smoke_refuses_invalid_anchor_parent_before_any_http(tmp_path, parent_ki
 
     assert not output.exists()
     assert not anchor.exists()
+
+
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_smoke_refuses_anchor_symlink_before_any_http(tmp_path, target_exists):
+    actual = tmp_path / "external-anchor" / "bundle.sha256"
+    actual.parent.mkdir()
+    if target_exists:
+        actual.write_text("operator-owned digest\n", encoding="utf-8")
+    anchor = tmp_path / "digest-symlink"
+    anchor.symlink_to(actual)
+    output = tmp_path / "private-evidence"
+
+    class NoHTTP:
+        def stream(self, *args, **kwargs):
+            pytest.fail("symlink digest path reached HTTP")
+
+    with pytest.raises(smoke.SmokeError, match="digest path must not be a symlink"):
+        smoke.run_smoke(NoHTTP(), output, anchor, APPROVER, EXPORTER)
+
+    assert not output.exists()
+    assert anchor.is_symlink()
+    if target_exists:
+        assert actual.read_text(encoding="utf-8") == "operator-owned digest\n"
+    else:
+        assert not actual.exists()
