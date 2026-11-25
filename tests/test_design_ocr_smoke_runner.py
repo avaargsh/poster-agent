@@ -128,8 +128,8 @@ def test_smoke_runs_one_design_document_operation_and_verifies_bundle(
     outcome = json.loads((output / "outcome.json").read_text(encoding="utf-8"))
     approval = json.loads((output / "approval.json").read_text(encoding="utf-8"))
     evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
-    journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
     source = json.loads((output / "source.json").read_text(encoding="utf-8"))
+    journal = json.loads((output / "journal.json").read_text(encoding="utf-8"))
     assert source["rasterizer"] == journal["rasterizer"] == "synthetic-test-raster/1"
     assert evidence["schema_version"] == 2
     assert evidence["approval"]["principal_id"] == approval["principal_id"]
@@ -366,6 +366,31 @@ def test_smoke_refuses_anchor_symlink_before_any_http(tmp_path, target_exists):
         assert actual.read_text(encoding="utf-8") == "operator-owned digest\n"
     else:
         assert not actual.exists()
+
+
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_smoke_refuses_output_symlink_before_any_http(tmp_path, target_exists):
+    real_output = tmp_path / "external-evidence"
+    if target_exists:
+        real_output.mkdir()
+        (real_output / "keep.txt").write_text("operator-owned", encoding="utf-8")
+    output = tmp_path / "evidence-symlink"
+    output.symlink_to(real_output, target_is_directory=True)
+    anchor = tmp_path / "separate-digest.txt"
+
+    class NoHTTP:
+        def stream(self, *args, **kwargs):
+            pytest.fail("symlink evidence output reached HTTP")
+
+    with pytest.raises(smoke.SmokeError, match="output directory must not be a symlink"):
+        smoke.run_smoke(NoHTTP(), output, anchor, APPROVER, EXPORTER)
+
+    assert output.is_symlink()
+    assert not anchor.exists()
+    if target_exists:
+        assert (real_output / "keep.txt").read_text(encoding="utf-8") == "operator-owned"
+    else:
+        assert not real_output.exists()
 
 
 @pytest.mark.parametrize("rasterizer", [None, "", "x" * 257])
