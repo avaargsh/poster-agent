@@ -306,6 +306,7 @@ def test_config_requires_exact_local_digest_and_unsafe_model_output_fails_closed
         "malformed_runtime",
         "deeply_nested_runtime",
         "spoofed_runtime_attestation",
+        "mismatched_runtime_model_digest",
         "unknown_with_stale_findings",
     ],
 )
@@ -354,6 +355,17 @@ def test_corrupted_vlm_journal_fails_closed_on_status_and_replay(
                             "local_model_digest_claim": MODEL_DIGEST,
                             "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
                             "attested": True,
+                        }
+                    )
+                }
+            elif mutation == "mismatched_runtime_model_digest":
+                changes = {
+                    "runtime_json": json.dumps(
+                        {
+                            "source": "local_ollama",
+                            "local_model_digest_claim": "sha256:" + "a" * 64,
+                            "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
+                            "attested": False,
                         }
                     )
                 }
