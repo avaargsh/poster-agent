@@ -2,10 +2,14 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 
 from app.compositor import compose, local_background
 from app.schemas import PosterSpec
+
+# Match the documented fresh-install workflow without overriding shell values.
+load_dotenv(Path(".env"), override=False)
 
 out = Path("data/examples")
 out.mkdir(parents=True, exist_ok=True)
