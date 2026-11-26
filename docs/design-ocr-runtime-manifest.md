@@ -18,7 +18,11 @@ uv run --no-sync python -m scripts.collect_ocr_runtime_manifest \
 
 The repository must have no reported tracked or untracked changes (ignored
 files are not measured); the destination must be new and outside the
-repository. The collector checks Git HEAD before and after measurement,
+repository. Its parent must already be a directory. The collector refuses an
+existing output, including a dangling final-path symlink, before measuring
+any environment or model files. Exclusive output creation remains in force;
+preflight does not guarantee subsequent writes or seal parent-directory races.
+The collector checks Git HEAD before and after measurement,
 OS/Python identity, the repository DesignDocument renderer version,
 installed PaddleOCR/CairoSVG and exactly one Paddle distribution, hashes
 of one to eight explicitly supplied font files, and the same bounded model
