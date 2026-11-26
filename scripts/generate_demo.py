@@ -44,7 +44,9 @@ if font_path:
             file=sys.stderr,
         )
         raise SystemExit(2) from None
-    ideographs = {char for char in spec.title + spec.subtitle + spec.cta if "\u3400" <= char <= "\u9fff"}
+    ideographs = {
+        char for char in spec.title + spec.subtitle + spec.cta if "\u3400" <= char <= "\u9fff"
+    }
     if any(_is_missing_demo_glyph(font, char) for char in ideographs):
         print("POSTER_FONT_PATH 指定的字体缺少示例汉字；请使用中文字体。", file=sys.stderr)
         raise SystemExit(2)
