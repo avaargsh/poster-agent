@@ -149,9 +149,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.output.is_symlink():
+            raise ManifestError("output must not be a symlink")
         repo, output = args.repo.resolve(), args.output.resolve()
         if output.is_relative_to(repo):
             raise ManifestError("output must be outside repository")
+        if output.exists() or not output.parent.is_dir():
+            raise ManifestError("output must be new and its parent must be an existing directory")
         result = collect_manifest(
             repo, args.font, os.environ.get("POSTER_DESIGN_OCR_MODEL_CONFIG_JSON")
         )
