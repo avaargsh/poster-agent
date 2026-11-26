@@ -89,3 +89,27 @@ def test_generate_demo_rejects_font_that_only_renders_missing_glyphs(tmp_path, m
     assert exc.value.code == 2
     assert "缺少" in capsys.readouterr().err
     assert not (tmp_path / "data").exists()
+
+
+def test_generate_demo_rejects_font_missing_call_to_action(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    font = tmp_path / "partial-cjk.otf"
+    font.touch()
+    monkeypatch.setenv("POSTER_FONT_PATH", str(font))
+
+    class Mask(bytes):
+        size = (1, 1)
+
+    class PartialCjkFont:
+        def getmask(self, char):
+            return Mask(b"a" if char in "双十一限时优惠智能清洁品质生活" else b"b")
+
+    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: PartialCjkFont())
+    monkeypatch.setattr(app.compositor, "compose", lambda *_args: b"synthetic")
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("scripts.generate_demo", run_name="__main__")
+
+    assert exc.value.code == 2
+    assert "缺少示例汉字" in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()
