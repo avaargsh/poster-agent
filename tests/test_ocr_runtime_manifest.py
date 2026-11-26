@@ -110,3 +110,62 @@ def test_font_identity_rejects_parent_directory_replacement(tmp_path, monkeypatc
     monkeypatch.setattr(collector.os, "fstat", replace_parent)
     with pytest.raises(ManifestError):
         collector._font_identity(font)
+
+
+@pytest.mark.parametrize(
+    "kind", ["symlink", "existing", "missing_parent", "non_directory_parent", "inside_repo"]
+)
+def test_manifest_cli_refuses_invalid_output_before_measurement(
+    tmp_path, monkeypatch, capsys, kind
+):
+    from scripts import collect_ocr_runtime_manifest as collector
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    existing = tmp_path / "existing"
+    existing.write_text("keep", encoding="utf-8")
+    target = tmp_path / "uncreated.json"
+    output = tmp_path / "manifest.json"
+    if kind == "symlink":
+        output.symlink_to(target)
+    elif kind == "existing":
+        output = existing
+    elif kind == "missing_parent":
+        output = tmp_path / "missing" / "manifest.json"
+    elif kind == "non_directory_parent":
+        output = existing / "manifest.json"
+    else:
+        output = repo / "manifest.json"
+
+    def unexpected_measurement(*args, **kwargs):
+        pytest.fail("invalid output reached model and environment measurement")
+
+    monkeypatch.setattr(collector, "collect_manifest", unexpected_measurement)
+    with pytest.raises(SystemExit) as exc:
+        collector.main(
+            ["--repo", str(repo), "--font", str(tmp_path / "unused.ttf"), "--output", str(output)]
+        )
+    assert exc.value.code == 2
+    assert "measurement refused" in capsys.readouterr().err
+    assert existing.read_text(encoding="utf-8") == "keep"
+    assert not target.exists()
+    if kind == "symlink":
+        assert output.is_symlink()
+    elif kind != "existing":
+        assert not output.exists()
+
+
+def test_manifest_cli_writes_new_private_output(tmp_path, monkeypatch):
+    from scripts import collect_ocr_runtime_manifest as collector
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    output = tmp_path / "manifest.json"
+    monkeypatch.setattr(collector, "collect_manifest", lambda *args: {"sample": True})
+    assert (
+        collector.main(
+            ["--repo", str(repo), "--font", str(tmp_path / "unused.ttf"), "--output", str(output)]
+        )
+        == 0
+    )
+    assert json.loads(output.read_text(encoding="utf-8")) == {"sample": True}
