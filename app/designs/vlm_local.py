@@ -11,8 +11,9 @@ import base64
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -26,6 +27,8 @@ _MAX_TAGS_BYTES = 65536
 _MAX_CHAT_BYTES = 32768
 _MAX_INPUT_BYTES = 4 * 1024 * 1024
 _MAX_OUTPUT_TOKENS = 512
+_MAX_METRIC_DURATION_NS = 24 * 60 * 60 * 1_000_000_000
+_MAX_METRIC_TOKEN_COUNT = 1_000_000
 _MODEL_TIMEOUT_SECONDS = 60.0
 
 _SYSTEM_PROMPT = (
@@ -57,6 +60,39 @@ class VLMModelProfile:
     model: str
     digest: str
     fingerprint: str
+
+
+class VLMExecutionMetrics(BaseModel):
+    """Bounded local/provider timing and token counters; not an attestation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    client_elapsed_ms: int = Field(strict=True, ge=0, le=24 * 60 * 60 * 1000)
+    provider_total_duration_ns: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_DURATION_NS
+    )
+    provider_load_duration_ns: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_DURATION_NS
+    )
+    provider_prompt_eval_count: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_TOKEN_COUNT
+    )
+    provider_prompt_eval_duration_ns: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_DURATION_NS
+    )
+    provider_eval_count: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_TOKEN_COUNT
+    )
+    provider_eval_duration_ns: int | None = Field(
+        default=None, strict=True, ge=0, le=_MAX_METRIC_DURATION_NS
+    )
+    output_token_limit: Literal[512] = _MAX_OUTPUT_TOKENS
+
+
+@dataclass(frozen=True)
+class VLMInspectionResult:
+    findings: list[dict]
+    metrics: VLMExecutionMetrics
 
 
 class _FindingEnvelope(BaseModel):
@@ -149,6 +185,15 @@ def _bounded_response(
         raise VLMProviderUnavailable("local model response unavailable") from None
 
 
+def _provider_metric(response: dict, field: str, *, maximum: int) -> int | None:
+    value = response.get(field)
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value <= maximum:
+        raise VLMProviderUnavailable("local model execution metrics invalid")
+    return value
+
+
 def verify_ollama_model(profile: VLMModelProfile) -> None:
     """Verify the local server's *claimed* model digest before and after invocation."""
     with httpx.Client(trust_env=False, follow_redirects=False) as client:
@@ -165,7 +210,7 @@ def verify_ollama_model(profile: VLMModelProfile) -> None:
         raise VLMProviderUnavailable("pinned model digest missing or ambiguous")
 
 
-def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> list[dict]:
+def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> VLMInspectionResult:
     """Explicit, bounded local /api/chat request; no retry or automatic fallback."""
     if not isinstance(png, bytes) or not 0 < len(png) <= _MAX_INPUT_BYTES:
         raise VLMProviderUnavailable("approved raster exceeds VLM input limit")
@@ -183,10 +228,12 @@ def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> list[dict]:
             },
         ],
     }
+    started_ns = time.perf_counter_ns()
     with httpx.Client(trust_env=False, follow_redirects=False) as client:
         response = _bounded_response(
             client, "POST", "/api/chat", limit=_MAX_CHAT_BYTES, json_body=payload
         )
+    elapsed_ns = time.perf_counter_ns() - started_ns
     if response.get("model") != profile.model:
         raise VLMProviderUnavailable("local model identity changed")
     # Non-streaming Ollama replies must be complete assistant messages.
@@ -200,4 +247,31 @@ def inspect_approved_png(png: bytes, profile: VLMModelProfile) -> list[dict]:
         or not isinstance(message.get("content"), str)
     ):
         raise VLMProviderUnavailable("missing local assistant findings")
-    return parse_findings(message["content"])
+    try:
+        metrics = VLMExecutionMetrics(
+            client_elapsed_ms=elapsed_ns // 1_000_000,
+            provider_total_duration_ns=_provider_metric(
+                response, "total_duration", maximum=_MAX_METRIC_DURATION_NS
+            ),
+            provider_load_duration_ns=_provider_metric(
+                response, "load_duration", maximum=_MAX_METRIC_DURATION_NS
+            ),
+            provider_prompt_eval_count=_provider_metric(
+                response, "prompt_eval_count", maximum=_MAX_METRIC_TOKEN_COUNT
+            ),
+            provider_prompt_eval_duration_ns=_provider_metric(
+                response, "prompt_eval_duration", maximum=_MAX_METRIC_DURATION_NS
+            ),
+            provider_eval_count=_provider_metric(
+                response, "eval_count", maximum=_MAX_METRIC_TOKEN_COUNT
+            ),
+            provider_eval_duration_ns=_provider_metric(
+                response, "eval_duration", maximum=_MAX_METRIC_DURATION_NS
+            ),
+        )
+    except ValidationError:
+        raise VLMProviderUnavailable("local model execution metrics invalid") from None
+    return VLMInspectionResult(
+        findings=parse_findings(message["content"]),
+        metrics=metrics,
+    )

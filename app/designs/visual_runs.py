@@ -24,6 +24,8 @@ from .rasterization import RasterInvalid, RasterUnavailable, rasterize_svg
 from .repository import DesignRepository, _now
 from .visual_critic import VisualSourceMismatch
 from .vlm_local import (
+    VLMExecutionMetrics,
+    VLMInspectionResult,
     VLMModelProfileError,
     _finite_json,
     inspect_approved_png,
@@ -147,15 +149,15 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
             if len(raw_runtime) > 4096:
                 raise ValueError("visual runtime provenance exceeds limit")
             runtime = _finite_json(raw_runtime)
+            runtime_fields = {
+                "source",
+                "local_model_digest_claim",
+                "execution_evidence",
+                "attested",
+            }
             if (
                 not isinstance(runtime, dict)
-                or set(runtime)
-                != {
-                    "source",
-                    "local_model_digest_claim",
-                    "execution_evidence",
-                    "attested",
-                }
+                or set(runtime) not in (runtime_fields, runtime_fields | {"execution_metrics"})
                 or runtime["source"] != "local_ollama"
                 or runtime["execution_evidence"] != "OPERATOR_LOCAL_NOT_ATTESTED"
                 or runtime["attested"] is not False
@@ -163,6 +165,10 @@ def _result(row: sqlite3.Row, *, replayed: bool) -> dict:
                 or re.fullmatch(r"sha256:[0-9a-f]{64}", runtime["local_model_digest_claim"]) is None
             ):
                 raise ValueError("invalid local-only runtime provenance")
+            if "execution_metrics" in runtime:
+                metrics = VLMExecutionMetrics.model_validate(runtime["execution_metrics"])
+                if metrics.model_dump(mode="json") != runtime["execution_metrics"]:
+                    raise ValueError("non-canonical local execution metrics")
             profile = load_vlm_profile(
                 _json(
                     {
@@ -465,7 +471,15 @@ def submit_visual_run(
             return admitted, False
 
         try:
-            findings = inspect_approved_png(raster.png, profile)
+            inspection = inspect_approved_png(raster.png, profile)
+            if isinstance(inspection, VLMInspectionResult):
+                findings = inspection.findings
+                execution_metrics = inspection.metrics.model_dump(mode="json")
+            else:
+                # Existing synthetic test doubles and historical callers may
+                # return findings only; absence stays absent, never zero-filled.
+                findings = inspection
+                execution_metrics = None
             verify_ollama_model(profile)
         except Exception:
             # A provider may have performed side effects even if the response
@@ -474,16 +488,19 @@ def submit_visual_run(
                 payload.operation_id, status="UNKNOWN", reason="VLM_EXECUTION_AMBIGUOUS"
             )
         else:
+            runtime = {
+                "source": "local_ollama",
+                "local_model_digest_claim": profile.digest,
+                "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
+                "attested": False,
+            }
+            if execution_metrics is not None:
+                runtime["execution_metrics"] = execution_metrics
             result = journal.finish(
                 payload.operation_id,
                 status="EXECUTED",
                 findings=findings,
-                runtime={
-                    "source": "local_ollama",
-                    "local_model_digest_claim": profile.digest,
-                    "execution_evidence": "OPERATOR_LOCAL_NOT_ATTESTED",
-                    "attested": False,
-                },
+                runtime=runtime,
             )
         return result, True
     finally:

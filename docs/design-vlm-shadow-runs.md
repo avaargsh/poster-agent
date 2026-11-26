@@ -59,6 +59,34 @@ The SQLite journal, hashes, Ollama tags and adapter runtime fields are **local o
 
 The request is limited to a 4 MiB PNG, one pinned model, at most 512 model output tokens, 20 findings, 32 KiB JSON response, and one local inference at a time. HTTP timeout is configured but is not an OS-level kill signal for a hung model process. Contain the Ollama service with host-level network and resource controls; a malicious local server can lie about its digest.
 
+
+## Local execution telemetry
+
+A successful `EXECUTED` result now retains a bounded `runtime.execution_metrics`
+record alongside the explicitly unattested local runtime identity:
+
+- `client_elapsed_ms`: monotonic client-side round-trip duration for the
+  non-streaming `/api/chat` request and response body.
+- `provider_total_duration_ns`, `provider_load_duration_ns`,
+  `provider_prompt_eval_duration_ns`, and `provider_eval_duration_ns`:
+  optional Ollama-reported nanosecond counters.
+- `provider_prompt_eval_count` and `provider_eval_count`: optional
+  Ollama-reported token counters.
+- `output_token_limit`: the configured 512-token response cap.
+
+Missing provider counters remain `null`, never synthetic zeroes. Provider
+counters must be strict nonnegative integers within bounded ranges; malformed
+values turn the admitted operation into `UNKNOWN`. Historical journal rows
+with the original four-field runtime envelope remain readable; new rows
+validate the additional metrics again on status lookup and idempotent replay.
+
+These values are operator-local wall-time and provider-reported telemetry.
+They are not independently measured model execution, a trusted receipt, or
+proof that the model's own counters are accurate. No monetary cost is inferred
+for local inference: estimate infrastructure cost separately by joining
+elapsed time and token counts with host/GPU utilization and an operator-owned
+rate card. Missing measurements must remain visibly missing.
+
 ## Verification
 
 ```bash

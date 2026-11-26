@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.designs.vlm_local import load_vlm_profile
+from app.designs.vlm_local import VLMExecutionMetrics, load_vlm_profile
 from scripts.evaluate_design_vlm_shadow import (
     LABEL_FIELDS,
     VISUAL_CATEGORIES,
@@ -148,6 +148,60 @@ def test_twenty_distinct_labeled_skus_are_only_operator_calibration(tmp_path):
     assert "reviewer-local" not in data
     assert "Synthetic visual label" not in data
     assert _eval(db, labels) == report
+
+
+def test_calibration_summarizes_retained_client_and_provider_metrics(tmp_path):
+    db, labels, rows = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        for index, row in enumerate(rows):
+            raw = connection.execute(
+                "SELECT runtime_json FROM design_vlm_runs WHERE operation_id = ?",
+                (row["operation_id"],),
+            ).fetchone()[0]
+            runtime = json.loads(raw)
+            runtime["execution_metrics"] = VLMExecutionMetrics(
+                client_elapsed_ms=100 + index,
+                provider_total_duration_ns=1_000 + index,
+                provider_load_duration_ns=200 + index,
+                provider_prompt_eval_count=50 + index,
+                provider_prompt_eval_duration_ns=300 + index,
+                provider_eval_count=10 + index,
+                provider_eval_duration_ns=400 + index,
+            ).model_dump(mode="json")
+            connection.execute(
+                "UPDATE design_vlm_runs SET runtime_json = ? WHERE operation_id = ?",
+                (json.dumps(runtime), row["operation_id"]),
+            )
+
+    report = _eval(db, labels)
+
+    metrics = report["execution_metrics"]
+    assert metrics["status"] == "EXECUTION_METRICS_RETAINED"
+    assert metrics["executed_operation_count"] == 20
+    assert metrics["records_with_metrics"] == 20
+    assert metrics["records_without_metrics"] == 0
+    assert metrics["by_field"]["client_elapsed_ms"]["count"] == 20
+    assert metrics["by_field"]["client_elapsed_ms"]["p50"] == 109
+    assert metrics["by_field"]["client_elapsed_ms"]["p95"] == 118
+    assert metrics["by_field"]["provider_eval_count"]["p50"] == 19
+    assert metrics["by_field"]["provider_eval_count"]["p95"] == 28
+    assert metrics["by_field"]["provider_eval_count"]["missing_count"] == 0
+    assert report["wall_elapsed_ms"]["p50"] == 509
+
+
+def test_calibration_keeps_legacy_missing_execution_metrics_null(tmp_path):
+    db, labels, _ = _fixture(tmp_path)
+
+    report = _eval(db, labels)
+
+    metrics = report["execution_metrics"]
+    assert metrics["status"] == "NO_EXECUTION_METRICS_RETAINED"
+    assert metrics["executed_operation_count"] == 20
+    assert metrics["records_with_metrics"] == 0
+    assert metrics["records_without_metrics"] == 20
+    assert metrics["by_field"]["client_elapsed_ms"]["count"] == 0
+    assert metrics["by_field"]["client_elapsed_ms"]["p50"] is None
+    assert metrics["by_field"]["client_elapsed_ms"]["missing_count"] == 20
 
 
 def test_small_cohort_never_becomes_acceptance_evidence(tmp_path):
@@ -304,6 +358,27 @@ def test_calibration_rejects_mutated_runtime_provenance(tmp_path, mutation):
             "UPDATE design_vlm_runs SET runtime_json=? WHERE operation_id=?",
             (encoded, rows[0]["operation_id"]),
         )
+    with pytest.raises(CalibrationError):
+        _eval(db, labels)
+
+
+def test_calibration_rejects_malformed_nested_execution_metrics(tmp_path):
+    db, labels, rows = _fixture(tmp_path)
+    with sqlite3.connect(db) as connection:
+        raw = connection.execute(
+            "SELECT runtime_json FROM design_vlm_runs WHERE operation_id = ?",
+            (rows[0]["operation_id"],),
+        ).fetchone()[0]
+        runtime = json.loads(raw)
+        runtime["execution_metrics"] = VLMExecutionMetrics(client_elapsed_ms=12).model_dump(
+            mode="json"
+        )
+        runtime["execution_metrics"]["client_elapsed_ms"] = True
+        connection.execute(
+            "UPDATE design_vlm_runs SET runtime_json = ? WHERE operation_id = ?",
+            (json.dumps(runtime), rows[0]["operation_id"]),
+        )
+
     with pytest.raises(CalibrationError):
         _eval(db, labels)
 

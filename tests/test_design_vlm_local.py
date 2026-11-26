@@ -62,7 +62,7 @@ def test_fixed_loopback_tags_and_bounded_ollama_chat(monkeypatch):
 
     _install_httpx_transport(monkeypatch, handler)
     local.verify_ollama_model(_profile())
-    assert local.inspect_approved_png(b"synthetic-png", _profile()) == []
+    assert local.inspect_approved_png(b"synthetic-png", _profile()).findings == []
     assert len(requests) == 2
 
 
@@ -104,6 +104,92 @@ def test_redirects_oversize_and_claimed_model_mismatch_fail_closed(monkeypatch):
 
     with pytest.raises(local.VLMProviderUnavailable):
         local.inspect_approved_png(b"x" * (4 * 1024 * 1024 + 1), _profile())
+
+
+def test_chat_returns_bounded_execution_metrics(monkeypatch):
+    payload = {
+        "model": "llava:latest",
+        "done": True,
+        "message": {"role": "assistant", "content": '{"findings":[]}'},
+        "total_duration": 1_000_000,
+        "load_duration": 200_000,
+        "prompt_eval_count": 120,
+        "prompt_eval_duration": 300_000,
+        "eval_count": 18,
+        "eval_duration": 400_000,
+    }
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+
+    result = local.inspect_approved_png(b"synthetic-png", _profile())
+
+    assert result.findings == []
+    metrics = result.metrics.model_dump(mode="json")
+    assert type(metrics["client_elapsed_ms"]) is int
+    assert 0 <= metrics["client_elapsed_ms"] <= 60_000
+    assert metrics == {
+        "client_elapsed_ms": metrics["client_elapsed_ms"],
+        "provider_total_duration_ns": 1_000_000,
+        "provider_load_duration_ns": 200_000,
+        "provider_prompt_eval_count": 120,
+        "provider_prompt_eval_duration_ns": 300_000,
+        "provider_eval_count": 18,
+        "provider_eval_duration_ns": 400_000,
+        "output_token_limit": 512,
+    }
+
+
+def test_chat_missing_provider_metrics_remain_null_not_zero(monkeypatch):
+    payload = {
+        "model": "llava:latest",
+        "done": True,
+        "message": {"role": "assistant", "content": '{"findings":[]}'},
+    }
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+
+    result = local.inspect_approved_png(b"synthetic-png", _profile())
+
+    assert result.findings == []
+    metrics = result.metrics.model_dump(mode="json")
+    assert type(metrics["client_elapsed_ms"]) is int
+    assert all(
+        metrics[field] is None
+        for field in (
+            "provider_total_duration_ns",
+            "provider_load_duration_ns",
+            "provider_prompt_eval_count",
+            "provider_prompt_eval_duration_ns",
+            "provider_eval_count",
+            "provider_eval_duration_ns",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("total_duration", -1),
+        ("prompt_eval_count", True),
+        ("eval_count", 1.5),
+        ("eval_duration", 86_400_000_000_001),
+    ],
+)
+def test_chat_rejects_malformed_provider_execution_metrics(monkeypatch, field, value):
+    payload = {
+        "model": "llava:latest",
+        "done": True,
+        "message": {"role": "assistant", "content": '{"findings":[]}'},
+        "total_duration": 1_000_000,
+        "load_duration": 200_000,
+        "prompt_eval_count": 120,
+        "prompt_eval_duration": 300_000,
+        "eval_count": 18,
+        "eval_duration": 400_000,
+    }
+    payload[field] = value
+    _install_httpx_transport(monkeypatch, lambda request: httpx.Response(200, json=payload))
+
+    with pytest.raises(local.VLMProviderUnavailable):
+        local.inspect_approved_png(b"synthetic-png", _profile())
 
 
 def test_duplicate_json_keys_and_untrusted_claims_do_not_parse():
