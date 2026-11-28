@@ -68,8 +68,18 @@ ld.rounded_rectangle((0, 8, 78, 85), radius=22, fill="#69cbf8")
 ld.ellipse((18, 28, 60, 67), fill="#163c7d")
 preview = compose(spec, product, logo, local_background(spec.style))
 out = Path("data/examples")
-out.mkdir(parents=True, exist_ok=True)
-product.save(out / "sample_product.png")
-logo.save(out / "sample_logo.png")
-(out / "sample_preview.png").write_bytes(preview)
+product_path = out / "sample_product.png"
+logo_path = out / "sample_logo.png"
+preview_path = out / "sample_preview.png"
+try:
+    out.mkdir(parents=True, exist_ok=True)
+    for path in (product_path, logo_path, preview_path):
+        if os.path.lexists(path) and (path.is_symlink() or not path.is_file()):
+            raise OSError(f"{path} 不是可替换的普通文件")
+    product.save(product_path)
+    logo.save(logo_path)
+    preview_path.write_bytes(preview)
+except OSError as exc:
+    print(f"无法写入示例图片：{exc}。请检查 data/examples 下的路径和写入权限。", file=sys.stderr)
+    raise SystemExit(2) from None
 print("已生成 data/examples/sample_product.png, sample_logo.png, sample_preview.png")
