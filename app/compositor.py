@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .schemas import PosterSpec, price_text
 
 SIZE = 1024
+_CLASSIC_PRICE_LABEL = "限时到手价"
 FONT_CANDIDATES = [
     "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -95,6 +96,20 @@ def _break_lines(
     return lines
 
 
+def _price_strings(spec: PosterSpec) -> tuple[str, str | None]:
+    sale = "¥" + price_text(spec.price)
+    original = (
+        "原价 ¥" + price_text(spec.original_price) if spec.original_price is not None else None
+    )
+    return sale, original
+
+
+def classic_visible_text(spec: PosterSpec) -> tuple[str, ...]:
+    """Return the visible strings in the classic square poster."""
+    sale, original = _price_strings(spec)
+    return (spec.title, spec.subtitle, _CLASSIC_PRICE_LABEL, sale, original or "", spec.cta)
+
+
 def _measure_text_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
     """Validate and measure every fixed square-layout text region without rendering."""
     title_font = _fit_text(draw, spec.title, 405, max_size=61, min_size=35)
@@ -110,16 +125,14 @@ def _measure_text_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
         if subtitle_width > 400 or subtitle_top + subtitle_height > 600:
             raise ValueError("副标题超出方形海报安全排版区域，请缩短副标题")
 
-    price_value = "¥" + price_text(spec.price)
+    price_value, original_value = _price_strings(spec)
     price_font = _fit_text(draw, price_value, 418, max_size=105, min_size=45)
     price_box = draw.textbbox((0, 0), price_value, font=price_font)
     if price_box[2] - price_box[0] > 418:
         raise ValueError("价格过长，无法安全排版")
 
-    original_value = None
     original_font = None
-    if spec.original_price is not None:
-        original_value = "原价 ¥" + price_text(spec.original_price)
+    if original_value is not None:
         original_font = _fit_text(draw, original_value, 405, max_size=28, min_size=20)
         original_box = draw.textbbox((0, 0), original_value, font=original_font)
         if original_box[2] - original_box[0] > 405:
@@ -171,15 +184,13 @@ def _measure_hero_layout(draw: ImageDraw.ImageDraw, spec: PosterSpec) -> dict:
         box = draw.textbbox((0, 0), spec.subtitle, font=subtitle_font)
         if box[2] - box[0] > 585 or subtitle_y + box[3] - box[1] > 801:
             raise ValueError("副标题超出商品主体优先版式安全区域，请缩短文案")
-    price_value = "¥" + price_text(spec.price)
+    price_value, original_value = _price_strings(spec)
     price_font = _fit_text(draw, price_value, 545, max_size=79, min_size=43)
     price_box = draw.textbbox((0, 0), price_value, font=price_font)
     if price_box[2] - price_box[0] > 545:
         raise ValueError("价格过长，无法安全排版")
-    original_value = None
     original_font = None
-    if spec.original_price is not None:
-        original_value = "原价 ¥" + price_text(spec.original_price)
+    if original_value is not None:
         original_font = _fit_text(draw, original_value, 530, max_size=25, min_size=19)
         old_box = draw.textbbox((0, 0), original_value, font=original_font)
         if old_box[2] - old_box[0] > 530:
@@ -348,7 +359,7 @@ def compose(
 
     draw.text(
         (75 + offset.price_dx, 610 + offset.price_dy),
-        "限时到手价",
+        _CLASSIC_PRICE_LABEL,
         font=get_font(31),
         fill="#CDE6FF",
     )

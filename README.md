@@ -27,7 +27,7 @@ uv run --locked python -m app.run_local --port 8000
 
 项目依赖以 `pyproject.toml` 为唯一声明、`uv.lock` 为可复现版本锁，开发依赖置于 `dev` 组。请用 `uv add` 更新依赖并同时提交锁文件；完整说明见 [uv 使用手册](docs/uv-workflow.md)。
 
-打开 <http://127.0.0.1:8000>；API 文档在 <http://127.0.0.1:8000/docs>。首次示例会在 `data/examples/` 生成测试素材及预览图。若中文缺字，在 `.env` 中设置本机存在的 `POSTER_FONT_PATH`。示例生成命令遇到无效的显式字体路径时会报错，不会悄悄使用其他字体；留空则使用系统候选字体。
+打开 <http://127.0.0.1:8000>；API 文档在 <http://127.0.0.1:8000/docs>。首次示例会在 `data/examples/` 生成测试素材及预览图。若中文缺字，在 `.env` 中设置本机存在的 `POSTER_FONT_PATH`。示例生成命令在显式字体路径无效、或字体缺少示例中的字符（含价格数字与 ¥）时会报错，不会悄悄使用其他字体；留空则使用系统候选字体。
 
 前端采用 **React 19 + TypeScript + Vite 7 + Tailwind CSS 4**，提供浅色侧栏工作台、独立滚动创作表单、预览缩放及手机布局。构建产物已随仓库保存，运行 Python 服务即可使用；开发与迁移边界见 [React 工作台说明](docs/react-workbench.md)。
 

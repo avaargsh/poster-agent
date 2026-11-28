@@ -43,11 +43,11 @@ def test_generate_demo_honors_dotenv_without_overriding_shell(
     class Mask(bytes):
         size = (1, 1)
 
-    class CjkFont:
+    class CompleteFont:
         def getmask(self, char):
-            return Mask(b"a" if "\u3400" <= char <= "\u9fff" else b"b")
+            return Mask(b"b" if char in ("\uffff", "\U0010ffff") else b"a")
 
-    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: CjkFont())
+    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: CompleteFont())
     runpy.run_module("scripts.generate_demo", run_name="__main__")
 
     assert [Path(font).name for font in selected_fonts] == [Path(expected_font).name]
@@ -111,5 +111,30 @@ def test_generate_demo_rejects_font_missing_call_to_action(tmp_path, monkeypatch
         runpy.run_module("scripts.generate_demo", run_name="__main__")
 
     assert exc.value.code == 2
-    assert "缺少示例汉字" in capsys.readouterr().err
+    assert "缺少示例字符" in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()
+
+
+@pytest.mark.parametrize("missing_char", ["手", "¥", "3", "·"])
+def test_generate_demo_rejects_missing_visible_glyph(tmp_path, monkeypatch, capsys, missing_char):
+    monkeypatch.chdir(tmp_path)
+    font = tmp_path / "partial.otf"
+    font.touch()
+    monkeypatch.setenv("POSTER_FONT_PATH", str(font))
+
+    class Mask(bytes):
+        size = (1, 1)
+
+    class PartialFont:
+        def getmask(self, char):
+            return Mask(b"b" if char in (missing_char, "\uffff", "\U0010ffff") else b"a")
+
+    monkeypatch.setattr(ImageFont, "truetype", lambda *_args, **_options: PartialFont())
+    monkeypatch.setattr(app.compositor, "compose", lambda *_args: b"synthetic")
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("scripts.generate_demo", run_name="__main__")
+
+    assert exc.value.code == 2
+    assert missing_char in capsys.readouterr().err
     assert not (tmp_path / "data").exists()

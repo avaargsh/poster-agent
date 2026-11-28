@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 
-from app.compositor import compose, local_background
+from app.compositor import classic_visible_text, compose, local_background
 from app.schemas import PosterSpec
 
 spec = PosterSpec(
@@ -16,6 +16,7 @@ spec = PosterSpec(
     price="199",
     original_price="399",
     style="蓝色科技风",
+    layout_id="classic",
 )
 
 
@@ -44,11 +45,15 @@ if font_path:
             file=sys.stderr,
         )
         raise SystemExit(2) from None
-    ideographs = {
-        char for char in spec.title + spec.subtitle + spec.cta if "\u3400" <= char <= "\u9fff"
+    visible_chars = {
+        char for text in classic_visible_text(spec) for char in text if not char.isspace()
     }
-    if any(_is_missing_demo_glyph(font, char) for char in ideographs):
-        print("POSTER_FONT_PATH 指定的字体缺少示例汉字；请使用中文字体。", file=sys.stderr)
+    missing = "".join(char for char in sorted(visible_chars) if _is_missing_demo_glyph(font, char))
+    if missing:
+        print(
+            f"POSTER_FONT_PATH 指定的字体缺少示例字符：{missing}。请使用支持这些字符的中文字体。",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
 
 product = Image.new("RGBA", (500, 680), (0, 0, 0, 0))
